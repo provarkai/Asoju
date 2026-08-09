@@ -57,10 +57,23 @@ end-to-end against a real Postgres instance:
 request entry point, case dashboard, and case detail with human-readable status, timeline, quote/accept,
 evidence/report viewers, and approval actions.
 
-Everything else in the PRD (Operations Control Centre UI, Field Agent App UI, Provider Portal UI,
-WhatsApp integration, a real payment-provider integration, etc.) is scoped but not yet built — the
-backend APIs for staff/agent actions exist (see route list below) but have no dedicated frontend yet.
-See the PRD's phased roadmap (Section 11.4) and feature priorities (Section 12) for what comes next.
+**Operations Control Centre** (Section 5.3), at `/ops`, staff-only:
+- **Case queue** — org-wide, filterable by triage/payment/assignment/QC/escalations/completed. Every
+  internal role can *see* the whole queue (that's the point of a queue); acting on or fully viewing a
+  specific case still requires being an explicit `CaseCollaborator` (Non-Negotiable #6) — a one-click
+  **Claim** button bridges the two so triage doesn't bottleneck on an admin.
+- **Case management** — issue quotes, assign agents/providers, run QC (approve/rework/escalate),
+  advance status manually, attach collaborators (admin), all from one page.
+- **Agents & Providers directories** — admin-onboarding forms, provider verification-lifecycle
+  controls (`PENDING → UNDER_REVIEW → VERIFIED → ACTIVE`, matching the Gate 2 source doc), agent
+  activate/deactivate.
+- Login redirects staff straight to `/ops`; customers to `/dashboard`.
+
+Everything else in the PRD (Field Agent App UI, Provider Portal UI, WhatsApp integration, a real
+payment-provider integration, etc.) is scoped but not yet built — the backend APIs for agent/provider
+self-service actions exist (see route list below) but have no dedicated frontend yet; staff currently
+perform those steps for them via the Ops Console or the API directly. See the PRD's phased roadmap
+(Section 11.4) and feature priorities (Section 12) for what comes next.
 
 ## Running locally
 
@@ -99,22 +112,19 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   without it, it fails closed rather than silently degrading.
 - The payment webhook (`POST /api/payments/webhook`) requires an `x-webhook-secret` header matching
   `PAYMENT_WEBHOOK_SECRET` — a stand-in for real Paystack/Flutterwave signature verification.
-- A staff member needs to be an explicit `CaseCollaborator` on a case to act on it (not just hold the
-  right role) — triaging a request auto-attaches the triaging staff member; use
-  `POST /api/cases/:caseId/collaborators` (admin-only) to attach anyone else (e.g. QC) to a case.
+- A staff member needs to be an explicit `CaseCollaborator` on a case to act on it or view full detail
+  (not just hold the right role) — triaging a request auto-attaches the triaging staff member;
+  `POST /api/cases/:caseId/claim` self-attaches (used by the Ops Console); `.../collaborators`
+  (admin-only) attaches anyone else.
+- The very first staff/admin account has no self-service path — seed it directly via Prisma/psql
+  (`npm run seed --workspace=backend` once you've written a seed script, or a one-off script like the
+  ones used during development). Every subsequent agent/provider account can then be onboarded through
+  `/ops/agents` and `/ops/providers`.
 
-### Staff/agent-facing API routes (no dedicated frontend yet)
+### Agent/provider-facing API routes (no dedicated frontend yet — Field Agent App / Provider Portal)
 
 | Route | Who | What |
 |---|---|---|
-| `POST /api/service-requests/:id/convert` | Case Manager/RM/Admin | Triage a request into a case |
-| `POST /api/cases/:caseId/transition` | Case Manager/QC/Admin | Manual state-machine transition |
-| `POST /api/cases/:caseId/collaborators` | Admin | Attach staff to a case |
-| `POST /api/cases/:caseId/quotes` | Case Manager/Finance/Admin | Issue a quote |
-| `POST /api/quotes/:id/accept` | Customer | Accept a quote → invoice |
-| `POST /api/payments/webhook` | Payment provider | Verify a payment |
-| `POST /api/cases/:caseId/assignments` | Case Manager/Admin | Assign an agent/provider |
 | `POST /api/assignments/:id/accept` \| `/decline` | Agent/Provider | Respond to an assignment |
 | `POST /api/cases/:caseId/evidence` | Agent/Provider | Submit evidence |
 | `POST /api/cases/:caseId/evidence/complete` | Agent/Provider | Mark fieldwork done |
-| `POST /api/cases/:caseId/qc` | QC/Admin | Approve (issues report) / rework / escalate |

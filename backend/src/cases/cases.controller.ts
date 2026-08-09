@@ -14,6 +14,13 @@ import { AddCollaboratorDto } from './dto/add-collaborator.dto';
 
 const STAFF_TRIAGE_ROLES = [Role.CASE_MANAGER, Role.RELATIONSHIP_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
 const STAFF_TRANSITION_ROLES = [Role.CASE_MANAGER, Role.QUALITY_CONTROL, Role.ADMIN, Role.SUPER_ADMIN];
+const CLAIMABLE_ROLES = [
+  Role.CASE_MANAGER,
+  Role.RELATIONSHIP_MANAGER,
+  Role.QUALITY_CONTROL,
+  Role.FINANCE,
+  Role.COMPLIANCE_RISK,
+];
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller()
@@ -44,6 +51,14 @@ export class CasesController {
   @Get('cases')
   listCases(@CurrentUser() user: AuthenticatedUser) {
     return this.casesService.listCasesForUser(user);
+  }
+
+  // No CaseAccessGuard here on purpose — claiming is how a staff member
+  // seen browsing the queue gets onto a case in the first place.
+  @Roles(...CLAIMABLE_ROLES)
+  @Post('cases/:caseId/claim')
+  claimCase(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string) {
+    return this.casesService.claimCase(user, caseId);
   }
 
   @UseGuards(CaseAccessGuard)

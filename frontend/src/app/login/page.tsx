@@ -3,6 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch, setSession } from '@/lib/api';
+import { landingPathForRole } from '@/lib/roles';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,7 +26,7 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       setSession(result.accessToken, result.refreshToken, result.user);
-      router.push('/dashboard');
+      router.push(landingPathForRole(result.user.role));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid credentials');
     } finally {

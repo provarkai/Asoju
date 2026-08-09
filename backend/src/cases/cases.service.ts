@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { ApprovalAction, CaseStatus, CollaboratorRole, Role } from '@prisma/client';
+import { ApprovalAction, AssignmentStatus, CaseStatus, CollaboratorRole, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -130,6 +130,32 @@ export class CasesService {
 
   // -- Cases -------------------------------------------------------------
 
+  private static readonly OPS_ROLES: Role[] = [
+    Role.CASE_MANAGER,
+    Role.RELATIONSHIP_MANAGER,
+    Role.QUALITY_CONTROL,
+    Role.FINANCE,
+    Role.COMPLIANCE_RISK,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+  ];
+
+  private static readonly CASE_QUEUE_SUMMARY = {
+    customer: { select: { fullName: true, userId: true } },
+    assignments: {
+      where: {
+        status: {
+          in: [AssignmentStatus.OFFERED, AssignmentStatus.ACCEPTED, AssignmentStatus.IN_PROGRESS],
+        },
+      },
+      include: {
+        agent: { select: { fullName: true } },
+        provider: { select: { fullName: true } },
+      },
+    },
+    _count: { select: { riskFlags: true, incidents: true } },
+  };
+
   async listCasesForUser(user: AuthenticatedUser) {
     if (user.role === Role.CUSTOMER) {
       const customer = await this.requireCustomerProfile(user.id);
@@ -152,28 +178,43 @@ export class CasesService {
       });
     }
 
-    if (user.role === Role.ADMIN || user.role === Role.SUPER_ADMIN) {
-      return this.prisma.serviceCase.findMany({ orderBy: { updatedAt: 'desc' }, take: 200 });
+    // Ops Control Centre "case queue" (Section 5.3) is an org-wide
+    // operational view by design — every internal role needs to see new
+    // and in-flight cases to triage/pick them up, not just ones they
+    // already hold a collaborator record on. This is deliberately broader
+    // than Non-Negotiable #6's case-scoped rule, which governs *acting on*
+    // a specific case (CaseAccessGuard, still enforced on detail/mutation
+    // endpoints below) — not read-only visibility of the queue itself.
+    if (CasesService.OPS_ROLES.includes(user.role)) {
+      return this.prisma.serviceCase.findMany({
+        include: CasesService.CASE_QUEUE_SUMMARY,
+        orderBy: { updatedAt: 'desc' },
+        take: 200,
+      });
     }
 
-    // Other staff roles (RM/Case Manager/QC/Finance/Compliance): only
-    // cases they are explicitly attached to (Non-Negotiable #6).
-    return this.prisma.serviceCase.findMany({
-      where: { collaborators: { some: { userId: user.id } } },
-      orderBy: { updatedAt: 'desc' },
-    });
+    return [];
   }
 
   async getCaseDetail(caseId: string) {
     const serviceCase = await this.prisma.serviceCase.findUnique({
       where: { id: caseId },
       include: {
+        customer: { select: { fullName: true, userId: true } },
         statusHistory: { orderBy: { createdAt: 'asc' } },
         riskFlags: true,
-        assignments: true,
-        evidence: true,
+        incidents: true,
+        collaborators: { include: { user: { select: { email: true, role: true } } } },
+        assignments: {
+          include: {
+            agent: { select: { fullName: true } },
+            provider: { select: { fullName: true } },
+          },
+        },
+        evidence: { include: { uploader: { select: { email: true } } } },
         reports: true,
         quotes: true,
+        invoices: { include: { payments: true } },
         approvals: { orderBy: { createdAt: 'asc' } },
       },
     });
@@ -299,6 +340,22 @@ export class CasesService {
     });
 
     return collaborator;
+  }
+
+  /**
+   * Self-service counterpart to addCollaborator: lets a staff member seen
+   * browsing the org-wide queue (listCasesForUser) attach themselves to a
+   * specific case — the "claim" action an Ops Console needs so triage
+   * doesn't bottleneck on an admin. Only valid for roles that map onto a
+   * CollaboratorRole; ADMIN/SUPER_ADMIN never need this since they bypass
+   * CaseAccessGuard already.
+   */
+  async claimCase(actor: AuthenticatedUser, caseId: string) {
+    const collaboratorRole = COLLABORATOR_ROLE_BY_USER_ROLE[actor.role];
+    if (!collaboratorRole) {
+      throw new BadRequestException('This role cannot claim cases');
+    }
+    return this.addCollaborator(actor, caseId, actor.id, collaboratorRole);
   }
 
   private async requireCustomerProfile(userId: string) {

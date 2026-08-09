@@ -10,6 +10,8 @@ import { AiModule } from './ai/ai.module';
 import { CommerceModule } from './commerce/commerce.module';
 import { AssignmentsModule } from './assignments/assignments.module';
 import { EvidenceModule } from './evidence/evidence.module';
+import { AgentsModule } from './agents/agents.module';
+import { ProvidersModule } from './providers/providers.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { EvidenceModule } from './evidence/evidence.module';
     CommerceModule,
     AssignmentsModule,
     EvidenceModule,
+    AgentsModule,
+    ProvidersModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

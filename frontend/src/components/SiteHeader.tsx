@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { clearSession, getSessionUser, SessionUser } from '@/lib/api';
+import { landingPathForRole, OPS_ROLES } from '@/lib/roles';
 
 export function SiteHeader() {
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -21,7 +22,9 @@ export function SiteHeader() {
         <nav className="nav">
           {user ? (
             <>
-              <Link href="/dashboard">My cases</Link>
+              <Link href={landingPathForRole(user.role)}>
+                {OPS_ROLES.includes(user.role) ? 'Ops Console' : 'My cases'}
+              </Link>
               <button
                 className="btn btn--ghost"
                 onClick={() => {
