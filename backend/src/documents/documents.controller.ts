@@ -11,8 +11,8 @@ export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
 
   @Get()
-  list(@Param('caseId') caseId: string) {
-    return this.documentsService.listForCase(caseId);
+  list(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string) {
+    return this.documentsService.listForCase(user, caseId);
   }
 
   @Post()

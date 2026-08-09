@@ -1,8 +1,26 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
+import { ConfirmMfaDto, DisableMfaDto, VerifyMfaDto } from './dto/mfa.dto';
+import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
+
+// Security hardening (independent readiness review, P0-06) — a tighter,
+// per-route limit than the app-wide default (100 req/60s, app.module.ts)
+// for the handful of endpoints brute-force actually targets: credential
+// guessing, OTP guessing, and reset-token enumeration. Configurable so the
+// e2e suite (which logs several fixture users in in a single burst from
+// one IP) can relax it without weakening the production default.
+const BRUTE_FORCE_THROTTLE = {
+  default: {
+    limit: parseInt(process.env.AUTH_THROTTLE_LIMIT ?? '5', 10),
+    ttl: parseInt(process.env.AUTH_THROTTLE_TTL_MS ?? '60000', 10),
+  },
+};
 
 @Controller('auth')
 export class AuthController {
@@ -13,10 +31,60 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  me(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.getMe(user.id);
+  }
+
+  @Throttle(BRUTE_FORCE_THROTTLE)
   @HttpCode(HttpStatus.OK)
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  /** Second step when login responds with `mfaRequired: true`. */
+  @Throttle(BRUTE_FORCE_THROTTLE)
+  @HttpCode(HttpStatus.OK)
+  @Post('mfa/verify')
+  verifyMfa(@Body() dto: VerifyMfaDto) {
+    return this.authService.verifyMfaLogin(dto.mfaToken, dto.code);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('mfa/enroll')
+  enrollMfa(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.enrollMfa(user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Post('mfa/confirm')
+  confirmMfa(@CurrentUser() user: AuthenticatedUser, @Body() dto: ConfirmMfaDto) {
+    return this.authService.confirmMfa(user.id, dto.code);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Post('mfa/disable')
+  disableMfa(@CurrentUser() user: AuthenticatedUser, @Body() dto: DisableMfaDto) {
+    return this.authService.disableMfa(user.id, dto.password);
+  }
+
+  @Throttle(BRUTE_FORCE_THROTTLE)
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password')
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Throttle(BRUTE_FORCE_THROTTLE)
+  @HttpCode(HttpStatus.OK)
+  @Post('reset-password')
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    await this.authService.resetPassword(dto.token, dto.newPassword);
+    return { message: 'Password updated — please sign in again.' };
   }
 
   @HttpCode(HttpStatus.OK)
@@ -29,5 +97,13 @@ export class AuthController {
   @Post('logout')
   async logout(@Body() dto: RefreshDto) {
     await this.authService.logout(dto.refreshToken);
+  }
+
+  /** Security hardening (P0-06) "session revocation" — every device. */
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('logout-all')
+  async logoutAll(@CurrentUser() user: AuthenticatedUser) {
+    await this.authService.logoutAll(user.id);
   }
 }

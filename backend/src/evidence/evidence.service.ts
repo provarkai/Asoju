@@ -25,8 +25,21 @@ export class EvidenceService {
     private readonly riskEngine: RiskEngineService,
   ) {}
 
-  /** Vertical slice 4: Assignment -> Field Execution. */
+  /**
+   * Vertical slice 4: Assignment -> Field Execution. Field Agent App
+   * "offline support" hardening — if the caller sends a clientRequestId
+   * (the offline queue always does), a replay of the same submission
+   * after a dropped response returns the row already created instead of
+   * creating a duplicate.
+   */
   async submitEvidence(actor: AuthenticatedUser, caseId: string, dto: CreateEvidenceDto) {
+    if (dto.clientRequestId) {
+      const existing = await this.prisma.evidence.findUnique({
+        where: { caseId_clientRequestId: { caseId, clientRequestId: dto.clientRequestId } },
+      });
+      if (existing) return existing;
+    }
+
     const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
     if (!serviceCase) throw new NotFoundException('Case not found');
     if (serviceCase.status !== CaseStatus.IN_PROGRESS) {
@@ -52,6 +65,7 @@ export class EvidenceService {
         storageKey: dto.storageKey,
         integrityHash,
         capturedAt: new Date(),
+        clientRequestId: dto.clientRequestId,
       },
     });
 
@@ -66,10 +80,14 @@ export class EvidenceService {
     return evidence;
   }
 
-  /** Section 5.4 Field Agent App — "Execute checklist" step (Section 6.1). */
+  /** Section 5.4 Field Agent App — "Execute checklist" step (Section 6.1).
+   * Idempotent: a replayed completion of an already-complete task is a
+   * no-op rather than re-timestamping it and re-logging the audit event —
+   * the offline queue can replay this safely after a dropped response. */
   async completeTask(actor: AuthenticatedUser, caseId: string, taskId: string) {
     const task = await this.prisma.caseTask.findUnique({ where: { id: taskId } });
     if (!task || task.caseId !== caseId) throw new NotFoundException('Checklist item not found on this case');
+    if (task.isComplete) return task;
 
     const updated = await this.prisma.caseTask.update({
       where: { id: taskId },

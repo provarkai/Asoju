@@ -181,6 +181,42 @@ predictive analytics) and the infrastructure Section 11.2 explicitly says not to
 (escrow, proprietary wallet, native mobile apps). See the PRD's phased roadmap (Section 11.4) for the
 scale-up gates beyond that.
 
+## Production hardening
+
+An independent build-readiness review (against an earlier snapshot of this repo) flagged a set of P0
+launch-critical gaps. The ones addressable in code — as opposed to needing a live external account,
+hosting infrastructure, or a written operating procedure — are closed and covered by automated tests:
+
+- **Payment webhook failure handling** — `charge.failed` (and any other Paystack event) used to be
+  silently ignored; it's now recorded and the customer told, without changing case status so they can
+  retry from their case page.
+- **Offline-queue idempotency** — a replayed checklist completion is a no-op rather than
+  re-timestamping it; evidence submission accepts a client-generated `clientRequestId` so a dropped
+  response and its retry can never create two Evidence rows.
+- **Document classification** — a `Document` can now be marked staff-only or restricted to one specific
+  assignment, and a field actor's view (both the dedicated endpoint and the embedded array on
+  `GET /cases/:id`) is filtered accordingly; customer and staff are always unrestricted.
+- **Authorization test suite** (`backend/test/authorization.e2e-spec.ts`) — 23 tests, real app, real
+  Postgres: cross-customer IDOR, field-actor BOLA, the org-wide-queue-vs-case-content-access
+  distinction, document classification, partner-role isolation, role-mismatched privilege escalation.
+  Confirmed to actually catch a regression (temporarily removing `CaseAccessGuard` fails 4 of them).
+- **Privileged authentication** — self-rolled TOTP MFA (enroll → confirm → login challenge, via
+  `backend/src/auth/totp.ts`, same "self-rolled, swap for a managed provider later" philosophy as the
+  JWT auth itself), password reset (never reveals whether an email exists, revokes every existing
+  session, single-use token), `logout-all` session revocation, and a tighter brute-force throttle on
+  the auth endpoints specifically. Covered by `backend/test/privileged-auth.e2e-spec.ts`.
+- **AI safety tests** (`backend/src/ai/ai.service.spec.ts`, unit not e2e) — `@anthropic-ai/sdk` is
+  mocked to return attacker-shaped tool output (extra fields, an out-of-range engagement score, a
+  refused tool call), proving the code enforces its trust boundaries regardless of what the model
+  returns: the model can never set `customerId`, an out-of-range score gets clamped instead of trusted,
+  a refused structured response throws instead of falling back to freeform parsing, and every completed
+  intake is audited as AI-attributed, never as the user acting directly.
+
+See `backend/test/README.md` for how to run all of the above. What that review flagged as needing a
+live external account, hosting/infra decisions, or a written SOP — live WhatsApp verification,
+staging/production separation, secrets management, backup/restore testing, a penetration test, and the
+operational runbooks themselves — is unchanged: still open, and out of this repo's reach either way.
+
 ## Running locally
 
 ### 1. Infrastructure
@@ -230,6 +266,16 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   marked PAID and case transitions) — neither this repo nor its test scripts have a real Paystack
   account, so the outbound "call Paystack's live API" leg specifically is unverified, same caveat as
   WhatsApp below.
+- **MFA / password reset / session revocation**: `POST /api/auth/mfa/enroll` (authenticated) starts TOTP
+  enrollment; `.../mfa/confirm` activates it; once active, `POST /api/auth/login` returns
+  `{ mfaRequired: true, mfaToken }` instead of tokens, and `POST /api/auth/mfa/verify` exchanges the
+  code for a real session. `.../mfa/disable` requires the current password. `POST /api/auth/forgot-password`
+  never reveals whether an email exists — outside production it also returns `devToken` directly since
+  there's no email provider wired up yet (Section 11.2: email infra is bought/integrated, not built
+  here); `POST /api/auth/reset-password` consumes it once and revokes every existing refresh token.
+  `POST /api/auth/logout-all` (authenticated) revokes every session on demand. See `/profile` → Security
+  for the customer-facing UI; there's no equivalent staff settings page yet, so a staff member currently
+  needs to call these endpoints directly to enroll in MFA.
 - A staff member needs to be an explicit `CaseCollaborator` on a case to act on it or view full detail
   (not just hold the right role) — triaging a request auto-attaches the triaging staff member;
   `POST /api/cases/:caseId/claim` self-attaches (used by the Ops Console); `.../collaborators`

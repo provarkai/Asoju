@@ -150,10 +150,13 @@ export default function FieldJobDetailPage() {
   async function submitEvidence() {
     if (!detail) return;
     const path = `/cases/${detail.id}/evidence`;
+    // Same key on the first attempt and any offline-queue replay of it, so
+    // a dropped response never creates a duplicate Evidence row server-side.
     const body = {
       type: evidenceType,
       description: evidenceDescription || undefined,
       storageKey: evidenceRef,
+      clientRequestId: crypto.randomUUID(),
     };
     setBusy('evidence');
     setError(null);

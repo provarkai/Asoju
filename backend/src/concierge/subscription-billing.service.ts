@@ -162,6 +162,39 @@ export class SubscriptionBillingService {
     return updated;
   }
 
+  /** Same "record it, tell the customer, don't silently drop it" fix as
+   * CommerceService.handleFailedCasePayment, for the subscription-billing
+   * side of the same webhook endpoint. */
+  async handleFailedSubscriptionPayment(reference: string, gatewayResponse?: string) {
+    const invoice = await this.prisma.subscriptionInvoice.findUnique({
+      where: { paystackReference: reference },
+      include: { subscription: { include: { customer: true } } },
+    });
+    if (!invoice) throw new NotFoundException(`No subscription invoice pending for reference ${reference}`);
+
+    if (invoice.status === PaymentStatus.PAID || invoice.status === PaymentStatus.FAILED) {
+      return invoice; // never downgrade a paid record; don't double-record a failure
+    }
+
+    const updated = await this.prisma.subscriptionInvoice.update({
+      where: { id: invoice.id },
+      data: { status: PaymentStatus.FAILED },
+    });
+
+    await this.audit.record({
+      actorType: 'system',
+      action: 'concierge.subscription_payment_failed',
+      metadata: { subscriptionInvoiceId: invoice.id, reference, gatewayResponse },
+    });
+    await this.notifications.notify(
+      invoice.subscription.customer.userId,
+      'Concierge payment did not go through',
+      `Your Concierge renewal payment wasn't successful${gatewayResponse ? ` (${gatewayResponse})` : ''} — it will be retried at your next billing date, or contact us to pay now.`,
+    );
+
+    return updated;
+  }
+
   async listInvoicesForCustomer(customerId: string) {
     return this.prisma.subscriptionInvoice.findMany({
       where: { subscription: { customerId } },

@@ -15,7 +15,7 @@ const STAFF_QUOTE_ROLES = [Role.CASE_MANAGER, Role.FINANCE, Role.ADMIN, Role.SUP
 
 interface PaystackChargeEvent {
   event: string;
-  data: { reference: string; amount: number; status: string };
+  data: { reference: string; amount: number; status: string; gateway_response?: string };
 }
 
 @Controller()
@@ -65,17 +65,32 @@ export class CommerceController {
   @Post('payments/webhook/paystack')
   async handlePaystackWebhook(@Req() req: Request) {
     const event = req.body as PaystackChargeEvent;
-    if (event.event !== 'charge.success') {
+
+    // Every other Paystack event type (transfer.*, subscription.*, etc.)
+    // genuinely has nothing for this app to do with it yet — acknowledging
+    // without acting is correct there. `charge.success`/`charge.failed`
+    // are the two that must never be silently dropped: a declined card
+    // used to vanish into an "ignored" response with the customer never
+    // told why their payment didn't go through.
+    if (event.event !== 'charge.success' && event.event !== 'charge.failed') {
       return { received: true, ignored: event.event };
     }
 
-    const { reference, amount } = event.data;
-    if (reference.startsWith(CASE_INVOICE_REFERENCE_PREFIX)) {
-      return this.commerceService.handleVerifiedCasePayment(reference, amount);
+    const { reference, amount, gateway_response: gatewayResponse } = event.data;
+    const isCaseInvoice = reference.startsWith(CASE_INVOICE_REFERENCE_PREFIX);
+    const isSubscriptionInvoice = reference.startsWith(SUBSCRIPTION_INVOICE_REFERENCE_PREFIX);
+    if (!isCaseInvoice && !isSubscriptionInvoice) {
+      throw new BadRequestException(`Unrecognised payment reference: ${reference}`);
     }
-    if (reference.startsWith(SUBSCRIPTION_INVOICE_REFERENCE_PREFIX)) {
-      return this.subscriptionBilling.handleVerifiedSubscriptionPayment(reference, amount);
+
+    if (event.event === 'charge.failed') {
+      return isCaseInvoice
+        ? this.commerceService.handleFailedCasePayment(reference, gatewayResponse)
+        : this.subscriptionBilling.handleFailedSubscriptionPayment(reference, gatewayResponse);
     }
-    throw new BadRequestException(`Unrecognised payment reference: ${reference}`);
+
+    return isCaseInvoice
+      ? this.commerceService.handleVerifiedCasePayment(reference, amount)
+      : this.subscriptionBilling.handleVerifiedSubscriptionPayment(reference, amount);
   }
 }

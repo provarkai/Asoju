@@ -237,10 +237,16 @@ export default function CaseDetailPage() {
               {q.acceptedAt && detail.paymentStatus !== 'PAID' && (() => {
                 const invoice = detail.invoices.find((inv) => inv.amount === q.amount) ?? detail.invoices[0];
                 const pending = invoice && !invoice.payments.some((p) => p.status === 'PAID');
+                const lastFailed = invoice?.payments.length
+                  ? invoice.payments[invoice.payments.length - 1].status === 'FAILED'
+                  : false;
                 return invoice && pending ? (
-                  <button className="btn" disabled={submitting !== null} onClick={() => payInvoice(invoice.id)}>
-                    {submitting === 'pay' ? 'Starting payment…' : 'Pay now'}
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.3rem' }}>
+                    {lastFailed && <span className="error-text">Your last payment attempt didn&apos;t go through.</span>}
+                    <button className="btn" disabled={submitting !== null} onClick={() => payInvoice(invoice.id)}>
+                      {submitting === 'pay' ? 'Starting payment…' : lastFailed ? 'Try payment again' : 'Pay now'}
+                    </button>
+                  </div>
                 ) : (
                   <span className="badge">Awaiting payment</span>
                 );

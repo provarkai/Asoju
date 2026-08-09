@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useAuthGuard } from '@/lib/useAuthGuard';
 import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
+import { SecuritySettings } from '@/components/SecuritySettings';
 
 interface Beneficiary { id: string; fullName: string; relationship: string | null; phone: string | null }
 interface Property { id: string; address: string; city: string | null; state: string | null }
@@ -24,6 +25,7 @@ export default function ProfilePage() {
   const [referral, setReferral] = useState<ReferralSummary | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
   const [myAccount, setMyAccount] = useState<MyAccount | null>(null);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
   const [invoices, setInvoices] = useState<SubscriptionInvoice[]>([]);
   const [subscribing, setSubscribing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -46,6 +48,7 @@ export default function ProfilePage() {
     apiFetch<SubscriptionSummary | null>('/me/subscription').then(setSubscription).catch((e) => setError(e.message));
     apiFetch<MyAccount | null>('/me/account').then(setMyAccount).catch((e) => setError(e.message));
     apiFetch<SubscriptionInvoice[]>('/me/subscription/invoices').then(setInvoices).catch(() => {});
+    apiFetch<{ mfaEnabled: boolean }>('/auth/me').then((me) => setMfaEnabled(me.mfaEnabled)).catch(() => {});
     apiFetch<{ preferredChannel: string | null }>('/me/preferences')
       .then((p) => setPreferredChannel(p.preferredChannel ?? 'whatsapp'))
       .catch((e) => setError(e.message));
@@ -150,6 +153,8 @@ export default function ProfilePage() {
 
       {error && <p className="error-text">{error}</p>}
 
+      <SecuritySettings mfaEnabled={mfaEnabled} />
+
       <div className="card">
         <h2 style={{ marginTop: 0 }}>ASOJU Concierge</h2>
         {subscription?.status === 'ACTIVE' ? (
@@ -182,7 +187,9 @@ export default function ProfilePage() {
                   {new Date(inv.periodStart).toLocaleDateString()} – {new Date(inv.periodEnd).toLocaleDateString()}
                 </span>
                 <span>{inv.currency} {Number(inv.amount).toLocaleString()}</span>
-                <span className="badge">{inv.status === 'PAID' ? 'Paid' : 'Awaiting payment'}</span>
+                <span className={inv.status === 'FAILED' ? 'error-text' : 'badge'}>
+                  {inv.status === 'PAID' ? 'Paid' : inv.status === 'FAILED' ? 'Payment failed' : 'Awaiting payment'}
+                </span>
               </div>
             ))}
           </div>

@@ -87,6 +87,7 @@ enum CaseStatus {
 enum PaymentStatus {
   PENDING
   PAID
+  FAILED
   REFUNDED
 }
 
@@ -240,6 +241,7 @@ model User {
   agentProfile      Agent?
   providerProfile   Provider?
   refreshTokens     RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
   caseCollaborators CaseCollaborator[]
   uploadedEvidence  Evidence[]         @relation("EvidenceUploader")
   auditEvents       AuditEvent[]
@@ -261,6 +263,21 @@ model RefreshToken {
   tokenHash String    @unique
   expiresAt DateTime
   revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// Security hardening (independent readiness review, P0-06 "privileged
+/// authentication") — single-use, short-lived password reset tokens.
+/// Only the hash is stored, same discipline as RefreshToken.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
   createdAt DateTime  @default(now())
 
   @@index([userId])
@@ -639,6 +656,8 @@ model Assignment {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
+  restrictedDocuments Document[]
+
   @@index([caseId])
 }
 
@@ -654,6 +673,23 @@ model Document {
   storageKey   String // private object storage key — never a predictable public URL
   uploadedById String?
   createdAt    DateTime    @default(now())
+
+  /// Security hardening — "field actors should receive only documents
+  /// necessary for the assignment" (independent readiness review, P0-04).
+  /// Customer and staff (collaborators/admin) always see every document on
+  /// their own case regardless of this field; it only narrows what a
+  /// FIELD_AGENT/PROVIDER assignee sees. ALL preserves the original
+  /// behaviour (every assignee sees it) so existing documents are
+  /// unaffected by this migration.
+  visibility               DocumentVisibility @default(ALL)
+  restrictedToAssignmentId String?
+  restrictedToAssignment   Assignment?        @relation(fields: [restrictedToAssignmentId], references: [id], onDelete: SetNull)
+}
+
+enum DocumentVisibility {
+  ALL // every assignee on the case, plus customer and staff (default, backward-compatible)
+  STAFF_ONLY // customer and staff only — no field actor, regardless of assignment
+  ASSIGNEE // customer, staff, and only the specific Assignment named in restrictedToAssignmentId
 }
 
 /// Photos, videos, docs, observations, metadata (Section 8.4).
@@ -684,7 +720,16 @@ model Evidence {
   capturedAt       DateTime?
   createdAt        DateTime      @default(now()) // server-side timestamp, per Section 8.4
 
+  /// Field Agent App "offline support" hardening — a client-generated key
+  /// so a queued submission replayed after a dropped response (the
+  /// request succeeded, the client never saw it) creates one Evidence
+  /// row, not two. Null for callers that don't send one; Postgres treats
+  /// each NULL as distinct, so unkeyed submissions are never deduped
+  /// against each other.
+  clientRequestId String?
+
   @@index([caseId])
+  @@unique([caseId, clientRequestId])
 }
 
 /// Customer-facing deliverable.

@@ -216,4 +216,48 @@ export class CommerceService {
 
     return updated;
   }
+
+  /**
+   * Section "Payments" hardening — a `charge.failed` webhook used to be
+   * silently ignored (only `charge.success` was handled), which meant a
+   * declined card left the customer staring at "Awaiting payment" with no
+   * idea why. This records the failure and tells them, without changing
+   * case status — the customer stays on AWAITING_PAYMENT and can retry
+   * with POST /invoices/:id/pay.
+   */
+  async handleFailedCasePayment(reference: string, gatewayResponse?: string) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { providerReference: reference },
+      include: { invoice: { include: { case: { include: { customer: true } } } } },
+    });
+    if (!payment) throw new NotFoundException(`No payment pending for reference ${reference}`);
+
+    if (payment.status === PaymentStatus.PAID) {
+      // A late/out-of-order failure webhook for a reference we already
+      // confirmed paid via another event — never downgrade a paid record.
+      return payment;
+    }
+    if (payment.status === PaymentStatus.FAILED) {
+      return payment; // already recorded — webhooks can be delivered more than once
+    }
+
+    const updated = await this.prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: PaymentStatus.FAILED },
+    });
+
+    await this.audit.record({
+      caseId: payment.invoice.caseId,
+      actorType: 'system',
+      action: 'payment.webhook_failed',
+      metadata: { paymentId: updated.id, provider: 'paystack', providerReference: reference, gatewayResponse },
+    });
+    await this.notifications.notify(
+      payment.invoice.case.customer.userId,
+      'Payment did not go through',
+      `Your payment for ${payment.invoice.case.caseNumber} wasn't successful${gatewayResponse ? ` (${gatewayResponse})` : ''} — you can try again from your case page.`,
+    );
+
+    return updated;
+  }
 }

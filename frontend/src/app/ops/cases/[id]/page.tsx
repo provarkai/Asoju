@@ -36,7 +36,7 @@ interface CaseDetail {
     agent: { fullName: string } | null; provider: { fullName: string } | null;
   }[];
   evidence: { id: string; type: string; description: string | null; uploader?: { email: string } | null }[];
-  documents: { id: string; label: string; createdAt: string }[];
+  documents: { id: string; label: string; createdAt: string; visibility: string; restrictedToAssignmentId: string | null }[];
   reports: { id: string; summary: string; createdAt: string }[];
   quotes: { id: string; amount: string; currency: string; acceptedAt: string | null }[];
   approvals: { id: string; action: string; note: string | null; createdAt: string }[];
@@ -66,6 +66,8 @@ export default function OpsCaseDetailPage() {
   const [collaboratorRole, setCollaboratorRole] = useState('CASE_MANAGER');
   const [documentLabel, setDocumentLabel] = useState('');
   const [documentRef, setDocumentRef] = useState('');
+  const [documentVisibility, setDocumentVisibility] = useState('ALL');
+  const [documentAssignmentId, setDocumentAssignmentId] = useState('');
   const [cadenceDays, setCadenceDays] = useState('30');
 
   function load() {
@@ -289,29 +291,71 @@ export default function OpsCaseDetailPage() {
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Documents</h2>
+        <p className="muted">
+          A field actor only sees a document if it&apos;s unrestricted or specifically shared with their
+          own assignment — restricting one doesn&apos;t affect what the customer or staff can see.
+        </p>
         {detail.documents.length === 0 ? (
           <p className="muted">None on file yet.</p>
         ) : (
           <ul>
-            {detail.documents.map((d) => (
-              <li key={d.id}>{d.label} — <span className="muted">{new Date(d.createdAt).toLocaleDateString()}</span></li>
-            ))}
+            {detail.documents.map((d) => {
+              const restrictedTo = detail.assignments.find((a) => a.id === d.restrictedToAssignmentId);
+              return (
+                <li key={d.id}>
+                  {d.label} — <span className="muted">{new Date(d.createdAt).toLocaleDateString()}</span>{' '}
+                  {d.visibility === 'STAFF_ONLY' && <span className="badge">Staff only</span>}
+                  {d.visibility === 'ASSIGNEE' && (
+                    <span className="badge">
+                      Only {restrictedTo?.agent?.fullName ?? restrictedTo?.provider?.fullName ?? 'one assignee'}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
-        <div className="actions-row">
+        <div className="actions-row" style={{ flexWrap: 'wrap' }}>
           <input placeholder="Label" value={documentLabel} onChange={(e) => setDocumentLabel(e.target.value)} />
           <input placeholder="File reference" value={documentRef} onChange={(e) => setDocumentRef(e.target.value)} />
+          <select value={documentVisibility} onChange={(e) => setDocumentVisibility(e.target.value)}>
+            <option value="ALL">Visible to every assignee</option>
+            <option value="STAFF_ONLY">Staff only (no field actor)</option>
+            <option value="ASSIGNEE">Only one assignee…</option>
+          </select>
+          {documentVisibility === 'ASSIGNEE' && (
+            <select value={documentAssignmentId} onChange={(e) => setDocumentAssignmentId(e.target.value)}>
+              <option value="">Select assignment…</option>
+              {detail.assignments.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.agent?.fullName ?? a.provider?.fullName ?? a.role} ({a.role})
+                </option>
+              ))}
+            </select>
+          )}
           <button
             className="btn btn--secondary"
-            disabled={!documentLabel || !documentRef || busy !== null}
+            disabled={
+              !documentLabel ||
+              !documentRef ||
+              busy !== null ||
+              (documentVisibility === 'ASSIGNEE' && !documentAssignmentId)
+            }
             onClick={() =>
               run('document', async () => {
                 await apiFetch(`/cases/${detail.id}/documents`, {
                   method: 'POST',
-                  body: JSON.stringify({ label: documentLabel, storageKey: documentRef }),
+                  body: JSON.stringify({
+                    label: documentLabel,
+                    storageKey: documentRef,
+                    visibility: documentVisibility,
+                    restrictedToAssignmentId: documentVisibility === 'ASSIGNEE' ? documentAssignmentId : undefined,
+                  }),
                 });
                 setDocumentLabel('');
                 setDocumentRef('');
+                setDocumentVisibility('ALL');
+                setDocumentAssignmentId('');
               })
             }
           >

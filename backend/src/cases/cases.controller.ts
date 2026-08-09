@@ -63,8 +63,8 @@ export class CasesController {
 
   @UseGuards(CaseAccessGuard)
   @Get('cases/:id')
-  getCase(@Param('id') id: string) {
-    return this.casesService.getCaseDetail(id);
+  getCase(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.casesService.getCaseDetail(user, id);
   }
 
   @Roles(...STAFF_TRANSITION_ROLES)

@@ -8,6 +8,7 @@ import { ConvertRequestDto } from './dto/convert-request.dto';
 import { assertValidTransition } from './case-state-machine';
 import { CHECKLIST_TEMPLATES } from './checklist-templates';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { filterDocumentsForFieldActor } from '../documents/document-visibility';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
 
@@ -297,7 +298,7 @@ export class CasesService {
     return [];
   }
 
-  async getCaseDetail(caseId: string) {
+  async getCaseDetail(actor: AuthenticatedUser, caseId: string) {
     const serviceCase = await this.prisma.serviceCase.findUnique({
       where: { id: caseId },
       include: {
@@ -309,8 +310,8 @@ export class CasesService {
         collaborators: { include: { user: { select: { email: true, role: true } } } },
         assignments: {
           include: {
-            agent: { select: { fullName: true } },
-            provider: { select: { fullName: true } },
+            agent: { select: { userId: true, fullName: true } },
+            provider: { select: { userId: true, fullName: true } },
           },
         },
         evidence: { include: { uploader: { select: { email: true } } } },
@@ -324,6 +325,22 @@ export class CasesService {
       },
     });
     if (!serviceCase) throw new NotFoundException('Case not found');
+
+    // Security hardening (independent readiness review, P0-04) — this
+    // `include` fetches every document on the case regardless of who's
+    // asking; CaseAccessGuard only proves the requester holds *some*
+    // assignment here, not that they need every document. Field actors get
+    // the same least-privilege filter DocumentsService applies on the
+    // dedicated /documents endpoint; customer and staff are unrestricted.
+    if (actor.role === Role.FIELD_AGENT || actor.role === Role.PROVIDER) {
+      const ownAssignmentIds = new Set(
+        serviceCase.assignments
+          .filter((a) => a.agent?.userId === actor.id || a.provider?.userId === actor.id)
+          .map((a) => a.id),
+      );
+      serviceCase.documents = filterDocumentsForFieldActor(serviceCase.documents, ownAssignmentIds);
+    }
+
     return serviceCase;
   }
 

@@ -30,4 +30,10 @@ export class CreateEvidenceDto {
   @IsString()
   @MinLength(1)
   storageKey: string;
+
+  /** Offline-queue hardening — see Evidence.clientRequestId. Optional so
+   * existing/manual callers keep working unchanged. */
+  @IsOptional()
+  @IsString()
+  clientRequestId?: string;
 }
