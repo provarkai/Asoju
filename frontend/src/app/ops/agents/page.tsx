@@ -11,6 +11,7 @@ interface AgentRow {
   city: string | null;
   state: string | null;
   isActive: boolean;
+  performanceScore: number | null;
   user: { email: string | null; phone: string | null };
 }
 
@@ -113,7 +114,8 @@ export default function OpsAgentsPage() {
           <ul>
             {agents.map((a) => (
               <li key={a.id} style={{ marginBottom: '0.4rem' }}>
-                <strong>{a.fullName}</strong> — {a.user.email} · {a.city ?? 'no city set'}{' '}
+                <strong>{a.fullName}</strong> — {a.user.email} · {a.city ?? 'no city set'}
+                {a.performanceScore !== null && ` · ${a.performanceScore.toFixed(1)}★`}{' '}
                 <span className={a.isActive ? 'badge' : 'error-text'}>{a.isActive ? 'active' : 'inactive'}</span>
                 {isAdmin && (
                   <button

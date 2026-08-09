@@ -1,21 +1,30 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { FormEvent, Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch, setSession } from '@/lib/api';
 
 // Section 5.1 onboarding: name, country of residence, phone/email,
 // preferred channel only — nothing more up front (progressive disclosure).
-export default function RegisterPage() {
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [countryOfResidence, setCountryOfResidence] = useState('United Kingdom');
   const [preferredChannel, setPreferredChannel] = useState('whatsapp');
+  const [referralCode, setReferralCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Section 12 P1 referral flow — a shared link like /register?ref=CODE
+  // pre-fills the field rather than requiring it to be typed in.
+  useEffect(() => {
+    const ref = searchParams.get('ref');
+    if (ref) setReferralCode(ref);
+  }, [searchParams]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -35,6 +44,7 @@ export default function RegisterPage() {
           password,
           countryOfResidence,
           preferredChannel,
+          referralCode: referralCode || undefined,
         }),
       });
       setSession(result.accessToken, result.refreshToken, result.user);
@@ -90,11 +100,23 @@ export default function RegisterPage() {
             <option value="sms">SMS</option>
           </select>
         </label>
+        <label>
+          Referral code (optional)
+          <input value={referralCode} onChange={(e) => setReferralCode(e.target.value.toUpperCase())} />
+        </label>
         {error && <p className="error-text">{error}</p>}
         <button className="btn" type="submit" disabled={loading}>
           {loading ? 'Creating account…' : 'Create account'}
         </button>
       </form>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
   );
 }

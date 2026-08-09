@@ -10,6 +10,7 @@ interface ProviderRow {
   fullName: string;
   serviceCategory: string;
   status: string;
+  performanceScore: number | null;
   user: { email: string | null };
 }
 
@@ -131,7 +132,8 @@ export default function OpsProvidersPage() {
           <ul>
             {providers.map((p) => (
               <li key={p.id} style={{ marginBottom: '0.4rem' }}>
-                <strong>{p.fullName}</strong> ({p.serviceCategory}) — {p.user.email}{' '}
+                <strong>{p.fullName}</strong> ({p.serviceCategory}) — {p.user.email}
+                {p.performanceScore !== null && ` · ${p.performanceScore.toFixed(1)}★`}{' '}
                 <span className="badge">{p.status.toLowerCase()}</span>
                 {isAdmin &&
                   (NEXT_STATUS[p.status] ?? []).map((next) => (

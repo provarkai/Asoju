@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { CaseStatus, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CasesService } from '../cases/cases.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateQuoteDto } from './dto/create-quote.dto';
@@ -12,6 +13,7 @@ export class CommerceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
     private readonly casesService: CasesService,
   ) {}
 
@@ -21,7 +23,10 @@ export class CommerceService {
    * (Section 5.2).
    */
   async createQuote(actor: AuthenticatedUser, caseId: string, dto: CreateQuoteDto) {
-    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    const serviceCase = await this.prisma.serviceCase.findUnique({
+      where: { id: caseId },
+      include: { customer: true },
+    });
     if (!serviceCase) throw new NotFoundException('Case not found');
     if (serviceCase.status !== CaseStatus.UNDER_REVIEW) {
       throw new BadRequestException(`Cannot quote a case in status ${serviceCase.status}`);
@@ -44,6 +49,11 @@ export class CommerceService {
       action: 'quote.created',
       metadata: { quoteId: quote.id, amount: dto.amount, currency: quote.currency },
     });
+    await this.notifications.notify(
+      serviceCase.customer.userId,
+      'Your quote is ready',
+      `We've put together a quote of ${quote.currency} ${dto.amount.toLocaleString()} for ${serviceCase.caseNumber}. Review and accept it to get scheduled.`,
+    );
 
     return quote;
   }
@@ -92,7 +102,10 @@ export class CommerceService {
    * (Non-Negotiable #4). Called by WebhookSecretGuard-protected routes only.
    */
   async handlePaymentWebhook(dto: PaymentWebhookDto) {
-    const invoice = await this.prisma.invoice.findUnique({ where: { id: dto.invoiceId } });
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id: dto.invoiceId },
+      include: { case: { include: { customer: true } } },
+    });
     if (!invoice) throw new NotFoundException('Invoice not found');
 
     const payment = await this.prisma.payment.upsert({
@@ -123,6 +136,11 @@ export class CommerceService {
       action: 'payment.webhook_verified',
       metadata: { paymentId: payment.id, provider: dto.provider, providerReference: dto.providerReference },
     });
+    await this.notifications.notify(
+      invoice.case.customer.userId,
+      'Payment received',
+      `We've confirmed your payment for ${invoice.case.caseNumber} — we'll be in touch to schedule the visit.`,
+    );
 
     if (serviceCase.status === CaseStatus.AWAITING_PAYMENT) {
       await this.casesService.systemTransitionCase(

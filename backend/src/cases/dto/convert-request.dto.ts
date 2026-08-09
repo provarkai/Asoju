@@ -32,4 +32,20 @@ export class ConvertRequestDto {
   @IsOptional()
   @IsEnum(CaseTier)
   tier?: CaseTier;
+
+  // Section 5.1 P1 — link a saved beneficiary/property/asset so a repeat
+  // customer never has to re-describe something ASOJU already knows about.
+  // Ownership (must belong to the request's customer) is checked in the
+  // service, not here — a DTO can't see the request being converted.
+  @IsOptional()
+  @IsString()
+  beneficiaryId?: string;
+
+  @IsOptional()
+  @IsString()
+  propertyId?: string;
+
+  @IsOptional()
+  @IsString()
+  assetId?: string;
 }

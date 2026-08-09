@@ -80,6 +80,28 @@ export class CasesService {
       throw new NotFoundException('Service request has already been converted');
     }
 
+    // Section 5.1 P1 — a saved beneficiary/property/asset may only be
+    // attached if it actually belongs to this request's customer; a DTO
+    // can't enforce that on its own.
+    if (dto.beneficiaryId) {
+      const beneficiary = await this.prisma.beneficiary.findUnique({ where: { id: dto.beneficiaryId } });
+      if (!beneficiary || beneficiary.customerId !== request.customerId) {
+        throw new BadRequestException('beneficiaryId does not belong to this customer');
+      }
+    }
+    if (dto.propertyId) {
+      const property = await this.prisma.property.findUnique({ where: { id: dto.propertyId } });
+      if (!property || property.customerId !== request.customerId) {
+        throw new BadRequestException('propertyId does not belong to this customer');
+      }
+    }
+    if (dto.assetId) {
+      const asset = await this.prisma.asset.findUnique({ where: { id: dto.assetId } });
+      if (!asset || asset.customerId !== request.customerId) {
+        throw new BadRequestException('assetId does not belong to this customer');
+      }
+    }
+
     const created = await this.prisma.serviceCase.create({
       data: {
         // Placeholder, unique on its own — replaced with the real
@@ -92,6 +114,9 @@ export class CasesService {
         priority: dto.priority,
         riskLevel: dto.riskLevel,
         tier: dto.tier,
+        beneficiaryId: dto.beneficiaryId,
+        propertyId: dto.propertyId,
+        assetId: dto.assetId,
         status: CaseStatus.DRAFT,
         originRequest: { connect: { id: request.id } },
       },
@@ -227,6 +252,7 @@ export class CasesService {
         quotes: true,
         invoices: { include: { payments: true } },
         approvals: { orderBy: { createdAt: 'asc' } },
+        rating: true,
       },
     });
     if (!serviceCase) throw new NotFoundException('Case not found');

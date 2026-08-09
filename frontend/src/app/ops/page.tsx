@@ -27,6 +27,15 @@ interface CaseQueueRow {
   updatedAt: string;
 }
 
+interface ServiceRequestRow {
+  id: string;
+  rawDescription: string;
+  location: string | null;
+  channel: string;
+  leadTag: string | null;
+  createdAt: string;
+}
+
 const FILTERS: { key: string; label: string; match: (c: CaseQueueRow) => boolean }[] = [
   { key: 'all', label: 'All', match: () => true },
   {
@@ -62,6 +71,7 @@ const FILTERS: { key: string; label: string; match: (c: CaseQueueRow) => boolean
 export default function OpsQueuePage() {
   const { ready } = useOpsGuard();
   const [cases, setCases] = useState<CaseQueueRow[] | null>(null);
+  const [requests, setRequests] = useState<ServiceRequestRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('all');
   const [claiming, setClaiming] = useState<string | null>(null);
@@ -70,6 +80,9 @@ export default function OpsQueuePage() {
     apiFetch<CaseQueueRow[]>('/cases')
       .then(setCases)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load the queue'));
+    apiFetch<ServiceRequestRow[]>('/service-requests')
+      .then(setRequests)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load new requests'));
   }
 
   useEffect(() => {
@@ -102,6 +115,24 @@ export default function OpsQueuePage() {
       </div>
 
       {error && <p className="error-text">{error}</p>}
+
+      {requests && requests.length > 0 && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>New requests — needs triage</h2>
+          <p className="muted">Raw AI Concierge / manual intake, not yet a case.</p>
+          <div className="case-list">
+            {requests.map((r) => (
+              <Link key={r.id} href={`/ops/requests/${r.id}`} className="case-row">
+                <div className="case-row__meta">
+                  <strong>{r.rawDescription}</strong>
+                  <span className="muted">{r.location ?? 'No location given'} · via {r.channel}</span>
+                </div>
+                <span className="badge">Convert →</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="actions-row" style={{ marginBottom: '1rem' }}>
         {FILTERS.map((f) => (

@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { CaseStatus, IncidentSeverity, QcOutcome } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CasesService } from '../cases/cases.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateEvidenceDto } from './dto/create-evidence.dto';
@@ -18,6 +19,7 @@ export class EvidenceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
     private readonly casesService: CasesService,
   ) {}
 
@@ -139,7 +141,10 @@ export class EvidenceService {
    * never automatically a completed case" (Section 8.5).
    */
   async performQc(actor: AuthenticatedUser, caseId: string, dto: PerformQcDto) {
-    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    const serviceCase = await this.prisma.serviceCase.findUnique({
+      where: { id: caseId },
+      include: { customer: true },
+    });
     if (!serviceCase) throw new NotFoundException('Case not found');
     const qcEligibleStatuses: CaseStatus[] = [CaseStatus.EVIDENCE_SUBMITTED, CaseStatus.QUALITY_CONTROL];
     if (!qcEligibleStatuses.includes(serviceCase.status)) {
@@ -173,6 +178,11 @@ export class EvidenceService {
       });
 
       await this.casesService.transitionCase(actor, caseId, CaseStatus.CUSTOMER_REVIEW, 'QC approved — report issued');
+      await this.notifications.notify(
+        serviceCase.customer.userId,
+        'Your report is ready',
+        `The report for ${serviceCase.caseNumber} is ready for your review — approve it or let us know if something needs another look.`,
+      );
       return { outcome: dto.outcome, report };
     }
 

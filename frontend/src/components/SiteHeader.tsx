@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { clearSession, getSessionUser, SessionUser } from '@/lib/api';
 import { FIELD_ROLES, landingPathForRole, OPS_ROLES } from '@/lib/roles';
+import { NotificationBell } from './NotificationBell';
 
 function navLabel(role: string): string {
   if (OPS_ROLES.includes(role)) return 'Ops Console';
@@ -29,6 +30,8 @@ export function SiteHeader() {
           {user ? (
             <>
               <Link href={landingPathForRole(user.role)}>{navLabel(user.role)}</Link>
+              {user.role === 'CUSTOMER' && <Link href="/profile">My Nigeria</Link>}
+              <NotificationBell />
               <button
                 className="btn btn--ghost"
                 onClick={() => {

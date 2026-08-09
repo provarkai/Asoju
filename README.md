@@ -83,10 +83,28 @@ evidence/report viewers, and approval actions.
 - Offline support (local queue for checklist/evidence capture, auto-sync on reconnect) is explicitly
   P1 in the PRD and not built — a poor-connectivity agent can currently lose an in-progress action.
 
-Every actor in the golden path now has a working UI. What's left from the PRD — WhatsApp integration,
-a real payment-provider integration in place of the webhook stand-in, offline support, recurring
-service scheduling, and the platform-expansion features in Section 12 P1/P2 — is scoped but not built.
-See the PRD's phased roadmap (Section 11.4) and feature priorities (Section 12) for what comes next.
+Every actor in the golden path has a working UI — that closes out the MVP. On top of that, a first
+slice of **Section 12 P1** is built and verified end-to-end:
+
+- **Saved beneficiaries/properties/assets** (Section 5.1 P1) — customers manage these from `/profile`
+  ("My Nigeria"); staff triaging a request into a case (`/ops/requests/:id`, previously API-only) can
+  now link a customer's saved beneficiary/property/asset straight into the new case, with ownership
+  re-verified server-side (a DTO field alone can't prove whose record it is).
+- **In-app notifications** — a `Notification` row is created on quote issued, payment verified,
+  assignment made, and QC-approved-report-ready; a bell in the header polls and shows an unread count.
+  One channel only (in-app) — no email/SMS/WhatsApp fan-out yet.
+- **Ratings → provider/agent performance scoring** (Section 12 P1) — a customer rates a
+  `COMPLETED`/`CLOSED` case once; the score rolls up into a running average shown in the Ops
+  agent/provider directories, replacing "this is our agent" with an actual track record.
+- **Referral system** (Section 5.1 P1 / Section 12 P1) — every customer gets a unique code on
+  registration (shown with a copyable invite link on `/profile`); `/register?ref=CODE` pre-fills it.
+  Deliberately minimal: records who-referred-whom, no reward/credit ledger yet.
+
+What's left from the PRD — WhatsApp integration, a real payment-provider integration in place of the
+webhook stand-in, Field Agent App offline support, recurring service scheduling, and the rest of
+Section 12 P1 (advanced provider portal, multi-provider coordination, document vault, customer service
+history beyond the case list, advanced analytics) and all of P2 — is scoped but not built. See the
+PRD's phased roadmap (Section 11.4) and feature priorities (Section 12) for what comes next.
 
 ## Running locally
 
@@ -135,3 +153,5 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   `/ops/agents` and `/ops/providers`.
 - A case's checklist is fixed at creation time from `backend/src/cases/checklist-templates.ts` — there's
   no UI yet to customize a checklist per case, only per service type.
+- A mistyped/expired referral code at registration is silently ignored rather than blocking signup —
+  check `GET /api/me/referral` if you need to confirm a code is actually valid before sharing it.

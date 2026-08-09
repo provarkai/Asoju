@@ -41,6 +41,11 @@ interface QuoteEntry {
   acceptedAt: string | null;
 }
 
+interface RatingEntry {
+  stars: number;
+  comment: string | null;
+}
+
 interface CaseDetail {
   id: string;
   caseNumber: string;
@@ -55,6 +60,7 @@ interface CaseDetail {
   reports: ReportEntry[];
   approvals: ApprovalEntry[];
   quotes: QuoteEntry[];
+  rating: RatingEntry | null;
 }
 
 const APPROVAL_ACTIONS: { action: string; label: string; variant: 'btn' | 'btn--secondary' }[] = [
@@ -70,6 +76,8 @@ export default function CaseDetailPage() {
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<string | null>(null);
+  const [ratingStars, setRatingStars] = useState(5);
+  const [ratingComment, setRatingComment] = useState('');
 
   function load() {
     apiFetch<CaseDetail>(`/cases/${params.id}`)
@@ -93,6 +101,21 @@ export default function CaseDetailPage() {
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit');
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
+  async function submitRating() {
+    setSubmitting('rating');
+    try {
+      await apiFetch(`/cases/${params.id}/rating`, {
+        method: 'POST',
+        body: JSON.stringify({ stars: ratingStars, comment: ratingComment || undefined }),
+      });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit rating');
     } finally {
       setSubmitting(null);
     }
@@ -233,6 +256,44 @@ export default function CaseDetailPage() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {(detail.status === 'COMPLETED' || detail.status === 'CLOSED') && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Rate this service</h2>
+          {detail.rating ? (
+            <p>
+              You rated this {detail.rating.stars} / 5{detail.rating.comment ? ` — “${detail.rating.comment}”` : ''}
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxWidth: '28rem' }}>
+              <div className="actions-row">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    className={`btn ${ratingStars === n ? '' : 'btn--ghost'}`}
+                    onClick={() => setRatingStars(n)}
+                  >
+                    {n}★
+                  </button>
+                ))}
+              </div>
+              <input
+                placeholder="Any comments? (optional)"
+                value={ratingComment}
+                onChange={(e) => setRatingComment(e.target.value)}
+              />
+              <button
+                className="btn"
+                style={{ alignSelf: 'flex-start' }}
+                disabled={submitting !== null}
+                onClick={submitRating}
+              >
+                {submitting === 'rating' ? 'Submitting…' : 'Submit rating'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

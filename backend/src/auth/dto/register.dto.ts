@@ -28,4 +28,9 @@ export class RegisterDto {
   @IsOptional()
   @IsIn(['whatsapp', 'email', 'sms'])
   preferredChannel?: string;
+
+  /** Section 12 P1 — "referral system". Another customer's referral code. */
+  @IsOptional()
+  @IsString()
+  referralCode?: string;
 }

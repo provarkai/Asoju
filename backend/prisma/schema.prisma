@@ -234,6 +234,7 @@ model User {
   messagesSent      Message[]          @relation("MessageSender")
   notifications     Notification[]
   approvals         Approval[]
+  ratings           Rating[]
 
   @@index([role])
 }
@@ -263,6 +264,14 @@ model Customer {
   account   Account? @relation(fields: [accountId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Section 5.1 P1 / Section 12 P1 — "referral flow", "referral system".
+  // Kept deliberately simple for MVP: a stable code, a self-relation
+  // recording who referred whom, no reward/credit tracking yet.
+  referralCode         String     @unique
+  referredByCustomerId String?
+  referredByCustomer   Customer?  @relation("Referrals", fields: [referredByCustomerId], references: [id])
+  referredCustomers    Customer[] @relation("Referrals")
 
   beneficiaries   Beneficiary[]
   properties      Property[]
@@ -395,6 +404,7 @@ model ServiceCase {
   auditEvents    AuditEvent[]
   approvals      Approval[]
   aiInteractions AiInteraction[]
+  rating         Rating?
 
   @@index([status])
   @@index([customerId])
@@ -468,6 +478,7 @@ model Agent {
   city      String?
   state     String?
   isActive  Boolean  @default(true)
+  performanceScore Float? // Section 12 P1 "provider performance scoring", applied to agents too
   createdAt DateTime @default(now())
 
   assignments Assignment[]
@@ -788,4 +799,18 @@ model Approval {
   action    ApprovalAction
   note      String?
   createdAt DateTime       @default(now())
+}
+
+/// Section 12 P1 — "provider performance scoring". One rating per
+/// completed case; rolls up into Agent.performanceScore /
+/// Provider.performanceScore for whoever was assigned to it.
+model Rating {
+  id        String      @id @default(uuid())
+  caseId    String      @unique
+  case      ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  byUserId  String
+  byUser    User        @relation(fields: [byUserId], references: [id])
+  stars     Int // 1-5
+  comment   String?
+  createdAt DateTime    @default(now())
 }

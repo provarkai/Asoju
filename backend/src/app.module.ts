@@ -12,6 +12,9 @@ import { AssignmentsModule } from './assignments/assignments.module';
 import { EvidenceModule } from './evidence/evidence.module';
 import { AgentsModule } from './agents/agents.module';
 import { ProvidersModule } from './providers/providers.module';
+import { ProfileModule } from './profile/profile.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { RatingsModule } from './ratings/ratings.module';
 
 @Module({
   imports: [
@@ -19,6 +22,7 @@ import { ProvidersModule } from './providers/providers.module';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     PrismaModule,
     AuditModule,
+    NotificationsModule,
     AuthModule,
     CasesModule,
     AiModule,
@@ -27,6 +31,8 @@ import { ProvidersModule } from './providers/providers.module';
     EvidenceModule,
     AgentsModule,
     ProvidersModule,
+    ProfileModule,
+    RatingsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { AssignmentRole, AssignmentStatus, CaseStatus, ProviderStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CasesService } from '../cases/cases.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateAssignmentDto } from './dto/create-assignment.dto';
@@ -11,12 +12,16 @@ export class AssignmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
     private readonly casesService: CasesService,
   ) {}
 
   /** Vertical slice 3: Payment -> Assignment. */
   async createAssignment(actor: AuthenticatedUser, caseId: string, dto: CreateAssignmentDto) {
-    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    const serviceCase = await this.prisma.serviceCase.findUnique({
+      where: { id: caseId },
+      include: { customer: true },
+    });
     if (!serviceCase) throw new NotFoundException('Case not found');
     if (serviceCase.status !== CaseStatus.SCHEDULED) {
       throw new BadRequestException(`Cannot assign a case in status ${serviceCase.status}`);
@@ -51,6 +56,11 @@ export class AssignmentsService {
       action: 'assignment.created',
       metadata: { assignmentId: assignment.id, role: dto.role, agentId: dto.agentId, providerId: dto.providerId },
     });
+    await this.notifications.notify(
+      serviceCase.customer.userId,
+      'Someone has been assigned to your case',
+      `We've assigned ${dto.role === 'FIELD_AGENT' ? 'a field agent' : 'a professional'} to ${serviceCase.caseNumber}. We'll update you once the visit is under way.`,
+    );
 
     return assignment;
   }
