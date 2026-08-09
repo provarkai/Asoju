@@ -193,6 +193,27 @@ export class CasesService {
     toStatus: CaseStatus,
     reason?: string,
   ) {
+    return this.applyTransition(caseId, toStatus, reason, actor.id, 'user');
+  }
+
+  /**
+   * Same deterministic transition, but for a change driven by a verified
+   * external event with no human actor behind it — e.g. a payment
+   * provider's webhook (Non-Negotiable #4). `changedById`/`actorId` are
+   * left null rather than pointed at a fake user, since AuditEvent.actorId
+   * has a real foreign key to User.
+   */
+  async systemTransitionCase(caseId: string, toStatus: CaseStatus, reason?: string) {
+    return this.applyTransition(caseId, toStatus, reason, undefined, 'system');
+  }
+
+  private async applyTransition(
+    caseId: string,
+    toStatus: CaseStatus,
+    reason: string | undefined,
+    actorId: string | undefined,
+    actorType: 'user' | 'system',
+  ) {
     const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
     if (!serviceCase) throw new NotFoundException('Case not found');
 
@@ -208,15 +229,15 @@ export class CasesService {
         caseId,
         fromStatus: serviceCase.status,
         toStatus,
-        changedById: actor.id,
+        changedById: actorId,
         reason,
       },
     });
 
     await this.audit.record({
       caseId,
-      actorId: actor.id,
-      actorType: 'user',
+      actorId,
+      actorType,
       action: 'case.status_transitioned',
       metadata: { from: serviceCase.status, to: toStatus, reason },
     });
@@ -244,6 +265,10 @@ export class CasesService {
     // Deterministic follow-on transitions driven by the approval action.
     if (action === ApprovalAction.APPROVED && serviceCase.status === CaseStatus.CUSTOMER_REVIEW) {
       await this.transitionCase(actor, caseId, CaseStatus.APPROVED, 'Customer approved');
+      // Nothing further requires human judgment once the customer has
+      // approved the deliverable — move straight to Completed. Closing
+      // (Completed -> Closed) stays a deliberate staff/finance action.
+      await this.transitionCase(actor, caseId, CaseStatus.COMPLETED, 'Auto-completed after customer approval');
     } else if (
       action === ApprovalAction.REQUEST_ADDITIONAL_WORK &&
       serviceCase.status === CaseStatus.CUSTOMER_REVIEW

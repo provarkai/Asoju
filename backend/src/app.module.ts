@@ -7,6 +7,9 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CasesModule } from './cases/cases.module';
 import { AiModule } from './ai/ai.module';
+import { CommerceModule } from './commerce/commerce.module';
+import { AssignmentsModule } from './assignments/assignments.module';
+import { EvidenceModule } from './evidence/evidence.module';
 
 @Module({
   imports: [
@@ -17,6 +20,9 @@ import { AiModule } from './ai/ai.module';
     AuthModule,
     CasesModule,
     AiModule,
+    CommerceModule,
+    AssignmentsModule,
+    EvidenceModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

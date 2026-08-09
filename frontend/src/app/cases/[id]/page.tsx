@@ -34,6 +34,13 @@ interface ApprovalEntry {
   createdAt: string;
 }
 
+interface QuoteEntry {
+  id: string;
+  amount: string;
+  currency: string;
+  acceptedAt: string | null;
+}
+
 interface CaseDetail {
   id: string;
   caseNumber: string;
@@ -42,10 +49,12 @@ interface CaseDetail {
   priority: string;
   location: string;
   description: string;
+  paymentStatus: string;
   statusHistory: StatusHistoryEntry[];
   evidence: EvidenceEntry[];
   reports: ReportEntry[];
   approvals: ApprovalEntry[];
+  quotes: QuoteEntry[];
 }
 
 const APPROVAL_ACTIONS: { action: string; label: string; variant: 'btn' | 'btn--secondary' }[] = [
@@ -89,6 +98,18 @@ export default function CaseDetailPage() {
     }
   }
 
+  async function acceptQuote(quoteId: string) {
+    setSubmitting('accept-quote');
+    try {
+      await apiFetch(`/quotes/${quoteId}/accept`, { method: 'POST' });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to accept quote');
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
   if (!ready) return null;
   if (error) return <p className="error-text">{error}</p>;
   if (!detail) return <p className="muted">Loading…</p>;
@@ -109,6 +130,33 @@ export default function CaseDetailPage() {
         <h2 style={{ marginTop: 0 }}>What you asked us to do</h2>
         <p>{detail.description}</p>
       </div>
+
+      {detail.quotes.length > 0 && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Quote</h2>
+          {detail.quotes.map((q) => (
+            <div key={q.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <strong>
+                  {q.currency} {Number(q.amount).toLocaleString()}
+                </strong>
+                {q.acceptedAt && (
+                  <div className="muted">Accepted {new Date(q.acceptedAt).toLocaleString()}</div>
+                )}
+              </div>
+              {!q.acceptedAt && detail.status === 'QUOTED' && (
+                <button className="btn" disabled={submitting !== null} onClick={() => acceptQuote(q.id)}>
+                  {submitting === 'accept-quote' ? 'Accepting…' : 'Accept & proceed to payment'}
+                </button>
+              )}
+              {q.acceptedAt && detail.paymentStatus !== 'PAID' && (
+                <span className="badge">Awaiting payment</span>
+              )}
+              {detail.paymentStatus === 'PAID' && <span className="badge">Paid</span>}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Timeline</h2>
