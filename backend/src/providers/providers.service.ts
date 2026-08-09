@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateProviderDto } from './dto/create-provider.dto';
+import { CreateCredentialDto } from './dto/create-credential.dto';
 import { assertValidProviderTransition } from './provider-status-machine';
 
 @Injectable()
@@ -72,6 +73,55 @@ export class ProvidersService {
       actorType: 'user',
       action: 'provider.status_changed',
       metadata: { providerId, from: provider.status, to: status },
+    });
+
+    return updated;
+  }
+
+  /** Section 12 P1 "advanced provider portal" — self-service credentials. */
+  async getOwnProfile(user: AuthenticatedUser) {
+    const provider = await this.prisma.provider.findUnique({
+      where: { userId: user.id },
+      include: { credentials: true },
+    });
+    if (!provider) throw new NotFoundException('No provider profile for this user');
+    return provider;
+  }
+
+  async addOwnCredential(user: AuthenticatedUser, dto: CreateCredentialDto) {
+    const provider = await this.prisma.provider.findUnique({ where: { userId: user.id } });
+    if (!provider) throw new NotFoundException('No provider profile for this user');
+
+    const credential = await this.prisma.providerCredential.create({
+      data: { providerId: provider.id, ...dto },
+    });
+
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'user',
+      action: 'provider_credential.added',
+      metadata: { providerId: provider.id, credentialId: credential.id, type: dto.type },
+    });
+
+    return credential;
+  }
+
+  /** A provider cannot verify their own credential — Non-Negotiable #3 (appropriate human review). */
+  async verifyCredential(actor: AuthenticatedUser, credentialId: string) {
+    const credential = await this.prisma.providerCredential.findUnique({ where: { id: credentialId } });
+    if (!credential) throw new NotFoundException('Credential not found');
+    if (credential.verifiedAt) throw new ConflictException('Credential already verified');
+
+    const updated = await this.prisma.providerCredential.update({
+      where: { id: credentialId },
+      data: { verifiedAt: new Date() },
+    });
+
+    await this.audit.record({
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'provider_credential.verified',
+      metadata: { credentialId, providerId: credential.providerId },
     });
 
     return updated;

@@ -36,9 +36,11 @@ interface CaseDetail {
     agent: { fullName: string } | null; provider: { fullName: string } | null;
   }[];
   evidence: { id: string; type: string; description: string | null; uploader?: { email: string } | null }[];
+  documents: { id: string; label: string; createdAt: string }[];
   reports: { id: string; summary: string; createdAt: string }[];
   quotes: { id: string; amount: string; currency: string; acceptedAt: string | null }[];
   approvals: { id: string; action: string; note: string | null; createdAt: string }[];
+  recurringSchedule: { id: string; cadenceDays: number; nextRunAt: string; active: boolean } | null;
 }
 
 export default function OpsCaseDetailPage() {
@@ -62,6 +64,9 @@ export default function OpsCaseDetailPage() {
   const [qcNote, setQcNote] = useState('');
   const [collaboratorUserId, setCollaboratorUserId] = useState('');
   const [collaboratorRole, setCollaboratorRole] = useState('CASE_MANAGER');
+  const [documentLabel, setDocumentLabel] = useState('');
+  const [documentRef, setDocumentRef] = useState('');
+  const [cadenceDays, setCadenceDays] = useState('30');
 
   function load() {
     setError(null);
@@ -218,6 +223,7 @@ export default function OpsCaseDetailPage() {
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Assignment</h2>
+        <p className="muted">A case can carry more than one assignment — e.g. a field agent for the visit and a lawyer for a title opinion.</p>
         {detail.assignments.length > 0 && (
           <ul>
             {detail.assignments.map((a) => (
@@ -227,7 +233,7 @@ export default function OpsCaseDetailPage() {
             ))}
           </ul>
         )}
-        {detail.status === 'SCHEDULED' ? (
+        {['SCHEDULED', 'ASSIGNED', 'IN_PROGRESS'].includes(detail.status) ? (
           <div className="actions-row">
             <select value={assignRole} onChange={(e) => { setAssignRole(e.target.value as 'FIELD_AGENT' | 'PROVIDER'); setAssignTargetId(''); }}>
               <option value="FIELD_AGENT">Field agent</option>
@@ -255,7 +261,7 @@ export default function OpsCaseDetailPage() {
                 )
               }
             >
-              {busy === 'assign' ? 'Assigning…' : 'Assign'}
+              {busy === 'assign' ? 'Assigning…' : detail.assignments.length > 0 ? 'Add another assignment' : 'Assign'}
             </button>
           </div>
         ) : (
@@ -279,6 +285,39 @@ export default function OpsCaseDetailPage() {
             ))}
           </ul>
         )}
+      </div>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Documents</h2>
+        {detail.documents.length === 0 ? (
+          <p className="muted">None on file yet.</p>
+        ) : (
+          <ul>
+            {detail.documents.map((d) => (
+              <li key={d.id}>{d.label} — <span className="muted">{new Date(d.createdAt).toLocaleDateString()}</span></li>
+            ))}
+          </ul>
+        )}
+        <div className="actions-row">
+          <input placeholder="Label" value={documentLabel} onChange={(e) => setDocumentLabel(e.target.value)} />
+          <input placeholder="File reference" value={documentRef} onChange={(e) => setDocumentRef(e.target.value)} />
+          <button
+            className="btn btn--secondary"
+            disabled={!documentLabel || !documentRef || busy !== null}
+            onClick={() =>
+              run('document', async () => {
+                await apiFetch(`/cases/${detail.id}/documents`, {
+                  method: 'POST',
+                  body: JSON.stringify({ label: documentLabel, storageKey: documentRef }),
+                });
+                setDocumentLabel('');
+                setDocumentRef('');
+              })
+            }
+          >
+            {busy === 'document' ? 'Adding…' : 'Add document'}
+          </button>
+        </div>
       </div>
 
       <div className="card">
@@ -381,6 +420,62 @@ export default function OpsCaseDetailPage() {
           </div>
         )}
       </div>
+
+      {['COMPLETED', 'CLOSED'].includes(detail.status) && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Recurring service</h2>
+          <p className="muted">Turn this into a recurring visit schedule (Section 6 — Construction Supervision is the model case, but any service can recur).</p>
+          {detail.recurringSchedule ? (
+            <>
+              <p>
+                Every {detail.recurringSchedule.cadenceDays} days — next visit{' '}
+                {new Date(detail.recurringSchedule.nextRunAt).toLocaleDateString()} —{' '}
+                <span className="badge">{detail.recurringSchedule.active ? 'active' : 'paused'}</span>
+              </p>
+              <button
+                className="btn btn--ghost"
+                disabled={busy !== null}
+                onClick={() =>
+                  run('recurrence', () =>
+                    apiFetch(`/cases/${detail.id}/recurrence`, {
+                      method: 'PATCH',
+                      body: JSON.stringify({ active: !detail.recurringSchedule!.active }),
+                    }),
+                  )
+                }
+              >
+                {busy === 'recurrence' ? 'Updating…' : detail.recurringSchedule.active ? 'Pause' : 'Reactivate'}
+              </button>
+            </>
+          ) : (
+            <div className="actions-row">
+              <input
+                type="number"
+                min={7}
+                max={365}
+                value={cadenceDays}
+                onChange={(e) => setCadenceDays(e.target.value)}
+                style={{ width: '6rem' }}
+              />
+              <span className="muted">days between visits</span>
+              <button
+                className="btn"
+                disabled={busy !== null}
+                onClick={() =>
+                  run('recurrence', () =>
+                    apiFetch(`/cases/${detail.id}/recurrence`, {
+                      method: 'POST',
+                      body: JSON.stringify({ cadenceDays: Number(cadenceDays) }),
+                    }),
+                  )
+                }
+              >
+                {busy === 'recurrence' ? 'Setting up…' : 'Set up recurring schedule'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {detail.approvals.length > 0 && (
         <div className="card">

@@ -25,7 +25,7 @@ interface JobRow {
 
 // Section 5.4 — Field Agent App: "Job list (today's assignments)".
 export default function FieldJobListPage() {
-  const { ready } = useFieldGuard();
+  const { user, ready } = useFieldGuard();
   const [jobs, setJobs] = useState<JobRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +46,11 @@ export default function FieldJobListPage() {
       <div className="hero">
         <h1>Your jobs</h1>
         <p>Everything you&apos;ve been assigned — accept, check in, and work through the checklist for each.</p>
+        {user?.role === 'PROVIDER' && (
+          <p>
+            <Link href="/field/credentials">Manage your credentials →</Link>
+          </p>
+        )}
       </div>
 
       {error && <p className="error-text">{error}</p>}

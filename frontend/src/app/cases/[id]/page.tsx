@@ -46,6 +46,13 @@ interface RatingEntry {
   comment: string | null;
 }
 
+interface DocumentEntry {
+  id: string;
+  label: string;
+  uploadedById: string | null;
+  createdAt: string;
+}
+
 interface CaseDetail {
   id: string;
   caseNumber: string;
@@ -57,6 +64,7 @@ interface CaseDetail {
   paymentStatus: string;
   statusHistory: StatusHistoryEntry[];
   evidence: EvidenceEntry[];
+  documents: DocumentEntry[];
   reports: ReportEntry[];
   approvals: ApprovalEntry[];
   quotes: QuoteEntry[];
@@ -78,6 +86,8 @@ export default function CaseDetailPage() {
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [ratingStars, setRatingStars] = useState(5);
   const [ratingComment, setRatingComment] = useState('');
+  const [documentLabel, setDocumentLabel] = useState('');
+  const [documentRef, setDocumentRef] = useState('');
 
   function load() {
     apiFetch<CaseDetail>(`/cases/${params.id}`)
@@ -101,6 +111,23 @@ export default function CaseDetailPage() {
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit');
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
+  async function addDocument() {
+    setSubmitting('document');
+    try {
+      await apiFetch(`/cases/${params.id}/documents`, {
+        method: 'POST',
+        body: JSON.stringify({ label: documentLabel, storageKey: documentRef }),
+      });
+      setDocumentLabel('');
+      setDocumentRef('');
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add document');
     } finally {
       setSubmitting(null);
     }
@@ -210,6 +237,29 @@ export default function CaseDetailPage() {
             ))}
           </ul>
         )}
+      </div>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Documents</h2>
+        <p className="muted">Title docs, ID copies, receipts — anything you want on file against this case.</p>
+        {detail.documents.length > 0 && (
+          <ul>
+            {detail.documents.map((d) => (
+              <li key={d.id}>{d.label} — <span className="muted">{new Date(d.createdAt).toLocaleDateString()}</span></li>
+            ))}
+          </ul>
+        )}
+        <div className="actions-row">
+          <input placeholder="Label" value={documentLabel} onChange={(e) => setDocumentLabel(e.target.value)} />
+          <input
+            placeholder="File reference (upload integration pending)"
+            value={documentRef}
+            onChange={(e) => setDocumentRef(e.target.value)}
+          />
+          <button className="btn btn--secondary" disabled={!documentLabel || !documentRef || submitting !== null} onClick={addDocument}>
+            {submitting === 'document' ? 'Adding…' : 'Add document'}
+          </button>
+        </div>
       </div>
 
       <div className="card">

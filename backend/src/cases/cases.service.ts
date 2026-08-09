@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { ApprovalAction, AssignmentStatus, CaseStatus, CollaboratorRole, Role } from '@prisma/client';
+import { ApprovalAction, AssignmentStatus, CaseStatus, CollaboratorRole, Role, ServiceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -102,6 +102,16 @@ export class CasesService {
       }
     }
 
+    // Section 12 P1 "Concierge workflow" — a Concierge subscriber's cases
+    // default to that tier unless staff explicitly override it.
+    let tier = dto.tier;
+    if (!tier) {
+      const activeSubscription = await this.prisma.subscription.findFirst({
+        where: { customerId: request.customerId, status: 'ACTIVE' },
+      });
+      tier = activeSubscription ? activeSubscription.tier : undefined;
+    }
+
     const created = await this.prisma.serviceCase.create({
       data: {
         // Placeholder, unique on its own — replaced with the real
@@ -113,7 +123,7 @@ export class CasesService {
         location: dto.location,
         priority: dto.priority,
         riskLevel: dto.riskLevel,
-        tier: dto.tier,
+        tier,
         beneficiaryId: dto.beneficiaryId,
         propertyId: dto.propertyId,
         assetId: dto.assetId,
@@ -157,6 +167,62 @@ export class CasesService {
       actorType: 'user',
       action: 'case.created_from_request',
       metadata: { serviceRequestId: request.id },
+    });
+
+    return serviceCase;
+  }
+
+  /**
+   * Section 12 P1 "recurring services" — the automatic counterpart to
+   * convertToCase, used only by RecurringSchedulerService. There's no
+   * ServiceRequest and no human actor behind this one; the audit trail
+   * says so (actorType 'system', same convention as the payment webhook).
+   */
+  async spawnCaseFromSchedule(schedule: {
+    id: string;
+    customerId: string;
+    serviceType: ServiceType;
+    description: string;
+    location: string;
+    beneficiaryId: string | null;
+    propertyId: string | null;
+    assetId: string | null;
+  }) {
+    const created = await this.prisma.serviceCase.create({
+      data: {
+        caseNumber: `PENDING-${randomUUID()}`,
+        customerId: schedule.customerId,
+        serviceType: schedule.serviceType,
+        description: schedule.description,
+        location: schedule.location,
+        beneficiaryId: schedule.beneficiaryId,
+        propertyId: schedule.propertyId,
+        assetId: schedule.assetId,
+        status: CaseStatus.DRAFT,
+        spawnedFromScheduleId: schedule.id,
+      },
+    });
+
+    const caseNumber = `${CASE_NUMBER_PREFIX}-${String(created.seq).padStart(6, '0')}`;
+    const serviceCase = await this.prisma.serviceCase.update({
+      where: { id: created.id },
+      data: { caseNumber },
+    });
+
+    const checklist = CHECKLIST_TEMPLATES[schedule.serviceType];
+    await this.prisma.caseTask.createMany({
+      data: checklist.map((label, index) => ({ caseId: serviceCase.id, label, sortOrder: index })),
+    });
+
+    await this.prisma.caseStatusHistory.create({
+      data: { caseId: serviceCase.id, toStatus: CaseStatus.DRAFT },
+    });
+
+    await this.audit.record({
+      caseId: serviceCase.id,
+      actorType: 'system',
+      action: 'case.spawned_from_schedule',
+      metadata: { scheduleId: schedule.id },
     });
 
     return serviceCase;
@@ -248,11 +314,13 @@ export class CasesService {
           },
         },
         evidence: { include: { uploader: { select: { email: true } } } },
+        documents: { orderBy: { createdAt: 'desc' } },
         reports: true,
         quotes: true,
         invoices: { include: { payments: true } },
         approvals: { orderBy: { createdAt: 'asc' } },
         rating: true,
+        recurringSchedule: true,
       },
     });
     if (!serviceCase) throw new NotFoundException('Case not found');

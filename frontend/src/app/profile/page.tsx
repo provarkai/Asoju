@@ -8,6 +8,7 @@ interface Beneficiary { id: string; fullName: string; relationship: string | nul
 interface Property { id: string; address: string; city: string | null; state: string | null }
 interface Asset { id: string; assetType: string; description: string | null; location: string | null }
 interface ReferralSummary { code: string; referredCount: number }
+interface SubscriptionSummary { status: string; tier: string; startedAt: string }
 
 // Section 5.1 P1 — "saved properties/assets, multiple beneficiaries".
 export default function ProfilePage() {
@@ -16,8 +17,12 @@ export default function ProfilePage() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [referral, setReferral] = useState<ReferralSummary | null>(null);
+  const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
+  const [subscribing, setSubscribing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preferredChannel, setPreferredChannel] = useState('whatsapp');
+  const [savingPreference, setSavingPreference] = useState(false);
 
   const [beneficiaryName, setBeneficiaryName] = useState('');
   const [beneficiaryRelationship, setBeneficiaryRelationship] = useState('');
@@ -31,6 +36,46 @@ export default function ProfilePage() {
     apiFetch<Property[]>('/me/properties').then(setProperties).catch((e) => setError(e.message));
     apiFetch<Asset[]>('/me/assets').then(setAssets).catch((e) => setError(e.message));
     apiFetch<ReferralSummary>('/me/referral').then(setReferral).catch((e) => setError(e.message));
+    apiFetch<SubscriptionSummary | null>('/me/subscription').then(setSubscription).catch((e) => setError(e.message));
+    apiFetch<{ preferredChannel: string | null }>('/me/preferences')
+      .then((p) => setPreferredChannel(p.preferredChannel ?? 'whatsapp'))
+      .catch((e) => setError(e.message));
+  }
+
+  async function savePreference(channel: string) {
+    setPreferredChannel(channel);
+    setSavingPreference(true);
+    try {
+      await apiFetch('/me/preferences', { method: 'PATCH', body: JSON.stringify({ preferredChannel: channel }) });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save preference');
+    } finally {
+      setSavingPreference(false);
+    }
+  }
+
+  async function subscribeConcierge() {
+    setSubscribing(true);
+    try {
+      await apiFetch('/me/subscription', { method: 'POST' });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to subscribe');
+    } finally {
+      setSubscribing(false);
+    }
+  }
+
+  async function cancelConcierge() {
+    setSubscribing(true);
+    try {
+      await apiFetch('/me/subscription/cancel', { method: 'POST' });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel');
+    } finally {
+      setSubscribing(false);
+    }
   }
 
   function copyReferralLink() {
@@ -95,6 +140,44 @@ export default function ProfilePage() {
       </div>
 
       {error && <p className="error-text">{error}</p>}
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>ASOJU Concierge</h2>
+        {subscription?.status === 'ACTIVE' ? (
+          <>
+            <p>
+              You&apos;re on <strong>Concierge</strong> since {new Date(subscription.startedAt).toLocaleDateString()} —
+              new cases default to relationship-managed service.
+            </p>
+            <button className="btn btn--ghost" disabled={subscribing} onClick={cancelConcierge}>
+              {subscribing ? 'Cancelling…' : 'Cancel Concierge'}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="muted">
+              Essential is pay-per-service. Concierge adds a dedicated relationship manager and
+              relationship-managed service by default.
+            </p>
+            <button className="btn" disabled={subscribing} onClick={subscribeConcierge}>
+              {subscribing ? 'Subscribing…' : 'Upgrade to Concierge'}
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Notification preferences</h2>
+        <p className="muted">How we reach you when something on a case needs your attention.</p>
+        <label>
+          Preferred channel
+          <select value={preferredChannel} onChange={(e) => savePreference(e.target.value)} disabled={savingPreference}>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="email">Email</option>
+            <option value="sms">SMS</option>
+          </select>
+        </label>
+      </div>
 
       {referral && (
         <div className="card">

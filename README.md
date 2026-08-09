@@ -83,28 +83,54 @@ evidence/report viewers, and approval actions.
 - Offline support (local queue for checklist/evidence capture, auto-sync on reconnect) is explicitly
   P1 in the PRD and not built — a poor-connectivity agent can currently lose an in-progress action.
 
-Every actor in the golden path has a working UI — that closes out the MVP. On top of that, a first
-slice of **Section 12 P1** is built and verified end-to-end:
+Every actor in the golden path has a working UI — that closes out the MVP. **All of Section 12 P1 is
+now built and verified end-to-end** (except the one item that genuinely needs external credentials):
 
 - **Saved beneficiaries/properties/assets** (Section 5.1 P1) — customers manage these from `/profile`
-  ("My Nigeria"); staff triaging a request into a case (`/ops/requests/:id`, previously API-only) can
-  now link a customer's saved beneficiary/property/asset straight into the new case, with ownership
-  re-verified server-side (a DTO field alone can't prove whose record it is).
-- **In-app notifications** — a `Notification` row is created on quote issued, payment verified,
-  assignment made, and QC-approved-report-ready; a bell in the header polls and shows an unread count.
-  One channel only (in-app) — no email/SMS/WhatsApp fan-out yet.
-- **Ratings → provider/agent performance scoring** (Section 12 P1) — a customer rates a
-  `COMPLETED`/`CLOSED` case once; the score rolls up into a running average shown in the Ops
-  agent/provider directories, replacing "this is our agent" with an actual track record.
-- **Referral system** (Section 5.1 P1 / Section 12 P1) — every customer gets a unique code on
-  registration (shown with a copyable invite link on `/profile`); `/register?ref=CODE` pre-fills it.
-  Deliberately minimal: records who-referred-whom, no reward/credit ledger yet.
+  ("My Nigeria"); staff triaging a request into a case (`/ops/requests/:id`) can link a customer's
+  saved beneficiary/property/asset straight into the new case, with ownership re-verified server-side.
+- **In-app notifications** — fires on quote issued, payment verified, assignment made,
+  QC-approved-report-ready, RM assigned, and recurring-visit spawned; a bell in the header polls and
+  shows an unread count. One channel only (in-app) — see notification *preferences* below for the
+  channel this would fan out to once email/SMS/WhatsApp sending exists.
+- **Ratings → provider/agent performance scoring** — a customer rates a `COMPLETED`/`CLOSED` case
+  once; the score rolls up into a running average shown in the Ops agent/provider directories.
+- **Referral system** — every customer gets a unique code on registration (copyable invite link on
+  `/profile`); `/register?ref=CODE` pre-fills it. Records who-referred-whom only, no reward ledger.
+- **Multi-provider coordination** — a case can carry more than one active assignment at once (e.g. a
+  field agent for the physical visit *and* a lawyer for a title opinion); the Ops case page's
+  assignment form stays open for additional assignments instead of locking after the first.
+- **Document vault** — a `Document` (title docs, ID copies, receipts — distinct from inspection
+  `Evidence`) can be attached to a case by the customer, staff, or an assigned agent/provider, visible
+  in both the customer case view and the Ops case page.
+- **Advanced provider portal** — providers manage their own credentials from `/field/credentials`
+  (licenses, certifications, references); admin verifies them from `/ops/providers` — a provider can
+  never verify their own credential.
+- **Concierge workflow** — customers subscribe/cancel ASOJU Concierge from `/profile`; admin assigns a
+  Relationship Manager to a customer's whole portfolio from `/ops/concierge` (not per-case); the RM
+  sees their book from `/ops/portfolio`; a Concierge subscriber's new cases default to that tier.
+- **Recurring services** (Section 6 — Construction Supervision is "the first recurring-revenue
+  product") — staff turn a completed case into a recurring schedule from the Ops case page; a daily
+  cron sweep (plus an admin-triggerable manual run for ops/testing) spawns the next case on schedule,
+  copying the checklist and notifying the customer, without needing the original case to still exist.
+- **Advanced analytics** — `/ops/analytics` (admin/finance) computes a working subset of Section 13's
+  success metrics live from the same tables everything else writes to: completion rate, repeat-customer
+  rate, revenue collected, average case value, average rating, QC rework rate, incidents by severity.
+- **Notification preferences** — customers pick their preferred channel (WhatsApp/email/SMS) from
+  `/profile`; this is the field a real channel fan-out would read from once it exists.
+- **WhatsApp AI integration — code-complete, needs a real provider to verify live.** The inbound
+  webhook, phone-only customer auto-creation, server-side conversation-history persistence
+  (`WhatsAppThread`), and outbound send abstraction are all built and reuse the exact same
+  `AiService.converse()` the web chat uses — but this repo has no Twilio/360dialog account to test
+  against, so the piece that actually talks to WhatsApp has only been verified up to the point where it
+  would call a real provider. See "WhatsApp integration" in Notes below before treating this as
+  production-ready.
 
-What's left from the PRD — WhatsApp integration, a real payment-provider integration in place of the
-webhook stand-in, Field Agent App offline support, recurring service scheduling, and the rest of
-Section 12 P1 (advanced provider portal, multi-provider coordination, document vault, customer service
-history beyond the case list, advanced analytics) and all of P2 — is scoped but not built. See the
-PRD's phased roadmap (Section 11.4) and feature priorities (Section 12) for what comes next.
+What's left from the PRD — a real payment-provider integration in place of the webhook stand-in, Field
+Agent App offline support, and all of Section 12 P2 (family support, procurement, business
+verification, investment/agriculture support, full subscription billing, corporate accounts, partner
+portal) — is scoped but not built. See the PRD's phased roadmap (Section 11.4) and feature priorities
+(Section 12) for what comes next.
 
 ## Running locally
 
@@ -155,3 +181,17 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   no UI yet to customize a checklist per case, only per service type.
 - A mistyped/expired referral code at registration is silently ignored rather than blocking signup —
   check `GET /api/me/referral` if you need to confirm a code is actually valid before sharing it.
+- A `RecurringSchedule` is unique per origin case — cancelling (`PATCH /api/cases/:caseId/recurrence`,
+  `{"active":false}`) pauses it rather than deleting it, so reactivating resumes the same schedule
+  (with the clock reset from the reactivation moment, not wherever it was paused).
+- **WhatsApp integration**: set `WHATSAPP_WEBHOOK_SECRET` to accept inbound messages at
+  `POST /api/webhooks/whatsapp` (shared-secret stand-in for real Twilio/360dialog signature
+  verification — see `WhatsappWebhookGuard`). Leave `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/
+  `TWILIO_WHATSAPP_FROM` unset to run sends in dry-run mode (logged, not delivered — see
+  `WhatsappSenderService`). A first message from an unrecognized number auto-creates a phone-only
+  customer account, same "front door" pattern as Section 7.2. This has been tested up to (not through)
+  a real provider — do not treat it as verified until it's run against an actual WhatsApp Business
+  account.
+- The daily recurring-schedule sweep runs via `@nestjs/schedule`'s cron (`RecurringSchedulerService`);
+  `POST /api/admin/recurring/run` (admin-only) triggers it on demand, which is also how to test a new
+  schedule without waiting for its cadence to elapse.

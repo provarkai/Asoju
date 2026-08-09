@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
@@ -15,10 +16,16 @@ import { ProvidersModule } from './providers/providers.module';
 import { ProfileModule } from './profile/profile.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RatingsModule } from './ratings/ratings.module';
+import { DocumentsModule } from './documents/documents.module';
+import { ConciergeModule } from './concierge/concierge.module';
+import { RecurringModule } from './recurring/recurring.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { WhatsappModule } from './whatsapp/whatsapp.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     PrismaModule,
     AuditModule,
@@ -33,6 +40,11 @@ import { RatingsModule } from './ratings/ratings.module';
     ProvidersModule,
     ProfileModule,
     RatingsModule,
+    DocumentsModule,
+    ConciergeModule,
+    RecurringModule,
+    AnalyticsModule,
+    WhatsappModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

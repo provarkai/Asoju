@@ -235,6 +235,8 @@ model User {
   notifications     Notification[]
   approvals         Approval[]
   ratings           Rating[]
+  rmPortfolio       Customer[]         @relation("CustomerRm")
+  whatsAppThread    WhatsAppThread?
 
   @@index([role])
 }
@@ -273,13 +275,20 @@ model Customer {
   referredByCustomer   Customer?  @relation("Referrals", fields: [referredByCustomerId], references: [id])
   referredCustomers    Customer[] @relation("Referrals")
 
-  beneficiaries   Beneficiary[]
-  properties      Property[]
-  assets          Asset[]
-  serviceRequests ServiceRequest[]
-  serviceCases    ServiceCase[]
-  subscriptions   Subscription[]
-  complaints      Complaint[]
+  /// Section 12 P1 "Concierge workflow" — a Relationship Manager owns a
+  /// portfolio of Concierge-tier customers (Section 4). Portfolio-level,
+  /// not case-level — distinct from the case-scoped RM CaseCollaborator role.
+  assignedRmUserId String?
+  assignedRm       User?   @relation("CustomerRm", fields: [assignedRmUserId], references: [id])
+
+  beneficiaries      Beneficiary[]
+  properties         Property[]
+  assets             Asset[]
+  serviceRequests    ServiceRequest[]
+  serviceCases       ServiceCase[]
+  subscriptions      Subscription[]
+  complaints         Complaint[]
+  recurringSchedules RecurringSchedule[]
 }
 
 /// e.g. customer's parents/family being helped.
@@ -405,6 +414,12 @@ model ServiceCase {
   approvals      Approval[]
   aiInteractions AiInteraction[]
   rating         Rating?
+
+  /// Section 12 P1 "recurring services" — set when this case was the one
+  /// a recurring schedule was configured from.
+  recurringSchedule    RecurringSchedule? @relation("ScheduleOrigin")
+  spawnedFromScheduleId String?
+  spawnedFromSchedule   RecurringSchedule? @relation("ScheduleSpawned", fields: [spawnedFromScheduleId], references: [id])
 
   @@index([status])
   @@index([customerId])
@@ -766,6 +781,33 @@ model Membership {
   createdAt      DateTime     @default(now())
 }
 
+/// Section 12 P1 "recurring services" — Section 6 Service 2 (Construction
+/// Supervision) is "the first recurring-revenue product": scheduled site
+/// visits, each producing comparable before/after evidence. Fields are
+/// copied from the origin case at setup time (not a live reference to it)
+/// so the schedule survives the origin case being closed/archived.
+model RecurringSchedule {
+  id           String      @id @default(uuid())
+  originCaseId String      @unique
+  originCase   ServiceCase @relation("ScheduleOrigin", fields: [originCaseId], references: [id])
+  customerId   String
+  customer     Customer    @relation(fields: [customerId], references: [id])
+
+  serviceType   ServiceType
+  description   String
+  location      String
+  beneficiaryId String?
+  propertyId    String?
+  assetId       String?
+
+  cadenceDays Int
+  nextRunAt   DateTime
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  spawnedCases ServiceCase[] @relation("ScheduleSpawned")
+}
+
 // ---------------------------------------------------------------------------
 // AI orchestration (Section 7)
 // ---------------------------------------------------------------------------
@@ -787,6 +829,24 @@ model AiInteraction {
   createdAt            DateTime      @default(now())
 
   serviceRequests ServiceRequest[]
+}
+
+/// Section 12 P1 "WhatsApp AI integration" — holds the running transcript
+/// for one phone number so the AI Concierge (Section 7) can carry context
+/// across inbound webhook calls, which arrive statelessly one at a time
+/// (unlike the web chat, where the browser holds history client-side).
+/// NEEDS A REAL PROVIDER TO VERIFY LIVE (see WhatsappModule) — the webhook
+/// receiver and this persistence layer are real and tested standalone,
+/// but nothing here has been exercised against an actual WhatsApp Business
+/// API account.
+model WhatsAppThread {
+  id        String   @id @default(uuid())
+  phone     String   @unique
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  history   Json // ConversationTurnDto[] — mirrors the web chat's client-held history
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
 }
 
 /// Human/customer approval events (Section 3, 5.1 approval actions).

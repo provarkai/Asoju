@@ -16,14 +16,23 @@ export class AssignmentsService {
     private readonly casesService: CasesService,
   ) {}
 
-  /** Vertical slice 3: Payment -> Assignment. */
+  /**
+   * Vertical slice 3: Payment -> Assignment. Also the entry point for
+   * Section 12 P1 "multi-provider coordination" — a case can carry more
+   * than one active assignment (e.g. a field agent for the physical visit
+   * *and* a lawyer for a title opinion), so this only requires the case to
+   * already be scheduled-or-later, and only drives the ASSIGNED transition
+   * on the *first* assignment. Later assignments join a case that's
+   * already ASSIGNED/IN_PROGRESS without trying to re-transition it.
+   */
   async createAssignment(actor: AuthenticatedUser, caseId: string, dto: CreateAssignmentDto) {
     const serviceCase = await this.prisma.serviceCase.findUnique({
       where: { id: caseId },
       include: { customer: true },
     });
     if (!serviceCase) throw new NotFoundException('Case not found');
-    if (serviceCase.status !== CaseStatus.SCHEDULED) {
+    const assignableStatuses: CaseStatus[] = [CaseStatus.SCHEDULED, CaseStatus.ASSIGNED, CaseStatus.IN_PROGRESS];
+    if (!assignableStatuses.includes(serviceCase.status)) {
       throw new BadRequestException(`Cannot assign a case in status ${serviceCase.status}`);
     }
 
@@ -48,7 +57,9 @@ export class AssignmentsService {
       },
     });
 
-    await this.casesService.transitionCase(actor, caseId, CaseStatus.ASSIGNED, `${dto.role} assigned`);
+    if (serviceCase.status === CaseStatus.SCHEDULED) {
+      await this.casesService.transitionCase(actor, caseId, CaseStatus.ASSIGNED, `${dto.role} assigned`);
+    }
     await this.audit.record({
       caseId,
       actorId: actor.id,

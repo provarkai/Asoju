@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -8,12 +8,23 @@ import { ProfileService } from './profile.service';
 import { CreateBeneficiaryDto } from './dto/beneficiary.dto';
 import { CreatePropertyDto } from './dto/property.dto';
 import { CreateAssetDto } from './dto/asset.dto';
+import { UpdatePreferencesDto } from './dto/update-preferences.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.CUSTOMER)
 @Controller('me')
 export class ProfileController {
   constructor(private readonly profileService: ProfileService) {}
+
+  @Get('preferences')
+  getPreferences(@CurrentUser() user: AuthenticatedUser) {
+    return this.profileService.getPreferences(user);
+  }
+
+  @Patch('preferences')
+  updatePreferences(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdatePreferencesDto) {
+    return this.profileService.updatePreferences(user, dto);
+  }
 
   @Get('referral')
   getReferral(@CurrentUser() user: AuthenticatedUser) {

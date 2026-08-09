@@ -5,6 +5,7 @@ import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateBeneficiaryDto } from './dto/beneficiary.dto';
 import { CreatePropertyDto } from './dto/property.dto';
 import { CreateAssetDto } from './dto/asset.dto';
+import { UpdatePreferencesDto } from './dto/update-preferences.dto';
 
 /**
  * Section 5.1 P1 — "saved properties/assets, multiple beneficiaries".
@@ -18,6 +19,32 @@ export class ProfileService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
   ) {}
+
+  // -- Notification preferences (Section 5.1 P1) --------------------------
+
+  async getPreferences(user: AuthenticatedUser) {
+    return this.prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { preferredChannel: true },
+    });
+  }
+
+  async updatePreferences(user: AuthenticatedUser, dto: UpdatePreferencesDto) {
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { preferredChannel: dto.preferredChannel },
+      select: { preferredChannel: true },
+    });
+
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'user',
+      action: 'user.preferences_updated',
+      metadata: { preferredChannel: dto.preferredChannel },
+    });
+
+    return updated;
+  }
 
   // -- Referrals (Section 12 P1) -----------------------------------------
 

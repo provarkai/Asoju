@@ -1,14 +1,13 @@
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
-import { createHash, randomBytes } from 'crypto';
+import { createHash } from 'crypto';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { generateUniqueReferralCode } from '../common/referral-code';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-
-const REFERRAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I — avoids read-aloud ambiguity
 
 export interface TokenPair {
   accessToken: string;
@@ -28,7 +27,7 @@ export class AuthService {
     if (existing) throw new ConflictException('An account with this email already exists');
 
     const passwordHash = await argon2.hash(dto.password);
-    const referralCode = await this.generateUniqueReferralCode();
+    const referralCode = await generateUniqueReferralCode(this.prisma);
 
     // A mistyped/expired referral code shouldn't block onboarding — treat
     // it as "no referral" rather than failing the whole registration.
@@ -62,20 +61,6 @@ export class AuthService {
 
     const tokens = await this.issueTokens(user.id, user.role);
     return { user: this.toPublicUser(user), ...tokens };
-  }
-
-  private async generateUniqueReferralCode(): Promise<string> {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const bytes = randomBytes(6);
-      let code = '';
-      for (const byte of bytes) code += REFERRAL_CODE_ALPHABET[byte % REFERRAL_CODE_ALPHABET.length];
-
-      const existing = await this.prisma.customer.findUnique({ where: { referralCode: code } });
-      if (!existing) return code;
-    }
-    // Astronomically unlikely to ever reach this with a 6-char, 32-symbol
-    // alphabet, but fail loudly rather than silently reusing a code.
-    throw new Error('Failed to generate a unique referral code');
   }
 
   async login(dto: LoginDto) {

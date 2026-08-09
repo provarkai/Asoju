@@ -5,6 +5,13 @@ import { apiFetch } from '@/lib/api';
 import { useOpsGuard } from '@/lib/useOpsGuard';
 import { ADMIN_ROLES } from '@/lib/roles';
 
+interface CredentialRow {
+  id: string;
+  type: string;
+  issuer: string | null;
+  verifiedAt: string | null;
+}
+
 interface ProviderRow {
   id: string;
   fullName: string;
@@ -12,6 +19,7 @@ interface ProviderRow {
   status: string;
   performanceScore: number | null;
   user: { email: string | null };
+  credentials: CredentialRow[];
 }
 
 const NEXT_STATUS: Record<string, string[]> = {
@@ -73,6 +81,15 @@ export default function OpsProvidersPage() {
     }
   }
 
+  async function verifyCredential(credentialId: string) {
+    try {
+      await apiFetch(`/providers/credentials/${credentialId}/verify`, { method: 'PATCH' });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to verify credential');
+    }
+  }
+
   if (!ready) return null;
   const isAdmin = user && ADMIN_ROLES.includes(user.role);
 
@@ -131,7 +148,7 @@ export default function OpsProvidersPage() {
         {providers && providers.length > 0 && (
           <ul>
             {providers.map((p) => (
-              <li key={p.id} style={{ marginBottom: '0.4rem' }}>
+              <li key={p.id} style={{ marginBottom: '0.6rem' }}>
                 <strong>{p.fullName}</strong> ({p.serviceCategory}) — {p.user.email}
                 {p.performanceScore !== null && ` · ${p.performanceScore.toFixed(1)}★`}{' '}
                 <span className="badge">{p.status.toLowerCase()}</span>
@@ -146,6 +163,29 @@ export default function OpsProvidersPage() {
                       → {next.toLowerCase()}
                     </button>
                   ))}
+                {p.credentials.length > 0 && (
+                  <ul style={{ marginTop: '0.3rem' }}>
+                    {p.credentials.map((c) => (
+                      <li key={c.id} className="muted">
+                        {c.type}{c.issuer ? ` — ${c.issuer}` : ''} —{' '}
+                        {c.verifiedAt ? 'verified' : (
+                          <>
+                            pending
+                            {isAdmin && (
+                              <button
+                                className="btn btn--ghost"
+                                style={{ marginLeft: '0.4rem', padding: '0.1rem 0.5rem' }}
+                                onClick={() => verifyCredential(c.id)}
+                              >
+                                Verify
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             ))}
           </ul>

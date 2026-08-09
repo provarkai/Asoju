@@ -7,6 +7,7 @@ import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-use
 import { ProvidersService } from './providers.service';
 import { CreateProviderDto } from './dto/create-provider.dto';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
+import { CreateCredentialDto } from './dto/create-credential.dto';
 
 // Read access to the directory is broad — see agents.controller.ts for why.
 const OPS_ROLES = [
@@ -44,5 +45,26 @@ export class ProvidersController {
     @Body() dto: UpdateProviderStatusDto,
   ) {
     return this.providersService.updateStatus(user, id, dto.status);
+  }
+
+  // -- Provider self-service (Section 12 P1 "advanced provider portal") --
+
+  @Roles(Role.PROVIDER)
+  @Get('me')
+  getOwnProfile(@CurrentUser() user: AuthenticatedUser) {
+    return this.providersService.getOwnProfile(user);
+  }
+
+  @Roles(Role.PROVIDER)
+  @Post('me/credentials')
+  addOwnCredential(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateCredentialDto) {
+    return this.providersService.addOwnCredential(user, dto);
+  }
+
+  // A provider cannot verify their own credential — admin only.
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @Patch('credentials/:credentialId/verify')
+  verifyCredential(@CurrentUser() user: AuthenticatedUser, @Param('credentialId') credentialId: string) {
+    return this.providersService.verifyCredential(user, credentialId);
   }
 }
