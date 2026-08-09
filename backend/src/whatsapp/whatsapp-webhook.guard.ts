@@ -1,13 +1,20 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 
 /**
- * Stand-in for real WhatsApp Business API signature verification — the
- * shared-secret pattern PaystackWebhookGuard replaced for payments. A real
- * Twilio/360dialog integration would validate `X-Twilio-Signature` (an HMAC
- * over the exact callback URL + sorted form params, keyed by your Twilio
- * Auth Token) or the equivalent for whichever BSP is used; replace this
- * guard's body with that when real credentials exist, without touching the
- * controller.
+ * Stand-in for real webhook signature verification — the shared-secret
+ * pattern PaystackWebhookGuard replaced for payments. Provider is Zavu
+ * (docs.zavu.dev): confirmed from their docs that inbound webhooks carry
+ * an `X-Zavu-Signature` header and a per-sender secret shaped like
+ * `whsec_...` (returned once, from `POST /v1/senders/:id/webhook/secret`)
+ * — but NOT confirmed is the exact signing algorithm/canonical string
+ * (their public docs reference "the Security guide" for this without
+ * exposing it to an unauthenticated fetch). Do not guess at that from
+ * this comment alone: pull the exact scheme from Zavu's dashboard/support
+ * before replacing this guard, the same way PaystackWebhookGuard's
+ * HMAC-SHA512 was verified byte-for-byte against Paystack's own docs
+ * before being trusted with "only a verified webhook may mark a payment
+ * PAID" (Non-Negotiable #4) — a webhook guard is exactly the wrong place
+ * for an unverified guess.
  */
 @Injectable()
 export class WhatsappWebhookGuard implements CanActivate {

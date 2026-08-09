@@ -122,13 +122,16 @@ now built and verified end-to-end**:
   rate, revenue collected, average case value, average rating, QC rework rate, incidents by severity.
 - **Notification preferences** — customers pick their preferred channel (WhatsApp/email/SMS) from
   `/profile`; this is the field a real channel fan-out would read from once it exists.
-- **WhatsApp AI integration — code-complete, needs a real provider to verify live.** The inbound
-  webhook, phone-only customer auto-creation, server-side conversation-history persistence
-  (`WhatsAppThread`), and outbound send abstraction are all built and reuse the exact same
-  `AiService.converse()` the web chat uses — but this repo has no Twilio/360dialog account to test
-  against, so the piece that actually talks to WhatsApp has only been verified up to the point where it
-  would call a real provider. See "WhatsApp integration" in Notes below before treating this as
-  production-ready.
+- **WhatsApp AI integration — outbound verified live, inbound still a stand-in.** Provider is Zavu
+  (docs.zavu.dev). The inbound webhook, phone-only customer auto-creation, server-side
+  conversation-history persistence (`WhatsAppThread`), and outbound send are all built and reuse the
+  exact same `AiService.converse()` the web chat uses. Outbound (`WhatsappSenderService`) has been
+  smoke-tested against Zavu's real sandbox API with a `zv_test_...` key — it authenticates and hits
+  `POST /v1/messages` correctly (confirmed by a real, specific 403 from Zavu: sandbox mode requires the
+  recipient number to be pre-verified in their dashboard before a test key will simulate a send to it).
+  Inbound signature verification (`WhatsappWebhookGuard`) is still the shared-secret stand-in — Zavu's
+  public docs confirm the header name (`X-Zavu-Signature`) but not the exact signing algorithm, and
+  that isn't a thing to guess at for a security guard. See "WhatsApp integration" in Notes below.
 - **Customer service history** — the one Section 12 P1 item ("customer service history") that had
   no dedicated view until now: `GET /customers/:customerId/history` gives any ops role a customer's
   whole relationship with ASOJU in one place (all cases, total paid, average rating), surfaced at
@@ -377,14 +380,16 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
 - A `RecurringSchedule` is unique per origin case — cancelling (`PATCH /api/cases/:caseId/recurrence`,
   `{"active":false}`) pauses it rather than deleting it, so reactivating resumes the same schedule
   (with the clock reset from the reactivation moment, not wherever it was paused).
-- **WhatsApp integration**: set `WHATSAPP_WEBHOOK_SECRET` to accept inbound messages at
-  `POST /api/webhooks/whatsapp` (shared-secret stand-in for real Twilio/360dialog signature
-  verification — see `WhatsappWebhookGuard`). Leave `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/
-  `TWILIO_WHATSAPP_FROM` unset to run sends in dry-run mode (logged, not delivered — see
-  `WhatsappSenderService`). A first message from an unrecognized number auto-creates a phone-only
-  customer account, same "front door" pattern as Section 7.2. This has been tested up to (not through)
-  a real provider — do not treat it as verified until it's run against an actual WhatsApp Business
-  account.
+- **WhatsApp integration** (Zavu, docs.zavu.dev): set `WHATSAPP_WEBHOOK_SECRET` to accept inbound
+  messages at `POST /api/webhooks/whatsapp` (shared-secret stand-in — Zavu's real inbound signature
+  scheme isn't confirmed publicly enough to implement; see `WhatsappWebhookGuard`'s comment). Set
+  `ZAVU_API_KEY` (and optionally `ZAVU_SENDER_ID`) to send for real — leave unset to run in dry-run
+  mode (logged, not delivered — see `WhatsappSenderService`). A `zv_test_...` sandbox key authenticates
+  and hits the real API but never delivers a message (Zavu's own docs: test keys simulate only), and
+  Zavu's sandbox additionally requires the recipient number to be pre-verified in their dashboard before
+  it'll even simulate a send — confirmed by a real 403 from their API during testing, not assumed. A
+  first message from an unrecognized number auto-creates a phone-only customer account, same "front
+  door" pattern as Section 7.2. Outbound is live-verified; inbound is not — see the P0 line above.
 - The daily recurring-schedule sweep runs via `@nestjs/schedule`'s cron (`RecurringSchedulerService`);
   `POST /api/admin/recurring/run` (admin-only) triggers it on demand, which is also how to test a new
   schedule without waiting for its cadence to elapse.

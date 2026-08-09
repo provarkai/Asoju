@@ -15,9 +15,11 @@ import { WhatsappSenderService } from './whatsapp-sender.service';
  * conversation history server-side (WhatsAppThread), since there's no
  * browser to hold it between webhook calls.
  *
- * NEEDS A REAL PROVIDER TO VERIFY LIVE — see WhatsappWebhookGuard and
- * WhatsappSenderService for the two integration points a real
- * Twilio/360dialog account would replace.
+ * Outbound (WhatsappSenderService) is wired to a real provider, Zavu
+ * (docs.zavu.dev). Inbound (WhatsappWebhookGuard, InboundMessageDto) is
+ * still a stand-in pending confirmation of Zavu's exact webhook signature
+ * algorithm — see WhatsappWebhookGuard's comment for why that isn't
+ * guessed at.
  */
 @Injectable()
 export class WhatsappService {
@@ -67,7 +69,11 @@ export class WhatsappService {
     return { reply: result.reply, ...sendResult };
   }
 
-  /** Twilio prefixes WhatsApp numbers with "whatsapp:" — strip it if present. */
+  /** Zavu's webhook payloads carry a plain E.164 number in `data.from` —
+   * this strips a "whatsapp:"-style prefix only in case the still-
+   * placeholder InboundMessageDto ever gets fed one manually (e.g. from a
+   * different BSP's raw webhook format during testing). No-op on real
+   * Zavu input. */
   private normalizePhone(raw: string): string {
     return raw.replace(/^whatsapp:/i, '').trim();
   }
