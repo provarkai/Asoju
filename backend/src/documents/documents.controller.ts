@@ -4,6 +4,7 @@ import { CaseAccessGuard } from '../common/guards/case-access.guard';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { DocumentsService } from './documents.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
+import { RequestUploadUrlDto } from '../storage/dto/request-upload-url.dto';
 
 @UseGuards(JwtAuthGuard, CaseAccessGuard)
 @Controller('cases/:caseId/documents')
@@ -13,6 +14,11 @@ export class DocumentsController {
   @Get()
   list(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string) {
     return this.documentsService.listForCase(user, caseId);
+  }
+
+  @Post('upload-url')
+  createUploadUrl(@Param('caseId') caseId: string, @Body() dto: RequestUploadUrlDto) {
+    return this.documentsService.createUploadUrl(caseId, dto);
   }
 
   @Post()

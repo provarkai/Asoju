@@ -6,9 +6,13 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CasesService } from '../cases/cases.service';
 import { RiskEngineService } from '../risk/risk-engine.service';
+import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateEvidenceDto } from './dto/create-evidence.dto';
 import { PerformQcDto } from './dto/perform-qc.dto';
+import { RequestUploadUrlDto } from '../storage/dto/request-upload-url.dto';
+
+const EVIDENCE_KEY_PREFIX = 'evidence';
 
 const INCIDENT_SEVERITY_BY_OUTCOME: Partial<Record<QcOutcome, IncidentSeverity>> = {
   [QcOutcome.ESCALATE]: IncidentSeverity.HIGH,
@@ -23,7 +27,18 @@ export class EvidenceService {
     private readonly notifications: NotificationsService,
     private readonly casesService: CasesService,
     private readonly riskEngine: RiskEngineService,
+    private readonly storage: StorageService,
   ) {}
+
+  /** Step one of a real upload: mints a case-scoped key and a short-lived
+   * presigned PUT URL. The client uploads bytes straight to storage with
+   * this, then submits the returned storageKey via submitEvidence() —
+   * which verifies it before trusting it (see below). */
+  async createUploadUrl(caseId: string, dto: RequestUploadUrlDto) {
+    const key = this.storage.createKey(`${EVIDENCE_KEY_PREFIX}/${caseId}`, dto.fileName);
+    const { url, expiresInSeconds } = await this.storage.getUploadUrl(key, dto.contentType);
+    return { storageKey: key, uploadUrl: url, method: 'PUT', expiresInSeconds };
+  }
 
   /**
    * Vertical slice 4: Assignment -> Field Execution. Field Agent App
@@ -46,9 +61,22 @@ export class EvidenceService {
       throw new BadRequestException(`Cannot submit evidence for a case in status ${serviceCase.status}`);
     }
 
-    // Placeholder integrity hash pending real file-upload integration
-    // (Section 11.2: object storage is bought/integrated, not built here) —
-    // this covers the metadata path, not byte-for-byte content integrity.
+    // A storageKey can only ever have come from createUploadUrl() above —
+    // never a client-invented value pointing at someone else's object, or
+    // at nothing at all. The prefix proves it was issued for this case;
+    // objectExists() (real once S3 is configured, a no-op in dry-run mode
+    // same as every other integration here) proves the upload actually
+    // landed before this evidence row gets created against it.
+    if (!dto.storageKey.startsWith(`${EVIDENCE_KEY_PREFIX}/${caseId}/`)) {
+      throw new BadRequestException('storageKey was not issued for this case — request a new upload URL');
+    }
+    if (!(await this.storage.objectExists(dto.storageKey))) {
+      throw new BadRequestException('Uploaded file not found — the upload may not have completed. Request a new upload URL and try again.');
+    }
+
+    // Placeholder integrity hash pending byte-level checksumming from the
+    // storage provider — this covers the metadata path, not byte-for-byte
+    // content integrity.
     const integrityHash = createHash('sha256')
       .update(`${dto.storageKey}:${actor.id}:${Date.now()}`)
       .digest('hex');

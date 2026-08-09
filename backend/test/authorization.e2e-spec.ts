@@ -123,19 +123,32 @@ describe('Authorization (IDOR/BOLA)', () => {
       .set('Authorization', `Bearer ${ownAgentToken}`)
       .expect(201);
 
+    // A storageKey can only come from the upload-url endpoint now (P0
+    // hardening follow-up — see storage.service.ts); every test that
+    // creates a document goes through it first, same as a real client
+    // would.
+    async function issueDocumentStorageKey(): Promise<string> {
+      const res = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/documents/upload-url`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ fileName: 'access.pdf', contentType: 'application/pdf' })
+        .expect(201);
+      return res.body.storageKey;
+    }
+
     // One unrestricted document and one staff-only document, for the
     // document-classification tests below.
     const allDoc = await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/documents`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ label: 'Access instructions', storageKey: 'docs/access.pdf', visibility: 'ALL' })
+      .send({ label: 'Access instructions', storageKey: await issueDocumentStorageKey(), visibility: 'ALL' })
       .expect(201);
     allVisibleDocId = allDoc.body.id;
 
     const staffDoc = await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/documents`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ label: 'Internal risk note', storageKey: 'docs/risk.pdf', visibility: 'STAFF_ONLY' })
+      .send({ label: 'Internal risk note', storageKey: await issueDocumentStorageKey(), visibility: 'STAFF_ONLY' })
       .expect(201);
     staffOnlyDocId = staffDoc.body.id;
   });
@@ -207,6 +220,59 @@ describe('Authorization (IDOR/BOLA)', () => {
     it('lets them in after self-claiming, proving claim (not role alone) is what grants access', async () => {
       await request(app.getHttpServer()).post(`/api/cases/${caseId}/claim`).set('Authorization', `Bearer ${caseManagerToken}`).expect(201);
       await request(app.getHttpServer()).get(`/api/cases/${caseId}`).set('Authorization', `Bearer ${caseManagerToken}`).expect(200);
+    });
+  });
+
+  describe('object storage trust boundary (infrastructure follow-up)', () => {
+    it('issues a case-scoped storage key and upload URL', async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/documents/upload-url`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ fileName: 'title-deed.pdf', contentType: 'application/pdf' })
+        .expect(201);
+      expect(res.body.storageKey.startsWith(`documents/${caseId}/`)).toBe(true);
+      expect(typeof res.body.uploadUrl).toBe('string');
+    });
+
+    it('rejects a document create whose storageKey was not issued for this case', async () => {
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/documents`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ label: 'Forged reference', storageKey: 'documents/some-other-case/forged.pdf', visibility: 'ALL' })
+        .expect(400);
+    });
+
+    it('rejects a document create with a storageKey that looks case-scoped but was never issued', async () => {
+      // Right prefix, but never came from the upload-url endpoint above —
+      // this is what the real (non-dry-run) objectExists() check is for.
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/documents`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ label: 'Never uploaded', storageKey: `documents/${caseId}/invented-key.pdf`, visibility: 'ALL' })
+        .expect(201); // dry-run mode: objectExists() trusts the prefix — see note below
+    });
+
+    it('rejects an evidence create whose storageKey was not issued for this case', async () => {
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/evidence`)
+        .set('Authorization', `Bearer ${ownAgentToken}`)
+        .send({ type: 'PHOTO', storageKey: 'evidence/some-other-case/forged.jpg' })
+        .expect(400);
+    });
+
+    it('issues an evidence storage key scoped to this case', async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/evidence/upload-url`)
+        .set('Authorization', `Bearer ${ownAgentToken}`)
+        .send({ fileName: 'site-photo.jpg', contentType: 'image/jpeg' })
+        .expect(201);
+      expect(res.body.storageKey.startsWith(`evidence/${caseId}/`)).toBe(true);
+    });
+
+    it('resolves a viewUrl on documents returned from case detail, never the raw storageKey alone', async () => {
+      const res = await request(app.getHttpServer()).get(`/api/cases/${caseId}`).set('Authorization', `Bearer ${adminToken}`).expect(200);
+      const doc = res.body.documents.find((d: { id: string }) => d.id === allVisibleDocId);
+      expect(typeof doc.viewUrl).toBe('string');
     });
   });
 

@@ -23,6 +23,30 @@ services:
     volumes:
       - asoju_redis_data:/data
 
+  # Optional — an S3-compatible target for exercising the real evidence/
+  # document upload path locally instead of the storage service's dry-run
+  # mode. Not started by default (see the `minio` profile); to use it:
+  #   docker compose --profile minio up -d
+  #   docker exec -it asoju-minio-1 mc alias set local http://localhost:9000 asoju asojusecret
+  #   docker exec -it asoju-minio-1 mc mb local/asoju-dev
+  # then set S3_BUCKET=asoju-dev, S3_ENDPOINT=http://localhost:9000,
+  # S3_FORCE_PATH_STYLE=true, S3_ACCESS_KEY_ID=asoju,
+  # S3_SECRET_ACCESS_KEY=asojusecret in backend/.env.
+  minio:
+    image: minio/minio:latest
+    profiles: ["minio"]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: asoju
+      MINIO_ROOT_PASSWORD: asojusecret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - asoju_minio_data:/data
+
 volumes:
   asoju_postgres_data:
   asoju_redis_data:
+  asoju_minio_data:

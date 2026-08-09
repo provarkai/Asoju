@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { uploadFile } from '@/lib/upload';
 import { useFieldGuard } from '@/lib/useFieldGuard';
 import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
 import { enqueue, flushQueue, getQueue, isNetworkFailure, QueuedAction } from '@/lib/offlineQueue';
@@ -23,6 +24,7 @@ interface EvidenceItem {
   id: string;
   type: string;
   description: string | null;
+  viewUrl?: string;
 }
 
 interface JobDetail {
@@ -49,13 +51,16 @@ export default function FieldJobDetailPage() {
 
   const [evidenceType, setEvidenceType] = useState('PHOTO');
   const [evidenceDescription, setEvidenceDescription] = useState('');
-  const [evidenceRef, setEvidenceRef] = useState('');
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [exceptionLabel, setExceptionLabel] = useState('');
   const [exceptionDetail, setExceptionDetail] = useState('');
 
-  // Section 5.4 "offline support" — checklist ticks and evidence captured
-  // without a connection queue locally and sync automatically once one
-  // comes back (see lib/offlineQueue).
+  // Section 5.4 "offline support" — checklist ticks queue locally with no
+  // connection at all. Evidence needs a connection to actually upload the
+  // file to storage (see lib/upload.ts), but a dropped response on the
+  // metadata submission *after* a successful upload still queues and syncs
+  // automatically once one comes back (see lib/offlineQueue and
+  // submitEvidence() below).
   const [queued, setQueued] = useState<QueuedAction[]>([]);
   const [isOnline, setIsOnline] = useState(true);
 
@@ -148,22 +153,40 @@ export default function FieldJobDetailPage() {
   }
 
   async function submitEvidence() {
-    if (!detail) return;
+    if (!detail || !evidenceFile) return;
     const path = `/cases/${detail.id}/evidence`;
+    setBusy('evidence');
+    setError(null);
+
+    // Uploading the file itself needs a connection no queue can fake — the
+    // bytes have to actually land in storage. What the offline queue still
+    // protects is the metadata submission *after* that upload succeeds: a
+    // dropped response there is a lost network blip, not a lost file.
+    let storageKey: string;
+    try {
+      storageKey = await uploadFile('evidence', detail.id, evidenceFile);
+    } catch (err) {
+      setError(
+        isNetworkFailure(err)
+          ? "Couldn't upload while offline — try again once you have a connection. The file wasn't lost, just not sent yet."
+          : err instanceof Error ? err.message : 'Upload failed',
+      );
+      setBusy(null);
+      return;
+    }
+
     // Same key on the first attempt and any offline-queue replay of it, so
     // a dropped response never creates a duplicate Evidence row server-side.
     const body = {
       type: evidenceType,
       description: evidenceDescription || undefined,
-      storageKey: evidenceRef,
+      storageKey,
       clientRequestId: crypto.randomUUID(),
     };
-    setBusy('evidence');
-    setError(null);
     try {
       await apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
       setEvidenceDescription('');
-      setEvidenceRef('');
+      setEvidenceFile(null);
       load();
     } catch (err) {
       if (!isNetworkFailure(err)) {
@@ -176,7 +199,7 @@ export default function FieldJobDetailPage() {
           evidence: [...detail.evidence, { id: `queued-${Date.now()}`, type: evidenceType, description: evidenceDescription || null }],
         });
         setEvidenceDescription('');
-        setEvidenceRef('');
+        setEvidenceFile(null);
       }
     } finally {
       setBusy(null);
@@ -280,6 +303,12 @@ export default function FieldJobDetailPage() {
               <li key={e.id}>
                 {e.type} — {e.description ?? 'No description'}
                 {e.id.startsWith('queued-') && <span className="muted"> (queued, will sync)</span>}
+                {e.viewUrl && (
+                  <>
+                    {' '}
+                    <a href={e.viewUrl} target="_blank" rel="noreferrer">view</a>
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -297,17 +326,17 @@ export default function FieldJobDetailPage() {
               onChange={(e) => setEvidenceDescription(e.target.value)}
             />
             <input
-              placeholder="File reference (upload integration pending)"
-              value={evidenceRef}
-              onChange={(e) => setEvidenceRef(e.target.value)}
+              type="file"
+              accept="image/*,video/*,audio/*,.pdf"
+              onChange={(e) => setEvidenceFile(e.target.files?.[0] ?? null)}
             />
             <button
               className="btn"
               style={{ alignSelf: 'flex-start' }}
-              disabled={!evidenceRef || busy !== null}
+              disabled={!evidenceFile || busy !== null}
               onClick={submitEvidence}
             >
-              {busy === 'evidence' ? 'Submitting…' : 'Add evidence'}
+              {busy === 'evidence' ? 'Uploading…' : 'Add evidence'}
             </button>
           </div>
         )}

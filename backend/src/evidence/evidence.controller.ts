@@ -9,6 +9,7 @@ import { EvidenceService } from './evidence.service';
 import { CreateEvidenceDto } from './dto/create-evidence.dto';
 import { PerformQcDto } from './dto/perform-qc.dto';
 import { RaiseExceptionDto } from './dto/raise-exception.dto';
+import { RequestUploadUrlDto } from '../storage/dto/request-upload-url.dto';
 
 const FIELD_ROLES = [Role.FIELD_AGENT, Role.PROVIDER];
 const QC_ROLES = [Role.QUALITY_CONTROL, Role.ADMIN, Role.SUPER_ADMIN];
@@ -17,6 +18,12 @@ const QC_ROLES = [Role.QUALITY_CONTROL, Role.ADMIN, Role.SUPER_ADMIN];
 @Controller('cases/:caseId')
 export class EvidenceController {
   constructor(private readonly evidenceService: EvidenceService) {}
+
+  @Roles(...FIELD_ROLES)
+  @Post('evidence/upload-url')
+  createUploadUrl(@Param('caseId') caseId: string, @Body() dto: RequestUploadUrlDto) {
+    return this.evidenceService.createUploadUrl(caseId, dto);
+  }
 
   @Roles(...FIELD_ROLES)
   @Post('evidence')

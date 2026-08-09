@@ -10,6 +10,7 @@ import { CHECKLIST_TEMPLATES } from './checklist-templates';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { filterDocumentsForFieldActor } from '../documents/document-visibility';
 import { redactCustomerName } from '../common/pii-restricted-roles';
+import { StorageService } from '../storage/storage.service';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
 
@@ -28,6 +29,7 @@ export class CasesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly storage: StorageService,
   ) {}
 
   // -- Service requests (pre-case intake) ------------------------------
@@ -353,6 +355,19 @@ export class CasesService {
     // but not the customer's real name — they act on the case, not on a
     // relationship with this person. RM/customer/admin see it unredacted.
     serviceCase.customer = redactCustomerName(serviceCase.customer, actor.role);
+
+    // Never a predictable public URL (Section 11.2) — resolve a short-lived
+    // signed view URL per file rather than exposing the raw storageKey.
+    const [documentsWithView, evidenceWithView] = await Promise.all([
+      Promise.all(
+        serviceCase.documents.map(async (doc) => ({ ...doc, viewUrl: await this.storage.getViewUrl(doc.storageKey) })),
+      ),
+      Promise.all(
+        serviceCase.evidence.map(async (item) => ({ ...item, viewUrl: await this.storage.getViewUrl(item.storageKey) })),
+      ),
+    ]);
+    serviceCase.documents = documentsWithView as typeof serviceCase.documents;
+    serviceCase.evidence = evidenceWithView as typeof serviceCase.evidence;
 
     return serviceCase;
   }

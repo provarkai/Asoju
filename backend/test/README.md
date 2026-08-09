@@ -45,6 +45,17 @@ keeps it small.
   endpoint (email/phone stripped there too); Relationship Manager and Admin
   see it unredacted (`backend/src/common/pii-restricted-roles.ts`).
 
+  The "object storage trust boundary" tests cover the presigned-upload
+  endpoints (`backend/src/storage`): a storageKey is only ever accepted if
+  it was issued by `POST .../upload-url` for that specific case — a key
+  with the right shape but the wrong case prefix is rejected on both
+  evidence and document creation, and every document/evidence item
+  returned from case detail carries a resolved `viewUrl` rather than the
+  raw key. One test (`... but was never issued`) documents an honest limit
+  of dry-run mode: without a real bucket configured there's no object to
+  check existence against, so that specific check only bites once
+  `S3_BUCKET` is set — the prefix check still applies unconditionally.
+
 - `privileged-auth.e2e-spec.ts` — P0-06: MFA enroll → confirm → login
   challenge (including proving the mfa-pending token can't double as a
   real access token), MFA disable, password reset (never reveals whether

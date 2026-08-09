@@ -218,10 +218,25 @@ hosting infrastructure, or a written operating procedure — are closed and cove
   a refused structured response throws instead of falling back to freeform parsing, and every completed
   intake is audited as AI-attributed, never as the user acting directly.
 
-See `backend/test/README.md` for how to run all of the above. What that review flagged as needing a
-live external account, hosting/infra decisions, or a written SOP — live WhatsApp verification,
-staging/production separation, secrets management, backup/restore testing, a penetration test, and the
-operational runbooks themselves — is unchanged: still open, and out of this repo's reach either way.
+See `backend/test/README.md` for how to run all of the above.
+
+A later infrastructure pass closed the one item on that list that was actually a code gap, not just a
+missing vendor account:
+
+- **Object storage** (`backend/src/storage`) — `Evidence.storageKey`/`Document.storageKey` used to be
+  plain client-supplied strings with nothing behind them. Now the backend is the sole issuer: a
+  presigned-upload endpoint (`POST /cases/:id/evidence/upload-url` and `.../documents/upload-url`)
+  mints a case-scoped key and a short-lived signed PUT URL against an S3-compatible bucket (AWS S3, R2,
+  Spaces, or MinIO for local dev — Section 11.2's "buy, don't build"); the create endpoints reject any
+  storageKey that wasn't issued for that case, and verify the object actually exists once real storage
+  is configured. Documents/evidence are served back with a short-lived signed view URL, never the raw
+  key. With `S3_BUCKET` unset it runs in dry-run mode — same "works without credentials" shape as
+  Paystack/WhatsApp/Anthropic — so this needed no new external account to build or test.
+
+What that review flagged as needing a live external account, hosting/infra decisions, or a written SOP
+— live WhatsApp verification, staging/production separation, secrets management, backup/restore
+testing, a penetration test, and the operational runbooks themselves — is unchanged: still open, and
+out of this repo's reach either way.
 
 ## Running locally
 

@@ -2,11 +2,14 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { DocumentVisibility, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateDocumentDto } from './dto/create-document.dto';
+import { RequestUploadUrlDto } from '../storage/dto/request-upload-url.dto';
 import { filterDocumentsForFieldActor } from './document-visibility';
 
 const FIELD_ROLES: Role[] = [Role.FIELD_AGENT, Role.PROVIDER];
+const DOCUMENT_KEY_PREFIX = 'documents';
 
 /**
  * Section 12 P1 — "document vault". Anyone who already has case access
@@ -28,22 +31,34 @@ export class DocumentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly storage: StorageService,
   ) {}
+
+  /** Same presign-then-verify pattern as EvidenceService.createUploadUrl —
+   * see the comment on addDocument()'s storageKey check below for why. */
+  async createUploadUrl(caseId: string, dto: RequestUploadUrlDto) {
+    const key = this.storage.createKey(`${DOCUMENT_KEY_PREFIX}/${caseId}`, dto.fileName);
+    const { url, expiresInSeconds } = await this.storage.getUploadUrl(key, dto.contentType);
+    return { storageKey: key, uploadUrl: url, method: 'PUT', expiresInSeconds };
+  }
 
   async listForCase(actor: AuthenticatedUser, caseId: string) {
     const documents = await this.prisma.document.findMany({ where: { caseId }, orderBy: { createdAt: 'desc' } });
-    if (!FIELD_ROLES.includes(actor.role)) return documents; // customer, staff, admin: unrestricted
+    const visible = FIELD_ROLES.includes(actor.role)
+      ? filterDocumentsForFieldActor(
+          documents,
+          new Set(
+            (
+              await this.prisma.assignment.findMany({
+                where: { caseId, OR: [{ agent: { userId: actor.id } }, { provider: { userId: actor.id } }] },
+                select: { id: true },
+              })
+            ).map((a) => a.id),
+          ),
+        )
+      : documents; // customer, staff, admin: unrestricted
 
-    const ownAssignmentIds = new Set(
-      (
-        await this.prisma.assignment.findMany({
-          where: { caseId, OR: [{ agent: { userId: actor.id } }, { provider: { userId: actor.id } }] },
-          select: { id: true },
-        })
-      ).map((a) => a.id),
-    );
-
-    return filterDocumentsForFieldActor(documents, ownAssignmentIds);
+    return Promise.all(visible.map(async (doc) => ({ ...doc, viewUrl: await this.storage.getViewUrl(doc.storageKey) })));
   }
 
   async addDocument(actor: AuthenticatedUser, caseId: string, dto: CreateDocumentDto) {
@@ -56,6 +71,16 @@ export class DocumentsService {
       if (!assignment || assignment.caseId !== caseId) {
         throw new BadRequestException('restrictedToAssignmentId must be an assignment on this case');
       }
+    }
+
+    // Same rule as evidence: a storageKey only ever came from
+    // createUploadUrl() above, never a client-supplied path onto someone
+    // else's object (or nothing at all).
+    if (!dto.storageKey.startsWith(`${DOCUMENT_KEY_PREFIX}/${caseId}/`)) {
+      throw new BadRequestException('storageKey was not issued for this case — request a new upload URL');
+    }
+    if (!(await this.storage.objectExists(dto.storageKey))) {
+      throw new BadRequestException('Uploaded file not found — the upload may not have completed. Request a new upload URL and try again.');
     }
 
     const document = await this.prisma.document.create({

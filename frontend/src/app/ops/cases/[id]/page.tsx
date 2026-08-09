@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { apiFetch, ApiError } from '@/lib/api';
+import { uploadFile } from '@/lib/upload';
 import { useOpsGuard } from '@/lib/useOpsGuard';
 import { ADMIN_ROLES } from '@/lib/roles';
 import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
@@ -35,8 +36,8 @@ interface CaseDetail {
     id: string; role: string; status: string;
     agent: { fullName: string } | null; provider: { fullName: string } | null;
   }[];
-  evidence: { id: string; type: string; description: string | null; uploader?: { email: string } | null }[];
-  documents: { id: string; label: string; createdAt: string; visibility: string; restrictedToAssignmentId: string | null }[];
+  evidence: { id: string; type: string; description: string | null; uploader?: { email: string } | null; viewUrl: string }[];
+  documents: { id: string; label: string; createdAt: string; visibility: string; restrictedToAssignmentId: string | null; viewUrl: string }[];
   reports: { id: string; summary: string; createdAt: string }[];
   quotes: { id: string; amount: string; currency: string; acceptedAt: string | null }[];
   approvals: { id: string; action: string; note: string | null; createdAt: string }[];
@@ -65,7 +66,7 @@ export default function OpsCaseDetailPage() {
   const [collaboratorUserId, setCollaboratorUserId] = useState('');
   const [collaboratorRole, setCollaboratorRole] = useState('CASE_MANAGER');
   const [documentLabel, setDocumentLabel] = useState('');
-  const [documentRef, setDocumentRef] = useState('');
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentVisibility, setDocumentVisibility] = useState('ALL');
   const [documentAssignmentId, setDocumentAssignmentId] = useState('');
   const [cadenceDays, setCadenceDays] = useState('30');
@@ -282,7 +283,8 @@ export default function OpsCaseDetailPage() {
             {detail.evidence.map((e) => (
               <li key={e.id}>
                 <strong>{e.type}</strong> — {e.description ?? 'No description'}{' '}
-                <span className="muted">by {e.uploader?.email ?? 'unknown'}</span>
+                <span className="muted">by {e.uploader?.email ?? 'unknown'}</span>{' '}
+                <a href={e.viewUrl} target="_blank" rel="noreferrer">view</a>
               </li>
             ))}
           </ul>
@@ -303,7 +305,8 @@ export default function OpsCaseDetailPage() {
               const restrictedTo = detail.assignments.find((a) => a.id === d.restrictedToAssignmentId);
               return (
                 <li key={d.id}>
-                  {d.label} — <span className="muted">{new Date(d.createdAt).toLocaleDateString()}</span>{' '}
+                  <a href={d.viewUrl} target="_blank" rel="noreferrer">{d.label}</a> —{' '}
+                  <span className="muted">{new Date(d.createdAt).toLocaleDateString()}</span>{' '}
                   {d.visibility === 'STAFF_ONLY' && <span className="badge">Staff only</span>}
                   {d.visibility === 'ASSIGNEE' && (
                     <span className="badge">
@@ -317,7 +320,7 @@ export default function OpsCaseDetailPage() {
         )}
         <div className="actions-row" style={{ flexWrap: 'wrap' }}>
           <input placeholder="Label" value={documentLabel} onChange={(e) => setDocumentLabel(e.target.value)} />
-          <input placeholder="File reference" value={documentRef} onChange={(e) => setDocumentRef(e.target.value)} />
+          <input type="file" onChange={(e) => setDocumentFile(e.target.files?.[0] ?? null)} />
           <select value={documentVisibility} onChange={(e) => setDocumentVisibility(e.target.value)}>
             <option value="ALL">Visible to every assignee</option>
             <option value="STAFF_ONLY">Staff only (no field actor)</option>
@@ -337,29 +340,30 @@ export default function OpsCaseDetailPage() {
             className="btn btn--secondary"
             disabled={
               !documentLabel ||
-              !documentRef ||
+              !documentFile ||
               busy !== null ||
               (documentVisibility === 'ASSIGNEE' && !documentAssignmentId)
             }
             onClick={() =>
               run('document', async () => {
+                const storageKey = await uploadFile('documents', detail.id, documentFile as File);
                 await apiFetch(`/cases/${detail.id}/documents`, {
                   method: 'POST',
                   body: JSON.stringify({
                     label: documentLabel,
-                    storageKey: documentRef,
+                    storageKey,
                     visibility: documentVisibility,
                     restrictedToAssignmentId: documentVisibility === 'ASSIGNEE' ? documentAssignmentId : undefined,
                   }),
                 });
                 setDocumentLabel('');
-                setDocumentRef('');
+                setDocumentFile(null);
                 setDocumentVisibility('ALL');
                 setDocumentAssignmentId('');
               })
             }
           >
-            {busy === 'document' ? 'Adding…' : 'Add document'}
+            {busy === 'document' ? 'Uploading…' : 'Add document'}
           </button>
         </div>
       </div>
