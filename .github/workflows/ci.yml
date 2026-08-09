@@ -2,9 +2,12 @@ name: CI
 
 # Staging/production separation only means something if a build that
 # hasn't passed this can't reach either environment — this is the gate.
-# No deploy step here: that depends on whichever host gets picked
-# (Section 11.2: managed cloud, CI/CD via Git), which hasn't been chosen
-# yet. Wire a deploy job onto the end of this once it has.
+# The deploy job at the bottom only runs after both test jobs pass, and
+# only on a push to main — Railway's own "deploy on push" should be turned
+# OFF for both services so this workflow is the only path to a deploy.
+# See README.md's "Deploying (Railway)" section for the one-time setup
+# this depends on (repo secrets/variables this file reads, and the manual
+# Railway-dashboard steps I have no access to do for you).
 
 on:
   push:
@@ -57,3 +60,30 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build --workspace=frontend
+
+  deploy:
+    name: Deploy to Railway (production)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+      # Each service's Root Directory is set in the Railway dashboard
+      # (backend -> "backend", frontend -> "frontend") — see README.
+      # `railway up` deploys the linked service using that config; the
+      # token below is a Railway *project* token, so it already knows
+      # which project this is without passing the project ID as a flag.
+      - name: Deploy backend
+        working-directory: backend
+        run: railway up --service "$RAILWAY_BACKEND_SERVICE" --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_BACKEND_SERVICE: ${{ vars.RAILWAY_BACKEND_SERVICE }}
+      - name: Deploy frontend
+        working-directory: frontend
+        run: railway up --service "$RAILWAY_FRONTEND_SERVICE" --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_FRONTEND_SERVICE: ${{ vars.RAILWAY_FRONTEND_SERVICE }}

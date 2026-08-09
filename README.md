@@ -258,8 +258,50 @@ component underneath the infra decision:
   host's probe carries no session.
 - **CI** (`.github/workflows/ci.yml`) — runs the full backend suite (unit + e2e, against a real
   Postgres service container) and the frontend build on every push/PR. There was no CI at all before
-  this; a broken build could previously only be caught by running the suites locally. No deploy step
-  yet — that depends on whichever host gets chosen, which this repo doesn't decide for you.
+  this; a broken build could previously only be caught by running the suites locally. A `deploy` job
+  now follows the two test jobs — see "Deploying (Railway)" below for what it does and, more
+  importantly, the manual setup it depends on that no amount of code can do for you.
+
+## Deploying (Railway)
+
+Railway was the host chosen for this project (project ID `3a589d6b-ad92-4c4d-bc3d-ffe570480345`).
+Everything below the line is code already in this repo; everything above it is a one-time manual setup
+in Railway's dashboard that I have no access to do for you — I can't create services, add a database
+plugin, or generate a token on your behalf. **None of this has been deploy-tested against your actual
+project** — it's built from Railway's documented conventions (Nixpacks build detection, `railway.json`
+per-service config, project-scoped CLI tokens), not verified against a real deploy. The first push to
+`main` after you finish the setup below is the real test; if the exact CLI flags have drifted from what
+a current `@railway/cli` expects, that run's log will show you exactly what to adjust.
+
+**One-time setup, in Railway's dashboard, inside that project:**
+
+1. **Two services**, both connected to this GitHub repo:
+   - `backend` — Root Directory: `backend`. Railway will pick up `backend/railway.json` (build command
+     via Nixpacks auto-detection, start command `npm run prisma:deploy && npm run start:prod` — the
+     migration runs on every boot; `prisma migrate deploy` takes its own advisory lock, so this stays
+     safe even if this service ever scales to more than one instance).
+   - `frontend` — Root Directory: `frontend`. Picks up `frontend/railway.json`.
+   - For both: turn **off** "Deploy on Push" in the service's Settings → this workflow's `deploy` job
+     is what should trigger deploys, gated on tests passing, not Railway's own push listener.
+2. **A Postgres plugin**, added to the project — Railway generates its own `DATABASE_URL` reference
+   variable; point the `backend` service's `DATABASE_URL` at that reference rather than typing it in by
+   hand.
+3. **Environment variables on each service**, following `.env.production.example` — every value that
+   file lists as needing to be real (JWT secrets via `openssl rand -hex 32`, `CORS_ORIGIN` set to the
+   frontend's Railway domain, `NEXT_PUBLIC_API_URL` on the frontend service set to the backend's Railway
+   domain, live Paystack/WhatsApp/S3 credentials once you have them — dry-run mode is fine for everything
+   you haven't set up yet, same as local dev). `backend/src/config/validate-production-env.ts` will
+   refuse to boot the backend service if the JWT/WhatsApp secrets or `CORS_ORIGIN`/`DATABASE_URL` are
+   missing or still placeholder values — that's intentional, and it's the fastest way to find out
+   something here was missed.
+4. **A Railway project token** (Settings → Tokens, scoped to this project) — add it to this GitHub
+   repo's secrets as `RAILWAY_TOKEN` (Settings → Secrets and variables → Actions → Secrets).
+5. **The two service names**, exactly as typed into Railway when the services were created — add them
+   to this GitHub repo's Actions **variables** (same page, "Variables" tab, not "Secrets" — they aren't
+   sensitive) as `RAILWAY_BACKEND_SERVICE` and `RAILWAY_FRONTEND_SERVICE`.
+
+Once all five are in place, a merge to `main` runs the test suites and, only if they pass, deploys both
+services via `railway up`.
 
 ## Running locally
 

@@ -1,3 +1,14 @@
+// Must be the first import. ConfigModule.forRoot() (in app.module.ts) also
+// loads .env, but only once its @Module() decorator actually runs — which
+// is AFTER every one of AppModule's own imports has already finished
+// executing its top-level code. Anything read from process.env at
+// module-scope elsewhere (e.g. AuthController's
+// `parseInt(process.env.AUTH_THROTTLE_LIMIT, ...)`, evaluated once when
+// the class is defined) would otherwise silently see values from before
+// .env was loaded — harmless on a real host like Railway, which injects
+// env vars directly with no .env file to race against, but wrong for
+// anyone running this from a checked-out .env file (local dev, CI).
+import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
