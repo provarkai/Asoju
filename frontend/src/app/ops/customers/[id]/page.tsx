@@ -73,8 +73,8 @@ export default function CustomerHistoryPage() {
       <div className="hero">
         <h1>{customer.fullName}</h1>
         <p>
-          {customer.email ?? customer.phone} · customer since{' '}
-          {new Date(customer.customerSince).toLocaleDateString()} · referral code{' '}
+          {(customer.email ?? customer.phone) || <span className="muted">Contact details hidden — curated case file</span>} ·
+          customer since {new Date(customer.customerSince).toLocaleDateString()} · referral code{' '}
           <code>{customer.referralCode}</code>
         </p>
       </div>

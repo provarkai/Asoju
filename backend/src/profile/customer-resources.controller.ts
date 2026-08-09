@@ -3,6 +3,7 @@ import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ProfileService } from './profile.service';
 
 const STAFF_TRIAGE_ROLES = [Role.CASE_MANAGER, Role.RELATIONSHIP_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
@@ -50,7 +51,7 @@ export class CustomerResourcesController {
 
   @Roles(...OPS_ROLES)
   @Get('history')
-  getHistory(@Param('customerId') customerId: string) {
-    return this.profileService.getCustomerHistory(customerId);
+  getHistory(@CurrentUser() user: AuthenticatedUser, @Param('customerId') customerId: string) {
+    return this.profileService.getCustomerHistory(customerId, user.role);
   }
 }

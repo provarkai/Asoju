@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CaseAccessGuard } from '../common/guards/case-access.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { RiskEngineService } from './risk-engine.service';
 
 const RISK_REVIEW_ROLES = [Role.COMPLIANCE_RISK, Role.CASE_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
@@ -17,8 +18,8 @@ export class RiskEngineController {
    * see every high-risk case, not just ones they already collaborate on. */
   @Roles(...RISK_REVIEW_ROLES)
   @Get('risk/flagged-cases')
-  listHighRiskCases() {
-    return this.riskEngine.listHighRiskCases();
+  listHighRiskCases(@CurrentUser() user: AuthenticatedUser) {
+    return this.riskEngine.listHighRiskCases(user.role);
   }
 
   @UseGuards(CaseAccessGuard)

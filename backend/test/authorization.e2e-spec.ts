@@ -27,6 +27,7 @@ describe('Authorization (IDOR/BOLA)', () => {
   let customerB: Awaited<ReturnType<typeof createCustomer>>;
   let admin: Awaited<ReturnType<typeof createStaff>>;
   let caseManager: Awaited<ReturnType<typeof createStaff>>; // never made a collaborator
+  let relationshipManager: Awaited<ReturnType<typeof createStaff>>; // PII-unrestricted staff role
   let ownAgent: Awaited<ReturnType<typeof createAgent>>; // assigned to the case
   let strangerAgent: Awaited<ReturnType<typeof createAgent>>; // never assigned
   let partner: Awaited<ReturnType<typeof createPartnerContact>>;
@@ -35,6 +36,7 @@ describe('Authorization (IDOR/BOLA)', () => {
   let tokenB: string;
   let adminToken: string;
   let caseManagerToken: string;
+  let rmToken: string;
   let ownAgentToken: string;
   let strangerAgentToken: string;
   let partnerToken: string;
@@ -54,22 +56,25 @@ describe('Authorization (IDOR/BOLA)', () => {
   beforeAll(async () => {
     app = await createTestApp();
 
-    [customerA, customerB, admin, caseManager, ownAgent, strangerAgent, partner] = await Promise.all([
-      createCustomer('authz-a'),
-      createCustomer('authz-b'),
-      createStaff('authz-admin', Role.ADMIN),
-      createStaff('authz-cm', Role.CASE_MANAGER),
-      createAgent('authz-own'),
-      createAgent('authz-stranger'),
-      createPartnerContact('authz'),
-    ]);
+    [customerA, customerB, admin, caseManager, relationshipManager, ownAgent, strangerAgent, partner] =
+      await Promise.all([
+        createCustomer('authz-a'),
+        createCustomer('authz-b'),
+        createStaff('authz-admin', Role.ADMIN),
+        createStaff('authz-cm', Role.CASE_MANAGER),
+        createStaff('authz-rm', Role.RELATIONSHIP_MANAGER),
+        createAgent('authz-own'),
+        createAgent('authz-stranger'),
+        createPartnerContact('authz'),
+      ]);
 
-    [tokenA, tokenB, adminToken, caseManagerToken, ownAgentToken, strangerAgentToken, partnerToken] =
+    [tokenA, tokenB, adminToken, caseManagerToken, rmToken, ownAgentToken, strangerAgentToken, partnerToken] =
       await Promise.all([
         login(customerA.email),
         login(customerB.email),
         login(admin.email),
         login(caseManager.email),
+        login(relationshipManager.email),
         login(ownAgent.email),
         login(strangerAgent.email),
         login(partner.email),
@@ -237,6 +242,50 @@ describe('Authorization (IDOR/BOLA)', () => {
       const res = await request(app.getHttpServer()).get(`/api/cases/${caseId}`).set('Authorization', `Bearer ${tokenA}`).expect(200);
       const ids = res.body.documents.map((d: { id: string }) => d.id);
       expect(ids).toEqual(expect.arrayContaining([allVisibleDocId, staffOnlyDocId]));
+    });
+  });
+
+  describe('curated case file — PII redaction for restricted staff roles', () => {
+    it('redacts the customer name from the org-wide queue for a PII-restricted role (Case Manager)', async () => {
+      const res = await request(app.getHttpServer()).get('/api/cases').set('Authorization', `Bearer ${caseManagerToken}`).expect(200);
+      const row = res.body.find((c: { id: string }) => c.id === caseId);
+      expect(row.customer.fullName).toBe('Client (name withheld)');
+    });
+
+    it('redacts the customer name from full case detail for the same role', async () => {
+      // caseManager already claimed this case in the section above.
+      const res = await request(app.getHttpServer()).get(`/api/cases/${caseId}`).set('Authorization', `Bearer ${caseManagerToken}`).expect(200);
+      expect(res.body.customer.fullName).toBe('Client (name withheld)');
+    });
+
+    it('does NOT redact the name for the Relationship Manager role', async () => {
+      await request(app.getHttpServer()).post(`/api/cases/${caseId}/claim`).set('Authorization', `Bearer ${rmToken}`).expect(201);
+      const res = await request(app.getHttpServer()).get(`/api/cases/${caseId}`).set('Authorization', `Bearer ${rmToken}`).expect(200);
+      expect(res.body.customer.fullName).toBe(customerA.customer.fullName);
+    });
+
+    it('does NOT redact the name for admin', async () => {
+      const res = await request(app.getHttpServer()).get(`/api/cases/${caseId}`).set('Authorization', `Bearer ${adminToken}`).expect(200);
+      expect(res.body.customer.fullName).toBe(customerA.customer.fullName);
+    });
+
+    it('redacts name and strips email/phone from the customer service-history endpoint for a restricted role', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/customers/${customerA.customer.id}/history`)
+        .set('Authorization', `Bearer ${caseManagerToken}`)
+        .expect(200);
+      expect(res.body.customer.fullName).toBe('Client (name withheld)');
+      expect(res.body.customer.email).toBeNull();
+      expect(res.body.customer.phone).toBeNull();
+    });
+
+    it('returns the real name and email from the same endpoint for an unrestricted role (admin)', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/customers/${customerA.customer.id}/history`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(res.body.customer.fullName).toBe(customerA.customer.fullName);
+      expect(res.body.customer.email).toBe(customerA.email);
     });
   });
 

@@ -30,10 +30,20 @@ keeps it small.
   the independent readiness review's P0-03/P0-04 items: cross-customer
   IDOR, field-actor BOLA (assignment-scoped access), the org-wide queue vs.
   case-content-access distinction (report Section 7.1), document
-  classification, partner-role isolation, and role-mismatched privilege
-  escalation attempts. Confirmed to actually catch a regression, not just
-  pass vacuously: temporarily removing `CaseAccessGuard` from
-  `GET /cases/:id` fails 4 of these tests; restoring it passes all 23.
+  classification, curated-case-file PII redaction, partner-role isolation,
+  and role-mismatched privilege escalation attempts. Confirmed to actually
+  catch a regression, not just pass vacuously: temporarily removing
+  `CaseAccessGuard` from `GET /cases/:id` fails 4 of these tests; restoring
+  it passes all 29. Same check done for the PII redaction specifically —
+  temporarily disabling it in `CasesService.getCaseDetail` fails its test,
+  restoring it passes again.
+
+  The curated-case-file tests cover "seeing a case ≠ seeing everything in
+  it" one layer past document classification: Case Manager, QC, Finance,
+  and Compliance-Risk see the customer's name replaced with a fixed
+  placeholder in the queue, case detail, and the customer service-history
+  endpoint (email/phone stripped there too); Relationship Manager and Admin
+  see it unredacted (`backend/src/common/pii-restricted-roles.ts`).
 
 - `privileged-auth.e2e-spec.ts` — P0-06: MFA enroll → confirm → login
   challenge (including proving the mfa-pending token can't double as a

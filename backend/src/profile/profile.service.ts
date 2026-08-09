@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -6,6 +7,7 @@ import { CreateBeneficiaryDto } from './dto/beneficiary.dto';
 import { CreatePropertyDto } from './dto/property.dto';
 import { CreateAssetDto } from './dto/asset.dto';
 import { UpdatePreferencesDto } from './dto/update-preferences.dto';
+import { isPiiRestricted, REDACTED_CUSTOMER_NAME } from '../common/pii-restricted-roles';
 
 /**
  * Section 5.1 P1 — "saved properties/assets, multiple beneficiaries".
@@ -162,7 +164,7 @@ export class ProfileService {
   /// that had no dedicated view: a staff member talking to a customer
   /// (or preparing to) needs their whole relationship with ASOJU in one
   /// place, not just the cases currently open in the queue.
-  async getCustomerHistory(customerId: string) {
+  async getCustomerHistory(customerId: string, actorRole: Role) {
     const customer = await this.prisma.customer.findUnique({
       where: { id: customerId },
       include: { user: { select: { email: true, phone: true } } },
@@ -200,12 +202,18 @@ export class ProfileService {
     const stars = caseSummaries.map((c) => c.rating?.stars).filter((s): s is number => typeof s === 'number');
     const averageRating = stars.length ? stars.reduce((a, b) => a + b, 0) / stars.length : null;
 
+    // Curated case file: this is the same PII this endpoint's callers
+    // could otherwise reach through the case queue/detail (name) — with
+    // email/phone added on top, so it's the bigger exposure of the two if
+    // left ungated. Same restricted-role set, same treatment.
+    const restricted = isPiiRestricted(actorRole);
+
     return {
       customer: {
         id: customer.id,
-        fullName: customer.fullName,
-        email: customer.user.email,
-        phone: customer.user.phone,
+        fullName: restricted ? REDACTED_CUSTOMER_NAME : customer.fullName,
+        email: restricted ? null : customer.user.email,
+        phone: restricted ? null : customer.user.phone,
         customerSince: customer.createdAt,
         referralCode: customer.referralCode,
       },

@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { CasePriority, CaseStatus, IncidentSeverity } from '@prisma/client';
+import { CasePriority, CaseStatus, IncidentSeverity, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { redactCustomerName } from '../common/pii-restricted-roles';
 
 const HIGH_RISK_LEVEL = 3;
 const INCIDENT_SEVERITY_POINTS: Record<IncidentSeverity, number> = {
@@ -145,9 +146,11 @@ export class RiskEngineService {
   }
 
   /** Compliance/Risk-facing queue — every case currently scored high or
-   * critical, with its most recent assessment. */
-  async listHighRiskCases() {
-    return this.prisma.serviceCase.findMany({
+   * critical, with its most recent assessment. Curated case file: this
+   * queue is also reachable by CASE_MANAGER (RISK_REVIEW_ROLES), which is
+   * PII-restricted, so the customer's name is redacted for that role. */
+  async listHighRiskCases(actorRole: Role) {
+    const cases = await this.prisma.serviceCase.findMany({
       where: { riskLevel: { gte: HIGH_RISK_LEVEL } },
       include: {
         customer: { select: { fullName: true } },
@@ -155,5 +158,6 @@ export class RiskEngineService {
       },
       orderBy: { updatedAt: 'desc' },
     });
+    return cases.map((c) => ({ ...c, customer: redactCustomerName(c.customer, actorRole) }));
   }
 }

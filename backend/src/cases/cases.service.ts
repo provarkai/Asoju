@@ -9,6 +9,7 @@ import { assertValidTransition } from './case-state-machine';
 import { CHECKLIST_TEMPLATES } from './checklist-templates';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { filterDocumentsForFieldActor } from '../documents/document-visibility';
+import { redactCustomerName } from '../common/pii-restricted-roles';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
 
@@ -288,11 +289,17 @@ export class CasesService {
     // a specific case (CaseAccessGuard, still enforced on detail/mutation
     // endpoints below) — not read-only visibility of the queue itself.
     if (CasesService.OPS_ROLES.includes(user.role)) {
-      return this.prisma.serviceCase.findMany({
+      const cases = await this.prisma.serviceCase.findMany({
         include: CasesService.CASE_QUEUE_SUMMARY,
         orderBy: { updatedAt: 'desc' },
         take: 200,
       });
+      // Curated case file (independent readiness review, Section 7.1
+      // follow-up): the queue is limited operational metadata by design
+      // (see comment above), but for PII-restricted staff roles that
+      // extends to the customer's name too — the case number is what they
+      // work with, not who the customer is.
+      return cases.map((c) => ({ ...c, customer: redactCustomerName(c.customer, user.role) }));
     }
 
     return [];
@@ -340,6 +347,12 @@ export class CasesService {
       );
       serviceCase.documents = filterDocumentsForFieldActor(serviceCase.documents, ownAssignmentIds);
     }
+
+    // Curated case file: Case Manager / QC / Finance / Compliance-Risk get
+    // the full operational record (tasks, evidence, documents, invoices)
+    // but not the customer's real name — they act on the case, not on a
+    // relationship with this person. RM/customer/admin see it unredacted.
+    serviceCase.customer = redactCustomerName(serviceCase.customer, actor.role);
 
     return serviceCase;
   }

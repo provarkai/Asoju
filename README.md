@@ -196,10 +196,16 @@ hosting infrastructure, or a written operating procedure — are closed and cove
 - **Document classification** — a `Document` can now be marked staff-only or restricted to one specific
   assignment, and a field actor's view (both the dedicated endpoint and the embedded array on
   `GET /cases/:id`) is filtered accordingly; customer and staff are always unrestricted.
-- **Authorization test suite** (`backend/test/authorization.e2e-spec.ts`) — 23 tests, real app, real
+- **Curated case file for operational staff** — seeing a case in the org-wide queue is metadata-only
+  visibility (Section 7.1); Case Manager, QC, Finance, and Compliance-Risk now also get the customer's
+  name and contact details withheld everywhere staff can reach them (queue, case detail, the customer
+  service-history lookup) — the case number, not the customer's identity, is what they work with. RM
+  and Admin/Super Admin are unaffected (`backend/src/common/pii-restricted-roles.ts`).
+- **Authorization test suite** (`backend/test/authorization.e2e-spec.ts`) — 29 tests, real app, real
   Postgres: cross-customer IDOR, field-actor BOLA, the org-wide-queue-vs-case-content-access
-  distinction, document classification, partner-role isolation, role-mismatched privilege escalation.
-  Confirmed to actually catch a regression (temporarily removing `CaseAccessGuard` fails 4 of them).
+  distinction, document classification, curated-case-file PII redaction, partner-role isolation,
+  role-mismatched privilege escalation. Confirmed to actually catch a regression (temporarily removing
+  `CaseAccessGuard` fails 4 of them; temporarily disabling the PII redaction fails its own test).
 - **Privileged authentication** — self-rolled TOTP MFA (enroll → confirm → login challenge, via
   `backend/src/auth/totp.ts`, same "self-rolled, swap for a managed provider later" philosophy as the
   JWT auth itself), password reset (never reveals whether an email exists, revokes every existing
