@@ -1,0 +1,787 @@
+// ASOJU — Prisma schema
+// Canonical data model per ASOJU Master PRD, Section 3.
+// The ServiceCase is the central object; everything else attaches to it.
+// Keep this file the single source of truth for the domain shape —
+// module code should never assume a shape this schema doesn't define.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Section 4 — User Roles. Role membership alone is never sufficient for
+/// access to a specific case — see CaseCollaborator / Assignment for the
+/// case-scoped layer (Non-Negotiable #6).
+enum Role {
+  CUSTOMER
+  BENEFICIARY
+  FIELD_AGENT
+  PROVIDER
+  RELATIONSHIP_MANAGER
+  CASE_MANAGER
+  QUALITY_CONTROL
+  FINANCE
+  COMPLIANCE_RISK
+  ADMIN
+  SUPER_ADMIN
+}
+
+/// Section 6 — MVP Service Catalogue (the only three services active at launch).
+enum ServiceType {
+  PROPERTY_INSPECTION
+  CONSTRUCTION_SUPERVISION
+  ASSET_INSPECTION
+}
+
+enum CaseTier {
+  ESSENTIAL
+  CONCIERGE
+}
+
+enum CasePriority {
+  STANDARD
+  PRIORITY
+  URGENT
+}
+
+/// Section 5.2 — Case state machine. Backend-enforced; AI may recommend
+/// but never force a transition (Non-Negotiable #9).
+enum CaseStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  QUOTED
+  AWAITING_PAYMENT
+  SCHEDULED
+  ASSIGNED
+  IN_PROGRESS
+  EVIDENCE_SUBMITTED
+  QUALITY_CONTROL
+  CUSTOMER_REVIEW
+  ADDITIONAL_WORK
+  APPROVED
+  COMPLETED
+  CLOSED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+}
+
+/// Section 8.3 — Evidence levels. Never conflate these.
+enum EvidenceLevel {
+  OBSERVED
+  REPORTED
+  PROFESSIONALLY_ASSESSED
+  PLATFORM_VERIFIED
+}
+
+/// Section 8.2 — Trust labels. Never a single vague "Verified" badge.
+enum TrustLabel {
+  ASOJU_VERIFIED
+  PROFESSIONALLY_REVIEWED
+  CUSTOMER_PROVIDED
+  THIRD_PARTY_STATEMENT
+  NOT_INDEPENDENTLY_VERIFIED
+}
+
+enum EvidenceType {
+  PHOTO
+  VIDEO
+  DOCUMENT
+  VOICE
+  LOCATION
+  NOTE
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Section 8.5 — Quality Control outcomes.
+enum QcOutcome {
+  APPROVED
+  REWORK
+  ESCALATE
+  INCIDENT
+}
+
+/// Section 7.4 — Scoring/segment tag, deterministic (not another LLM call).
+enum LeadTag {
+  HOT
+  WARM
+  COLD
+}
+
+/// Section 7.3 / 7.5 — AI escalation triggers.
+enum AiEscalation {
+  NONE
+  HUMAN_REQUESTED
+  VIP
+  FRUSTRATION
+  LEGAL_QUESTION
+}
+
+/// Section 7.6 — AI action permission levels.
+enum AiActionLevel {
+  INFORM
+  ASSIST
+  EXECUTE_LOW_RISK
+  HUMAN_APPROVAL_REQUIRED
+}
+
+enum ApprovalAction {
+  APPROVED
+  REQUEST_CLARIFICATION
+  REQUEST_ADDITIONAL_WORK
+  ESCALATE
+}
+
+enum AssignmentRole {
+  FIELD_AGENT
+  PROVIDER
+}
+
+enum AssignmentStatus {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  IN_PROGRESS
+  COMPLETED
+  REVOKED
+}
+
+/// Case-scoped staff access (Section 4) — distinct from field
+/// Assignment, which covers agents/providers doing the physical/professional work.
+enum CollaboratorRole {
+  RELATIONSHIP_MANAGER
+  CASE_MANAGER
+  QUALITY_CONTROL
+  FINANCE
+  COMPLIANCE_RISK
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  EXPIRED
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+}
+
+/// Provider verification lifecycle (Gate 2 — Trust & Provider Network,
+/// working-session source doc). A provider is not bookable until VERIFIED.
+enum ProviderStatus {
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  ACTIVE
+  RESTRICTED
+  SUSPENDED
+  REMOVED
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access
+// ---------------------------------------------------------------------------
+
+model User {
+  id                 String   @id @default(uuid())
+  email              String?  @unique
+  phone              String?  @unique
+  passwordHash       String?
+  role               Role
+  mfaEnabled         Boolean  @default(false)
+  mfaSecret          String?
+  isActive           Boolean  @default(true)
+  countryOfResidence String?
+  preferredChannel   String? // e.g. whatsapp | email | sms
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  customer          Customer?
+  agentProfile      Agent?
+  providerProfile   Provider?
+  refreshTokens     RefreshToken[]
+  caseCollaborators CaseCollaborator[]
+  uploadedEvidence  Evidence[]         @relation("EvidenceUploader")
+  auditEvents       AuditEvent[]
+  messagesSent      Message[]          @relation("MessageSender")
+  notifications     Notification[]
+  approvals         Approval[]
+
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Customers, beneficiaries, accounts
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName  String
+  accountId String?
+  account   Account? @relation(fields: [accountId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  beneficiaries   Beneficiary[]
+  properties      Property[]
+  assets          Asset[]
+  serviceRequests ServiceRequest[]
+  serviceCases    ServiceCase[]
+  subscriptions   Subscription[]
+  complaints      Complaint[]
+}
+
+/// e.g. customer's parents/family being helped.
+model Beneficiary {
+  id           String   @id @default(uuid())
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  fullName     String
+  relationship String?
+  phone        String?
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  serviceCases ServiceCase[]
+}
+
+/// Optional grouping for family/organisation use.
+model Account {
+  id        String     @id @default(uuid())
+  name      String
+  createdAt DateTime   @default(now())
+  customers Customer[]
+}
+
+// ---------------------------------------------------------------------------
+// Properties & generalized assets
+// ---------------------------------------------------------------------------
+
+model Property {
+  id          String   @id @default(uuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  address     String
+  city        String?
+  state       String?
+  description String?
+  createdAt   DateTime @default(now())
+
+  serviceCases ServiceCase[]
+}
+
+/// Generalized: farm, business premises, equipment, vehicle (Section 3).
+model Asset {
+  id          String   @id @default(uuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  assetType   String
+  description String?
+  location    String?
+  createdAt   DateTime @default(now())
+
+  serviceCases ServiceCase[]
+}
+
+// ---------------------------------------------------------------------------
+// Service requests & cases — the central objects (Section 3.1)
+// ---------------------------------------------------------------------------
+
+/// Raw inbound request (pre-case). Created by the AI Concierge or a manual
+/// intake; becomes a ServiceCase once triaged (vertical slice 1).
+model ServiceRequest {
+  id              String         @id @default(uuid())
+  customerId      String
+  customer        Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  serviceType     ServiceType?
+  rawDescription  String
+  location        String?
+  channel         String // whatsapp | web | email
+  leadTag         LeadTag?
+  leadScore       Int?
+  segmentTag      String? // Diaspora | Local HNI | Mass Retail
+  aiInteractionId String?
+  aiInteraction   AiInteraction? @relation(fields: [aiInteractionId], references: [id])
+  convertedCaseId String?        @unique
+  convertedCase   ServiceCase?   @relation("RequestToCase", fields: [convertedCaseId], references: [id])
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+/// THE CENTRAL OBJECT. Every request, regardless of vertical, becomes a
+/// Case, and everything else attaches to it (Section 3).
+model ServiceCase {
+  id            String       @id @default(uuid())
+  seq           Int          @unique @default(autoincrement()) // backs caseNumber generation (ASJ-000184)
+  caseNumber    String       @unique // e.g. ASJ-000184 — derived from `seq` on creation
+  customerId    String
+  customer      Customer     @relation(fields: [customerId], references: [id])
+  beneficiaryId String?
+  beneficiary   Beneficiary? @relation(fields: [beneficiaryId], references: [id])
+  propertyId    String?
+  property      Property?    @relation(fields: [propertyId], references: [id])
+  assetId       String?
+  asset         Asset?       @relation(fields: [assetId], references: [id])
+
+  serviceType ServiceType
+  description String
+  location    String
+  priority    CasePriority @default(STANDARD)
+  riskLevel   Int          @default(1) // 1-4, Section 3.1
+  tier        CaseTier     @default(ESSENTIAL)
+  status      CaseStatus   @default(DRAFT)
+
+  paymentStatus PaymentStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  originRequest  ServiceRequest?     @relation("RequestToCase")
+  tasks          CaseTask[]
+  statusHistory  CaseStatusHistory[]
+  riskFlags      CaseRiskFlag[]
+  assignments    Assignment[]
+  collaborators  CaseCollaborator[]
+  documents      Document[]
+  evidence       Evidence[]
+  reports        Report[]
+  quotes         Quote[]
+  invoices       Invoice[]
+  messages       Message[]
+  complaints     Complaint[]
+  incidents      Incident[]
+  auditEvents    AuditEvent[]
+  approvals      Approval[]
+  aiInteractions AiInteraction[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([serviceType])
+}
+
+model CaseTask {
+  id          String      @id @default(uuid())
+  caseId      String
+  case        ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  label       String
+  isRequired  Boolean     @default(true)
+  isComplete  Boolean     @default(false)
+  completedAt DateTime?
+  sortOrder   Int         @default(0)
+  createdAt   DateTime    @default(now())
+
+  evidence Evidence[]
+}
+
+/// Append-only per-case status trail (distinct from the global AuditEvent
+/// log — this one is case-status-specific and drives the timeline UI).
+model CaseStatusHistory {
+  id          String      @id @default(uuid())
+  caseId      String
+  case        ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  fromStatus  CaseStatus?
+  toStatus    CaseStatus
+  changedById String?
+  reason      String?
+  createdAt   DateTime    @default(now())
+
+  @@index([caseId])
+}
+
+model CaseRiskFlag {
+  id         String      @id @default(uuid())
+  caseId     String
+  case       ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  label      String
+  detail     String?
+  raisedById String?
+  resolvedAt DateTime?
+  createdAt  DateTime    @default(now())
+}
+
+/// Case-scoped staff access — an RM/Case Manager/QC/Finance/Compliance user
+/// must be explicitly attached here to see a case; role membership alone
+/// is never sufficient (Section 4, Non-Negotiable #6).
+model CaseCollaborator {
+  id      String           @id @default(uuid())
+  caseId  String
+  case    ServiceCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User             @relation(fields: [userId], references: [id])
+  role    CollaboratorRole
+  addedAt DateTime         @default(now())
+
+  @@unique([caseId, userId, role])
+}
+
+// ---------------------------------------------------------------------------
+// Field agents & professional providers
+// ---------------------------------------------------------------------------
+
+model Agent {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName  String
+  city      String?
+  state     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  assignments Assignment[]
+}
+
+model Provider {
+  id               String         @id @default(uuid())
+  userId           String         @unique
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName         String
+  serviceCategory  String // surveyor | lawyer | engineer | valuer | ...
+  city             String?
+  state            String?
+  status           ProviderStatus @default(PENDING)
+  performanceScore Float? // rolling score from jobs completed / on-time rate / rework rate
+  createdAt        DateTime       @default(now())
+
+  credentials ProviderCredential[]
+  assignments Assignment[]
+
+  @@index([status])
+}
+
+model ProviderCredential {
+  id          String    @id @default(uuid())
+  providerId  String
+  provider    Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  type        String // license | certification | reference
+  issuer      String?
+  reference   String?
+  verifiedAt  DateTime?
+  documentUrl String?
+  createdAt   DateTime  @default(now())
+}
+
+/// Links case <-> agent/provider (Section 3).
+model Assignment {
+  id           String           @id @default(uuid())
+  caseId       String
+  case         ServiceCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  role         AssignmentRole
+  agentId      String?
+  agent        Agent?           @relation(fields: [agentId], references: [id])
+  providerId   String?
+  provider     Provider?        @relation(fields: [providerId], references: [id])
+  status       AssignmentStatus @default(OFFERED)
+  scheduledFor DateTime?
+  acceptedAt   DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// Trust & Evidence Engine (Section 8)
+// ---------------------------------------------------------------------------
+
+model Document {
+  id           String      @id @default(uuid())
+  caseId       String
+  case         ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  label        String
+  storageKey   String // private object storage key — never a predictable public URL
+  uploadedById String?
+  createdAt    DateTime    @default(now())
+}
+
+/// Photos, videos, docs, observations, metadata (Section 8.4).
+/// Chain of custody: Captured -> Uploaded -> Stored -> Reviewed ->
+/// Approved/Rejected -> Included in report -> Delivered to customer.
+/// Original evidence must remain in the audit trail even if later
+/// corrected/replaced — this table is append-only by convention;
+/// corrections create a new row referencing `supersedesId`.
+model Evidence {
+  id               String        @id @default(uuid())
+  caseId           String
+  case             ServiceCase   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  taskId           String?
+  task             CaseTask?     @relation(fields: [taskId], references: [id])
+  uploaderId       String
+  uploader         User          @relation("EvidenceUploader", fields: [uploaderId], references: [id])
+  type             EvidenceType
+  evidenceLevel    EvidenceLevel @default(OBSERVED)
+  trustLabel       TrustLabel    @default(NOT_INDEPENDENTLY_VERIFIED)
+  description      String?
+  locationMetadata Json?
+  storageKey       String // private object storage key
+  integrityHash    String
+  reviewStatus     ReviewStatus  @default(PENDING)
+  supersedesId     String?       @unique
+  supersedes       Evidence?     @relation("EvidenceSupersedes", fields: [supersedesId], references: [id])
+  supersededBy     Evidence?     @relation("EvidenceSupersedes")
+  capturedAt       DateTime?
+  createdAt        DateTime      @default(now()) // server-side timestamp, per Section 8.4
+
+  @@index([caseId])
+}
+
+/// Customer-facing deliverable.
+model Report {
+  id             String      @id @default(uuid())
+  caseId         String
+  case           ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  summary        String
+  findings       Json // structured findings, leads with results not metadata
+  qcOutcome      QcOutcome?
+  qcReviewedById String?
+  qcReviewedAt   DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Commercial: quotes, invoices, payments, refunds, payouts
+// ---------------------------------------------------------------------------
+
+model Quote {
+  id         String      @id @default(uuid())
+  caseId     String
+  case       ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  amount     Decimal     @db.Decimal(12, 2)
+  currency   String      @default("NGN")
+  breakdown  Json?
+  expiresAt  DateTime?
+  acceptedAt DateTime?
+  createdAt  DateTime    @default(now())
+
+  invoices Invoice[]
+}
+
+model Invoice {
+  id        String      @id @default(uuid())
+  caseId    String
+  case      ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  quoteId   String?
+  quote     Quote?      @relation(fields: [quoteId], references: [id])
+  amount    Decimal     @db.Decimal(12, 2)
+  currency  String      @default("NGN")
+  createdAt DateTime    @default(now())
+
+  payments Payment[]
+}
+
+/// Non-Negotiable #4 — no payment status based solely on customer
+/// screenshots; only the payment provider's verified webhook status
+/// drives workflow. `providerWebhookVerifiedAt` is set only by the
+/// payments module's webhook handler, never by a customer-facing endpoint.
+model Payment {
+  id                        String        @id @default(uuid())
+  invoiceId                 String
+  invoice                   Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount                    Decimal       @db.Decimal(12, 2)
+  currency                  String        @default("NGN")
+  provider                  String // e.g. paystack | flutterwave
+  providerReference         String        @unique
+  providerWebhookVerifiedAt DateTime?
+  status                    PaymentStatus @default(PENDING)
+  createdAt                 DateTime      @default(now())
+  updatedAt                 DateTime      @updatedAt
+
+  refunds Refund[]
+}
+
+model Refund {
+  id        String   @id @default(uuid())
+  paymentId String
+  payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  amount    Decimal  @db.Decimal(12, 2)
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+model Payout {
+  id            String         @id @default(uuid())
+  recipientType AssignmentRole
+  agentId       String?
+  providerId    String?
+  amount        Decimal        @db.Decimal(12, 2)
+  currency      String         @default("NGN")
+  status        PaymentStatus  @default(PENDING)
+  createdAt     DateTime       @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Communication
+// ---------------------------------------------------------------------------
+
+model Message {
+  id        String      @id @default(uuid())
+  caseId    String
+  case      ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  senderId  String?
+  sender    User?       @relation("MessageSender", fields: [senderId], references: [id])
+  channel   String // whatsapp | web | email | internal
+  body      String
+  createdAt DateTime    @default(now())
+
+  @@index([caseId])
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Complaints, incidents, audit
+// ---------------------------------------------------------------------------
+
+model Complaint {
+  id         String       @id @default(uuid())
+  caseId     String?
+  case       ServiceCase? @relation(fields: [caseId], references: [id])
+  customerId String
+  customer   Customer     @relation(fields: [customerId], references: [id])
+  subject    String
+  detail     String
+  resolvedAt DateTime?
+  createdAt  DateTime     @default(now())
+}
+
+model Incident {
+  id        String           @id @default(uuid())
+  caseId    String?
+  case      ServiceCase?     @relation(fields: [caseId], references: [id])
+  severity  IncidentSeverity
+  status    IncidentStatus   @default(OPEN)
+  summary   String
+  detail    String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+/// Append-only (Non-Negotiable #10). No update/delete path should ever be
+/// exposed for this model at the application layer.
+model AuditEvent {
+  id        String       @id @default(uuid())
+  caseId    String?
+  case      ServiceCase? @relation(fields: [caseId], references: [id])
+  actorId   String?
+  actor     User?        @relation(fields: [actorId], references: [id])
+  actorType String // user | ai | system
+  action    String
+  metadata  Json?
+  createdAt DateTime     @default(now())
+
+  @@index([caseId])
+  @@index([actorId])
+}
+
+// ---------------------------------------------------------------------------
+// Concierge tier
+// ---------------------------------------------------------------------------
+
+model Subscription {
+  id          String             @id @default(uuid())
+  customerId  String
+  customer    Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tier        CaseTier           @default(CONCIERGE)
+  status      SubscriptionStatus @default(ACTIVE)
+  startedAt   DateTime           @default(now())
+  renewsAt    DateTime?
+  cancelledAt DateTime?
+
+  memberships Membership[]
+}
+
+model Membership {
+  id             String       @id @default(uuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  benefit        String
+  createdAt      DateTime     @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// AI orchestration (Section 7)
+// ---------------------------------------------------------------------------
+
+/// Structured log of AI conversations/actions — every AI turn is recorded
+/// here, separate from the deterministic scoring result (Non-Negotiable #8:
+/// no AI claim presented as verified fact).
+model AiInteraction {
+  id                   String        @id @default(uuid())
+  caseId               String?
+  case                 ServiceCase?  @relation(fields: [caseId], references: [id])
+  channel              String // whatsapp | web
+  actionLevel          AiActionLevel @default(INFORM)
+  promptSummary        String?
+  dataCollected        Json?
+  engagementSubscore   Int?
+  escalation           AiEscalation  @default(NONE)
+  conversationComplete Boolean       @default(false)
+  createdAt            DateTime      @default(now())
+
+  serviceRequests ServiceRequest[]
+}
+
+/// Human/customer approval events (Section 3, 5.1 approval actions).
+model Approval {
+  id        String         @id @default(uuid())
+  caseId    String
+  case      ServiceCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  byUserId  String
+  byUser    User           @relation(fields: [byUserId], references: [id])
+  action    ApprovalAction
+  note      String?
+  createdAt DateTime       @default(now())
+}

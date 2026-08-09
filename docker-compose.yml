@@ -1,0 +1,28 @@
+version: "3.9"
+
+# Local dev infrastructure only. Managed cloud equivalents are used in
+# staging/production per Section 11.2 of the Master PRD.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: asoju
+      POSTGRES_PASSWORD: asoju
+      POSTGRES_DB: asoju
+    ports:
+      - "5432:5432"
+    volumes:
+      - asoju_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - asoju_redis_data:/data
+
+volumes:
+  asoju_postgres_data:
+  asoju_redis_data:
