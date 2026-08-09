@@ -1,0 +1,59 @@
+name: CI
+
+# Staging/production separation only means something if a build that
+# hasn't passed this can't reach either environment — this is the gate.
+# No deploy step here: that depends on whichever host gets picked
+# (Section 11.2: managed cloud, CI/CD via Git), which hasn't been chosen
+# yet. Wire a deploy job onto the end of this once it has.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: asoju
+          POSTGRES_PASSWORD: asoju
+          POSTGRES_DB: asoju_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U asoju"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: "postgresql://asoju:asoju@localhost:5432/asoju_test?schema=public"
+      JWT_ACCESS_SECRET: "ci-only-access-secret-never-used-outside-this-workflow"
+      JWT_REFRESH_SECRET: "ci-only-refresh-secret-never-used-outside-this-workflow"
+      AUTH_THROTTLE_LIMIT: "1000"
+      AUTH_THROTTLE_TTL_MS: "60000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run prisma:deploy --workspace=backend
+      - name: Unit tests (AI safety, config validation)
+        run: npm run test --workspace=backend
+      - name: E2E tests (authorization, privileged auth, health) — real Postgres, no mocks
+        run: npm run test:e2e --workspace=backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace=frontend

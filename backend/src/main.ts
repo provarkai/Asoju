@@ -2,8 +2,14 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { validateProductionEnv } from './config/validate-production-env';
 
 async function bootstrap() {
+  // Staging/production separation — crash loudly at startup rather than
+  // run silently insecure on a dev-shaped config (see the file for what
+  // this actually checks).
+  validateProductionEnv();
+
   // rawBody: true preserves the exact request bytes on `request.rawBody`
   // alongside normal JSON parsing — PaystackWebhookGuard needs those exact
   // bytes to verify the HMAC signature; a re-serialized parsed body would

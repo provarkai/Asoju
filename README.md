@@ -234,9 +234,32 @@ missing vendor account:
   Paystack/WhatsApp/Anthropic — so this needed no new external account to build or test.
 
 What that review flagged as needing a live external account, hosting/infra decisions, or a written SOP
-— live WhatsApp verification, staging/production separation, secrets management, backup/restore
-testing, a penetration test, and the operational runbooks themselves — is unchanged: still open, and
-out of this repo's reach either way.
+— live WhatsApp verification, secrets management, backup/restore testing, a penetration test, and the
+operational runbooks themselves — is unchanged: still open, and out of this repo's reach either way.
+
+Staging/production separation was next, and — like object storage — turned out to have a real code
+component underneath the infra decision:
+
+- **Three distinct env templates, not one.** `.env.example` (development) is joined by
+  `.env.staging.example` and `.env.production.example` at the repo root. All three set every var this
+  app reads; what differs is which values go in, and each file says explicitly what must never be
+  shared with another environment (database, secrets, external accounts, domain).
+- **Fail-fast startup validation** (`backend/src/config/validate-production-env.ts`) — refuses to boot
+  with `NODE_ENV=production` if `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET`/`WHATSAPP_WEBHOOK_SECRET` are
+  missing, too short, or still equal to the checked-in dev defaults; if `DATABASE_URL` is unset; or if
+  `CORS_ORIGIN` is unset (which otherwise silently falls back to allowing every origin). Collects every
+  problem into one error instead of failing on the first. Covered by 9 unit tests, and manually smoke-
+  tested both ways: it refuses to boot on an unedited `.env.example` under `NODE_ENV=production`, and
+  boots cleanly once every value is actually filled in.
+- **`GET /health` and `GET /health/ready`** — every managed host needs something to poll; there was
+  nothing here to poll before. Liveness (`/health`) just confirms the process is up; readiness
+  (`/health/ready`) actually queries the database, so a host can stop routing traffic to an instance
+  that's up but can't reach Postgres. Unauthenticated and exempt from the brute-force throttle, since a
+  host's probe carries no session.
+- **CI** (`.github/workflows/ci.yml`) — runs the full backend suite (unit + e2e, against a real
+  Postgres service container) and the frontend build on every push/PR. There was no CI at all before
+  this; a broken build could previously only be caught by running the suites locally. No deploy step
+  yet — that depends on whichever host gets chosen, which this repo doesn't decide for you.
 
 ## Running locally
 
