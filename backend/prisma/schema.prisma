@@ -516,9 +516,13 @@ model Assignment {
   status       AssignmentStatus @default(OFFERED)
   scheduledFor DateTime?
   acceptedAt   DateTime?
-  completedAt  DateTime?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  /// Section 5.4 Field Agent App workflow: Accept -> Navigate -> Check-in
+  /// (timestamp + location) -> Execute checklist -> ...
+  checkInAt       DateTime?
+  checkInLocation Json?
+  completedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   @@index([caseId])
 }

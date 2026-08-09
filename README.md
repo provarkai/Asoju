@@ -69,11 +69,24 @@ evidence/report viewers, and approval actions.
   activate/deactivate.
 - Login redirects staff straight to `/ops`; customers to `/dashboard`.
 
-Everything else in the PRD (Field Agent App UI, Provider Portal UI, WhatsApp integration, a real
-payment-provider integration, etc.) is scoped but not yet built — the backend APIs for agent/provider
-self-service actions exist (see route list below) but have no dedicated frontend yet; staff currently
-perform those steps for them via the Ops Console or the API directly. See the PRD's phased roadmap
-(Section 11.4) and feature priorities (Section 12) for what comes next.
+**Field Agent App** (Section 5.4), at `/field`, for field agents and providers:
+- **Job list** ("today's assignments") — every case they're assigned to, with their own
+  accept/decline/check-in status shown inline.
+- **Job card** — instructions, location, and the case's standard checklist (Section 6.1 — a
+  per-service-type template of required steps, auto-seeded onto every case the moment it's created:
+  Property Inspection, Construction Supervision, and Asset Inspection each get their own).
+- **Workflow**: Accept → Check-in (server-timestamped, with GPS if the browser grants it) → tick off
+  checklist items → capture evidence → **Submit fieldwork** (→ `EVIDENCE_SUBMITTED`) → **Escalate an
+  exception** at any point, which flags the case (`CaseRiskFlag`) for staff without blocking or
+  silently advancing it (Non-Negotiable #7 — never hide an unresolved issue).
+- Login redirects agents/providers straight to `/field`.
+- Offline support (local queue for checklist/evidence capture, auto-sync on reconnect) is explicitly
+  P1 in the PRD and not built — a poor-connectivity agent can currently lose an in-progress action.
+
+Every actor in the golden path now has a working UI. What's left from the PRD — WhatsApp integration,
+a real payment-provider integration in place of the webhook stand-in, offline support, recurring
+service scheduling, and the platform-expansion features in Section 12 P1/P2 — is scoped but not built.
+See the PRD's phased roadmap (Section 11.4) and feature priorities (Section 12) for what comes next.
 
 ## Running locally
 
@@ -120,11 +133,5 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   (`npm run seed --workspace=backend` once you've written a seed script, or a one-off script like the
   ones used during development). Every subsequent agent/provider account can then be onboarded through
   `/ops/agents` and `/ops/providers`.
-
-### Agent/provider-facing API routes (no dedicated frontend yet — Field Agent App / Provider Portal)
-
-| Route | Who | What |
-|---|---|---|
-| `POST /api/assignments/:id/accept` \| `/decline` | Agent/Provider | Respond to an assignment |
-| `POST /api/cases/:caseId/evidence` | Agent/Provider | Submit evidence |
-| `POST /api/cases/:caseId/evidence/complete` | Agent/Provider | Mark fieldwork done |
+- A case's checklist is fixed at creation time from `backend/src/cases/checklist-templates.ts` — there's
+  no UI yet to customize a checklist per case, only per service type.

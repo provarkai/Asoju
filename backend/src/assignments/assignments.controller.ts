@@ -7,6 +7,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { AssignmentsService } from './assignments.service';
 import { CreateAssignmentDto } from './dto/create-assignment.dto';
+import { CheckInDto } from './dto/check-in.dto';
 
 const STAFF_ASSIGN_ROLES = [Role.CASE_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
 
@@ -36,5 +37,11 @@ export class AssignmentsController {
   @Post('assignments/:id/decline')
   declineAssignment(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.assignmentsService.declineAssignment(user, id);
+  }
+
+  @Roles(Role.FIELD_AGENT, Role.PROVIDER)
+  @Post('assignments/:id/check-in')
+  checkIn(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: CheckInDto) {
+    return this.assignmentsService.checkIn(user, id, dto.location);
   }
 }

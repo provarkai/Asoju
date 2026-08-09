@@ -11,7 +11,11 @@ export const OPS_ROLES = [
 
 export const ADMIN_ROLES = ['ADMIN', 'SUPER_ADMIN'];
 
+// Section 5.4 — Field Agent App / Provider Portal (shared workflow for MVP).
+export const FIELD_ROLES = ['FIELD_AGENT', 'PROVIDER'];
+
 export function landingPathForRole(role: string): string {
   if (OPS_ROLES.includes(role)) return '/ops';
+  if (FIELD_ROLES.includes(role)) return '/field';
   return '/dashboard';
 }

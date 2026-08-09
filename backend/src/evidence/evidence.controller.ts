@@ -8,6 +8,7 @@ import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-use
 import { EvidenceService } from './evidence.service';
 import { CreateEvidenceDto } from './dto/create-evidence.dto';
 import { PerformQcDto } from './dto/perform-qc.dto';
+import { RaiseExceptionDto } from './dto/raise-exception.dto';
 
 const FIELD_ROLES = [Role.FIELD_AGENT, Role.PROVIDER];
 const QC_ROLES = [Role.QUALITY_CONTROL, Role.ADMIN, Role.SUPER_ADMIN];
@@ -31,6 +32,26 @@ export class EvidenceController {
   @Post('evidence/complete')
   completeFieldwork(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string) {
     return this.evidenceService.completeFieldwork(user, caseId);
+  }
+
+  @Roles(...FIELD_ROLES)
+  @Post('tasks/:taskId/complete')
+  completeTask(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.evidenceService.completeTask(user, caseId, taskId);
+  }
+
+  @Roles(...FIELD_ROLES)
+  @Post('exceptions')
+  raiseException(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Body() dto: RaiseExceptionDto,
+  ) {
+    return this.evidenceService.raiseException(user, caseId, dto.label, dto.detail);
   }
 
   @Roles(...QC_ROLES)

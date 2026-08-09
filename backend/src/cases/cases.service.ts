@@ -6,6 +6,7 @@ import { AuditService } from '../audit/audit.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { ConvertRequestDto } from './dto/convert-request.dto';
 import { assertValidTransition } from './case-state-machine';
+import { CHECKLIST_TEMPLATES } from './checklist-templates';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
@@ -102,6 +103,14 @@ export class CasesService {
       data: { caseNumber },
     });
 
+    // Section 6.1 — every service gets its own version of the standard
+    // field checklist, seeded onto the case the moment it exists so the
+    // Field Agent App always has one to execute against.
+    const checklist = CHECKLIST_TEMPLATES[dto.serviceType];
+    await this.prisma.caseTask.createMany({
+      data: checklist.map((label, index) => ({ caseId: serviceCase.id, label, sortOrder: index })),
+    });
+
     await this.prisma.caseStatusHistory.create({
       data: { caseId: serviceCase.id, toStatus: CaseStatus.DRAFT, changedById: actor.id },
     });
@@ -166,14 +175,15 @@ export class CasesService {
     }
 
     if (user.role === Role.FIELD_AGENT || user.role === Role.PROVIDER) {
+      // Section 5.4 Field Agent App "job list" — include just this
+      // person's own assignment(s) on each case so the UI has the
+      // assignment id/status without a second round trip per case.
+      const ownAssignmentFilter = {
+        OR: [{ agent: { userId: user.id } }, { provider: { userId: user.id } }],
+      };
       return this.prisma.serviceCase.findMany({
-        where: {
-          assignments: {
-            some: {
-              OR: [{ agent: { userId: user.id } }, { provider: { userId: user.id } }],
-            },
-          },
-        },
+        where: { assignments: { some: ownAssignmentFilter } },
+        include: { assignments: { where: ownAssignmentFilter } },
         orderBy: { updatedAt: 'desc' },
       });
     }
@@ -201,6 +211,7 @@ export class CasesService {
       where: { id: caseId },
       include: {
         customer: { select: { fullName: true, userId: true } },
+        tasks: { orderBy: { sortOrder: 'asc' } },
         statusHistory: { orderBy: { createdAt: 'asc' } },
         riskFlags: true,
         incidents: true,

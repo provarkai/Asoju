@@ -61,15 +61,7 @@ export class AssignmentsService {
    * kicks off execution (Assigned -> In Progress).
    */
   async acceptAssignment(actor: AuthenticatedUser, assignmentId: string) {
-    const assignment = await this.prisma.assignment.findUnique({
-      where: { id: assignmentId },
-      include: { agent: true, provider: true, case: true },
-    });
-    if (!assignment) throw new NotFoundException('Assignment not found');
-
-    const ownsAssignment =
-      assignment.agent?.userId === actor.id || assignment.provider?.userId === actor.id;
-    if (!ownsAssignment) throw new ForbiddenException('Not your assignment');
+    const assignment = await this.requireOwnedAssignment(actor, assignmentId);
 
     if (assignment.status !== AssignmentStatus.OFFERED) {
       throw new BadRequestException(`Assignment already ${assignment.status.toLowerCase()}`);
@@ -97,15 +89,7 @@ export class AssignmentsService {
 
   /** Lets the assignee decline so staff can reassign rather than the case stalling. */
   async declineAssignment(actor: AuthenticatedUser, assignmentId: string) {
-    const assignment = await this.prisma.assignment.findUnique({
-      where: { id: assignmentId },
-      include: { agent: true, provider: true, case: true },
-    });
-    if (!assignment) throw new NotFoundException('Assignment not found');
-
-    const ownsAssignment =
-      assignment.agent?.userId === actor.id || assignment.provider?.userId === actor.id;
-    if (!ownsAssignment) throw new ForbiddenException('Not your assignment');
+    const assignment = await this.requireOwnedAssignment(actor, assignmentId);
 
     const updated = await this.prisma.assignment.update({
       where: { id: assignmentId },
@@ -125,5 +109,48 @@ export class AssignmentsService {
     });
 
     return updated;
+  }
+
+  /**
+   * Section 5.4 Field Agent App workflow: Accept -> Navigate -> Check-in
+   * (timestamp + location) -> Execute checklist. Timestamp is always
+   * server-side (consistent with Section 8.4's evidence rule) — location
+   * is whatever the client can provide (GPS coords, or a plain address
+   * string if geolocation isn't available).
+   */
+  async checkIn(actor: AuthenticatedUser, assignmentId: string, location?: Record<string, unknown>) {
+    const assignment = await this.requireOwnedAssignment(actor, assignmentId);
+    if (assignment.status !== AssignmentStatus.ACCEPTED) {
+      throw new BadRequestException('Must accept the assignment before checking in');
+    }
+
+    const updated = await this.prisma.assignment.update({
+      where: { id: assignmentId },
+      data: { checkInAt: new Date(), checkInLocation: location as any },
+    });
+
+    await this.audit.record({
+      caseId: assignment.caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'assignment.checked_in',
+      metadata: { assignmentId, location },
+    });
+
+    return updated;
+  }
+
+  private async requireOwnedAssignment(actor: AuthenticatedUser, assignmentId: string) {
+    const assignment = await this.prisma.assignment.findUnique({
+      where: { id: assignmentId },
+      include: { agent: true, provider: true, case: true },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+
+    const ownsAssignment =
+      assignment.agent?.userId === actor.id || assignment.provider?.userId === actor.id;
+    if (!ownsAssignment) throw new ForbiddenException('Not your assignment');
+
+    return assignment;
   }
 }

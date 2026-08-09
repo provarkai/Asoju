@@ -3,7 +3,13 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { clearSession, getSessionUser, SessionUser } from '@/lib/api';
-import { landingPathForRole, OPS_ROLES } from '@/lib/roles';
+import { FIELD_ROLES, landingPathForRole, OPS_ROLES } from '@/lib/roles';
+
+function navLabel(role: string): string {
+  if (OPS_ROLES.includes(role)) return 'Ops Console';
+  if (FIELD_ROLES.includes(role)) return 'My jobs';
+  return 'My cases';
+}
 
 export function SiteHeader() {
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -22,9 +28,7 @@ export function SiteHeader() {
         <nav className="nav">
           {user ? (
             <>
-              <Link href={landingPathForRole(user.role)}>
-                {OPS_ROLES.includes(user.role) ? 'Ops Console' : 'My cases'}
-              </Link>
+              <Link href={landingPathForRole(user.role)}>{navLabel(user.role)}</Link>
               <button
                 className="btn btn--ghost"
                 onClick={() => {

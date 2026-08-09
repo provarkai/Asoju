@@ -62,6 +62,53 @@ export class EvidenceService {
     return evidence;
   }
 
+  /** Section 5.4 Field Agent App — "Execute checklist" step (Section 6.1). */
+  async completeTask(actor: AuthenticatedUser, caseId: string, taskId: string) {
+    const task = await this.prisma.caseTask.findUnique({ where: { id: taskId } });
+    if (!task || task.caseId !== caseId) throw new NotFoundException('Checklist item not found on this case');
+
+    const updated = await this.prisma.caseTask.update({
+      where: { id: taskId },
+      data: { isComplete: true, completedAt: new Date() },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case_task.completed',
+      metadata: { taskId, label: task.label },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Section 5.4 Field Agent App — "Escalate exceptions". Distinct from QC's
+   * escalate outcome: this is the agent flagging something *during*
+   * fieldwork, before QC ever sees the case. Never hides the issue
+   * (Non-Negotiable #7) but never blocks the agent from continuing either —
+   * staff triage the flag separately.
+   */
+  async raiseException(actor: AuthenticatedUser, caseId: string, label: string, detail?: string) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+
+    const flag = await this.prisma.caseRiskFlag.create({
+      data: { caseId, label, detail, raisedById: actor.id },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.exception_raised',
+      metadata: { label, detail },
+    });
+
+    return flag;
+  }
+
   /** Vertical slice 5: Field Execution -> Evidence complete. */
   async completeFieldwork(actor: AuthenticatedUser, caseId: string) {
     const evidenceCount = await this.prisma.evidence.count({ where: { caseId } });
