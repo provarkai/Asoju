@@ -34,11 +34,19 @@ enum Role {
   SUPER_ADMIN
 }
 
-/// Section 6 — MVP Service Catalogue (the only three services active at launch).
+/// Section 6 — MVP Service Catalogue (the three services active at launch),
+/// extended per Section 12 P2 "diaspora operations layer" expansion — new
+/// case-shaped service categories using the same engine, not new
+/// marketplaces (Section 11.2 explicitly rules those out).
 enum ServiceType {
   PROPERTY_INSPECTION
   CONSTRUCTION_SUPERVISION
   ASSET_INSPECTION
+  FAMILY_SUPPORT
+  PROCUREMENT
+  BUSINESS_VERIFICATION
+  INVESTMENT_SUPPORT
+  AGRICULTURE_SUPPORT
 }
 
 enum CaseTier {
@@ -305,12 +313,23 @@ model Beneficiary {
   serviceCases ServiceCase[]
 }
 
-/// Optional grouping for family/organisation use.
+/// Section 12 P2 "corporate accounts" / "family management dashboard" —
+/// groups several Customer records under one shared, read-only umbrella
+/// (a household or a company) without merging their individual case
+/// ownership or access. Deliberately not a billing/consolidation engine
+/// (Section 11.2 rules out a "complex subscription ecosystem") — just
+/// shared visibility over who's-doing-what across the group.
 model Account {
-  id        String     @id @default(uuid())
+  id        String      @id @default(uuid())
   name      String
-  createdAt DateTime   @default(now())
+  type      AccountType @default(FAMILY)
+  createdAt DateTime    @default(now())
   customers Customer[]
+}
+
+enum AccountType {
+  FAMILY
+  CORPORATE
 }
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ interface CaseQueueRow {
   priority: string;
   location: string;
   paymentStatus: string;
+  customerId: string;
   customer: { fullName: string };
   assignments: AssignmentSummary[];
   _count: { riskFlags: number; incidents: number };
@@ -160,7 +161,8 @@ export default function OpsQueuePage() {
                       <strong>{c.caseNumber}</strong>
                     </Link>
                     <span className="muted">
-                      {c.customer.fullName} · {humanServiceType(c.serviceType)} · {c.location}
+                      <Link href={`/ops/customers/${c.customerId}`}>{c.customer.fullName}</Link>
+                      {' '}· {humanServiceType(c.serviceType)} · {c.location}
                     </span>
                     {assignee && (
                       <span className="muted">

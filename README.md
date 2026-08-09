@@ -125,12 +125,31 @@ now built and verified end-to-end** (except the one item that genuinely needs ex
   against, so the piece that actually talks to WhatsApp has only been verified up to the point where it
   would call a real provider. See "WhatsApp integration" in Notes below before treating this as
   production-ready.
+- **Customer service history** — the one Section 12 P1 item ("customer service history") that had
+  no dedicated view until now: `GET /customers/:customerId/history` gives any ops role a customer's
+  whole relationship with ASOJU in one place (all cases, total paid, average rating), surfaced at
+  `/ops/customers/:id` and linked from the queue, the Concierge directory, and account pages.
+
+With every Section 12 P1 item now genuinely built, the platform moved into **Section 12 P2** —
+deliberately the minimal, real slice of it, not the "full marketplace" versions Section 11.2 explicitly
+rules out:
+
+- **Expanded service catalogue** — the three MVP services are joined by five more `ServiceType`
+  categories (Family Support, Procurement, Business Verification, Investment Support, Agriculture
+  Support) straight from the PRD's "diaspora operations layer" language, each with its own Section 6.1
+  standard checklist. Same case engine, same QC/evidence/report pipeline — no new marketplace, no new
+  workflow to build or maintain.
+- **Corporate/family accounts** — the `Account` model has existed in the schema since Section 3 and was
+  never wired up; it now groups several customers under one household or company. Admin manages
+  accounts and membership from `/ops/accounts`; a member sees a **read-only** roster of who else shares
+  the account and what's being handled for each from `/profile` — deliberately a visibility layer, not
+  a shared-access one: opening a case someone else in the account owns still requires being that case's
+  customer or an assigned collaborator (Non-Negotiable #6 is untouched by this feature).
 
 What's left from the PRD — a real payment-provider integration in place of the webhook stand-in, Field
-Agent App offline support, and all of Section 12 P2 (family support, procurement, business
-verification, investment/agriculture support, full subscription billing, corporate accounts, partner
-portal) — is scoped but not built. See the PRD's phased roadmap (Section 11.4) and feature priorities
-(Section 12) for what comes next.
+Agent App offline support, and the rest of Section 12 P2 (a full subscription/billing engine, an
+advanced risk engine, a personal AI assistant, and a partner portal) — is scoped but not built. See the
+PRD's phased roadmap (Section 11.4) and feature priorities (Section 12) for what comes next.
 
 ## Running locally
 

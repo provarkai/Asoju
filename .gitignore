@@ -28,3 +28,4 @@ backend/prisma/migrations/dev.db
 
 # Testing
 coverage/
+*.tsbuildinfo

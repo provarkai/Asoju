@@ -25,6 +25,11 @@ const SERVICE_TYPE_LABELS: Record<string, string> = {
   PROPERTY_INSPECTION: 'Property Inspection & Verification',
   CONSTRUCTION_SUPERVISION: 'Construction / Project Supervision',
   ASSET_INSPECTION: 'Asset / Project Inspection',
+  FAMILY_SUPPORT: 'Family Support',
+  PROCUREMENT: 'Procurement',
+  BUSINESS_VERIFICATION: 'Business Verification',
+  INVESTMENT_SUPPORT: 'Investment Support',
+  AGRICULTURE_SUPPORT: 'Agriculture Support',
 };
 
 const APPROVAL_ACTION_LABELS: Record<string, string> = {

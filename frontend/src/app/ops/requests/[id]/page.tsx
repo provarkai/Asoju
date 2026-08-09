@@ -19,7 +19,16 @@ interface Beneficiary { id: string; fullName: string }
 interface Property { id: string; address: string }
 interface Asset { id: string; assetType: string }
 
-const SERVICE_TYPES = ['PROPERTY_INSPECTION', 'CONSTRUCTION_SUPERVISION', 'ASSET_INSPECTION'];
+const SERVICE_TYPES = [
+  'PROPERTY_INSPECTION',
+  'CONSTRUCTION_SUPERVISION',
+  'ASSET_INSPECTION',
+  'FAMILY_SUPPORT',
+  'PROCUREMENT',
+  'BUSINESS_VERIFICATION',
+  'INVESTMENT_SUPPORT',
+  'AGRICULTURE_SUPPORT',
+];
 
 export default function ConvertRequestPage() {
   const { ready } = useOpsGuard();

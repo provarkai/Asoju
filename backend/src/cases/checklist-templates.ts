@@ -39,4 +39,53 @@ export const CHECKLIST_TEMPLATES: Record<ServiceType, string[]> = {
     'Identify exceptions',
     'Complete inspection submission',
   ],
+
+  // -- Section 12 P2 service categories -----------------------------------
+  // Same standard-checklist pattern (Section 6.1), generalized from each
+  // category's one-line scope in Section 1/12 rather than a full new
+  // playbook — the platform-expansion services this repo does not (yet)
+  // have a dedicated Section 6 write-up for.
+  [ServiceType.FAMILY_SUPPORT]: [
+    'Confirm beneficiary details and location',
+    'Make contact / confirm welfare',
+    'Photograph relevant documentation',
+    'Record observations',
+    'Identify exceptions',
+    'Complete visit submission',
+  ],
+  [ServiceType.PROCUREMENT]: [
+    'Confirm item specification and budget',
+    'Source and compare at least two quotes',
+    'Photograph the item(s) before purchase',
+    'Complete purchase and collect receipt',
+    'Photograph item(s) and receipt after purchase',
+    'Arrange delivery / handoff',
+    'Identify exceptions',
+    'Complete procurement submission',
+  ],
+  [ServiceType.BUSINESS_VERIFICATION]: [
+    'Confirm business name and registered address',
+    'Photograph business premises',
+    'Collect CAC / registration documents',
+    'Record observations on business activity',
+    'Identify exceptions',
+    'Complete verification submission',
+  ],
+  [ServiceType.INVESTMENT_SUPPORT]: [
+    'Confirm investment site / instrument details',
+    'Photograph site or supporting documents',
+    'Record observations',
+    'Collect available documents',
+    'Identify exceptions',
+    'Complete review submission',
+  ],
+  [ServiceType.AGRICULTURE_SUPPORT]: [
+    'Confirm farm / site location',
+    'Photograph the farm (all sections)',
+    'Capture site video',
+    'Record crop/livestock condition observations',
+    'Collect available documents',
+    'Identify exceptions',
+    'Complete inspection submission',
+  ],
 };

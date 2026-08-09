@@ -157,4 +157,65 @@ export class ProfileService {
   async listAssetsForCustomer(customerId: string) {
     return this.prisma.asset.findMany({ where: { customerId }, orderBy: { createdAt: 'desc' } });
   }
+
+  /// Section 12 P1 "customer service history" — the one item from that list
+  /// that had no dedicated view: a staff member talking to a customer
+  /// (or preparing to) needs their whole relationship with ASOJU in one
+  /// place, not just the cases currently open in the queue.
+  async getCustomerHistory(customerId: string) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      include: { user: { select: { email: true, phone: true } } },
+    });
+    if (!customer) throw new NotFoundException('Customer not found');
+
+    const cases = await this.prisma.serviceCase.findMany({
+      where: { customerId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        invoices: { include: { payments: true } },
+        rating: { select: { stars: true, comment: true } },
+      },
+    });
+
+    const caseSummaries = cases.map((c) => {
+      const paidAmount = c.invoices
+        .flatMap((invoice) => invoice.payments)
+        .filter((payment) => payment.status === 'PAID')
+        .reduce((sum, payment) => sum + Number(payment.amount), 0);
+      return {
+        id: c.id,
+        caseNumber: c.caseNumber,
+        serviceType: c.serviceType,
+        status: c.status,
+        tier: c.tier,
+        createdAt: c.createdAt,
+        paidAmount,
+        rating: c.rating,
+      };
+    });
+
+    const completedCases = caseSummaries.filter((c) => c.status === 'COMPLETED' || c.status === 'CLOSED').length;
+    const totalPaid = caseSummaries.reduce((sum, c) => sum + c.paidAmount, 0);
+    const stars = caseSummaries.map((c) => c.rating?.stars).filter((s): s is number => typeof s === 'number');
+    const averageRating = stars.length ? stars.reduce((a, b) => a + b, 0) / stars.length : null;
+
+    return {
+      customer: {
+        id: customer.id,
+        fullName: customer.fullName,
+        email: customer.user.email,
+        phone: customer.user.phone,
+        customerSince: customer.createdAt,
+        referralCode: customer.referralCode,
+      },
+      stats: {
+        totalCases: caseSummaries.length,
+        completedCases,
+        totalPaid,
+        averageRating,
+      },
+      cases: caseSummaries,
+    };
+  }
 }

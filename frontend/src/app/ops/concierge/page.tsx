@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useOpsGuard } from '@/lib/useOpsGuard';
@@ -74,7 +75,9 @@ export default function OpsConciergePage() {
                 const sub = c.subscriptions[0];
                 return (
                   <tr key={c.id} style={{ borderBottom: '1px solid var(--asoju-border)' }}>
-                    <td style={{ padding: '0.4rem' }}>{c.fullName} <span className="muted">({c.user.email})</span></td>
+                    <td style={{ padding: '0.4rem' }}>
+                      <Link href={`/ops/customers/${c.id}`}>{c.fullName}</Link> <span className="muted">({c.user.email})</span>
+                    </td>
                     <td style={{ padding: '0.4rem' }}>
                       {sub ? <span className="badge">{sub.tier} · {sub.status.toLowerCase()}</span> : <span className="muted">Essential</span>}
                     </td>

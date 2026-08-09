@@ -21,6 +21,7 @@ import { ConciergeModule } from './concierge/concierge.module';
 import { RecurringModule } from './recurring/recurring.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { AccountsModule } from './accounts/accounts.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
     RecurringModule,
     AnalyticsModule,
     WhatsappModule,
+    AccountsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

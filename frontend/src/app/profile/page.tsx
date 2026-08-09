@@ -3,12 +3,16 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useAuthGuard } from '@/lib/useAuthGuard';
+import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
 
 interface Beneficiary { id: string; fullName: string; relationship: string | null; phone: string | null }
 interface Property { id: string; address: string; city: string | null; state: string | null }
 interface Asset { id: string; assetType: string; description: string | null; location: string | null }
 interface ReferralSummary { code: string; referredCount: number }
 interface SubscriptionSummary { status: string; tier: string; startedAt: string }
+interface AccountCaseSummary { id: string; caseNumber: string; serviceType: string; status: string; createdAt: string }
+interface AccountMember { id: string; fullName: string; email: string | null; cases: AccountCaseSummary[] }
+interface MyAccount { account: { id: string; name: string; type: string }; members: AccountMember[] }
 
 // Section 5.1 P1 — "saved properties/assets, multiple beneficiaries".
 export default function ProfilePage() {
@@ -18,6 +22,7 @@ export default function ProfilePage() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [referral, setReferral] = useState<ReferralSummary | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
+  const [myAccount, setMyAccount] = useState<MyAccount | null>(null);
   const [subscribing, setSubscribing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +42,7 @@ export default function ProfilePage() {
     apiFetch<Asset[]>('/me/assets').then(setAssets).catch((e) => setError(e.message));
     apiFetch<ReferralSummary>('/me/referral').then(setReferral).catch((e) => setError(e.message));
     apiFetch<SubscriptionSummary | null>('/me/subscription').then(setSubscription).catch((e) => setError(e.message));
+    apiFetch<MyAccount | null>('/me/account').then(setMyAccount).catch((e) => setError(e.message));
     apiFetch<{ preferredChannel: string | null }>('/me/preferences')
       .then((p) => setPreferredChannel(p.preferredChannel ?? 'whatsapp'))
       .catch((e) => setError(e.message));
@@ -192,6 +198,31 @@ export default function ProfilePage() {
               {copied ? 'Link copied!' : 'Copy invite link'}
             </button>
           </div>
+        </div>
+      )}
+
+      {myAccount && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>{myAccount.account.name}</h2>
+          <p className="muted">
+            {myAccount.account.type === 'CORPORATE' ? 'Corporate account' : 'Family account'} —
+            what&apos;s being handled for everyone sharing this account. Opening a case still
+            requires being that case&apos;s own customer or an assigned collaborator.
+          </p>
+          {myAccount.members.map((member) => (
+            <div key={member.id} style={{ marginTop: '0.75rem' }}>
+              <strong>{member.fullName}</strong>{' '}
+              <span className="muted">{member.cases.length} case{member.cases.length === 1 ? '' : 's'}</span>
+              {member.cases.map((c) => (
+                <div key={c.id} className="case-row">
+                  <span className="muted">
+                    {c.caseNumber} · {humanServiceType(c.serviceType)}
+                  </span>
+                  <span className="badge">{humanCaseStatus(c.status)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       )}
 
