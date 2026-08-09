@@ -36,9 +36,11 @@ end-to-end against a real Postgres instance:
 **Case → Quote → Payment**
 - Staff issue a `Quote` on a case under review (`UNDER_REVIEW` → `QUOTED`); the customer accepts it,
   creating an `Invoice` (→ `AWAITING_PAYMENT`).
-- Payment status changes **only** via a provider-webhook endpoint guarded by a shared secret
-  (Non-Negotiable #4 — never a customer-facing screenshot) — verified webhook → `SCHEDULED`, and the
-  case-status-history correctly attributes that transition to `system`, not a fake user.
+- Payment status changes **only** via a real Paystack integration (`POST /api/invoices/:id/pay` starts
+  hosted checkout; `POST /api/payments/webhook/paystack` verifies Paystack's actual HMAC-SHA512
+  signature over the raw request body, not a shared-secret stand-in — Non-Negotiable #4, never a
+  customer-facing screenshot) → `SCHEDULED`, and the case-status-history correctly attributes that
+  transition to `system`, not a fake user. See "Payments" in Notes below for what "verified" means here.
 
 **Payment → Assignment → Field Execution**
 - Staff assign a verified field agent/provider to a `SCHEDULED` case (→ `ASSIGNED`); the assignee
@@ -80,11 +82,13 @@ evidence/report viewers, and approval actions.
   exception** at any point, which flags the case (`CaseRiskFlag`) for staff without blocking or
   silently advancing it (Non-Negotiable #7 — never hide an unresolved issue).
 - Login redirects agents/providers straight to `/field`.
-- Offline support (local queue for checklist/evidence capture, auto-sync on reconnect) is explicitly
-  P1 in the PRD and not built — a poor-connectivity agent can currently lose an in-progress action.
+- **Offline support** — checklist ticks and evidence captured without a connection queue to
+  `localStorage` and sync automatically on reconnect (`lib/offlineQueue.ts`), with a banner showing
+  what's queued. Deliberately scoped to those two actions: check-in wants a live GPS/timestamp fix, and
+  accept/decline/submit are only meaningful against the assignment's current online state.
 
 Every actor in the golden path has a working UI — that closes out the MVP. **All of Section 12 P1 is
-now built and verified end-to-end** (except the one item that genuinely needs external credentials):
+now built and verified end-to-end**:
 
 - **Saved beneficiaries/properties/assets** (Section 5.1 P1) — customers manage these from `/profile`
   ("My Nigeria"); staff triaging a request into a case (`/ops/requests/:id`) can link a customer's
@@ -130,9 +134,10 @@ now built and verified end-to-end** (except the one item that genuinely needs ex
   whole relationship with ASOJU in one place (all cases, total paid, average rating), surfaced at
   `/ops/customers/:id` and linked from the queue, the Concierge directory, and account pages.
 
-With every Section 12 P1 item now genuinely built, the platform moved into **Section 12 P2** —
-deliberately the minimal, real slice of it, not the "full marketplace" versions Section 11.2 explicitly
-rules out:
+With every Section 12 P1 item genuinely built and the two remaining PRD gaps (real payments, offline
+support) closed, the platform completed **Section 12 P2** — deliberately the minimal, real slice of it,
+not the "full marketplace" versions Section 11.2 explicitly rules out ("full family-care marketplace",
+"full procurement marketplace", "full investment marketplace", "complex subscription ecosystem"):
 
 - **Expanded service catalogue** — the three MVP services are joined by five more `ServiceType`
   categories (Family Support, Procurement, Business Verification, Investment Support, Agriculture
@@ -145,11 +150,36 @@ rules out:
   the account and what's being handled for each from `/profile` — deliberately a visibility layer, not
   a shared-access one: opening a case someone else in the account owns still requires being that case's
   customer or an assigned collaborator (Non-Negotiable #6 is untouched by this feature).
+- **Advanced risk engine** — `RiskEngineService` computes a deterministic score (never an AI judgment
+  call, the same philosophy as the Case Engine's state machine) from signals already in the database:
+  open risk flags, incident severity on this case, prior incidents on the customer's other cases, a
+  low-performing assignee, urgent priority, QC rework cycles, high case value. Runs automatically when
+  an agent raises an exception or QC escalates/reworks a case, is available on demand from the Ops case
+  page ("Recompute risk level"), and a high score auto-raises a `CaseRiskFlag` that surfaces in
+  Compliance/Risk's own queue at `/ops/risk`.
+- **Personal AI assistant** — distinct from the intake Concierge: `/ai/assistant/message` answers an
+  *existing* customer's questions about their own cases, subscription, and saved beneficiaries/
+  properties/assets, grounded only in a context block of that customer's real data — no tool-use, no
+  mutation, nothing invented. Surfaced as "Ask ASOJU" on `/dashboard`. Fails closed without
+  `ANTHROPIC_API_KEY`, exactly like the intake Concierge.
+- **Bounded subscription billing engine** — Section 11.2 explicitly rules out a "complex subscription
+  ecosystem", so this is the real, minimal slice: `SubscriptionBillingService` bills each Concierge
+  subscription's flat recurring amount every 30 days through the same Paystack integration as case
+  payments, generates a `SubscriptionInvoice` per period, and lapses the subscription if the previous
+  period's invoice never got paid rather than letting debt pile up. A daily cron runs the sweep;
+  `POST /api/admin/subscriptions/run-billing` triggers it on demand. Billing history shows on `/profile`.
+- **Partner portal** — an external referral organisation (a diaspora association, a Nigerian business,
+  an individual agent — Section 1's "distribution/partnership channels"), attributed at registration via
+  `/register?partner=CODE` alongside the existing peer-to-peer referral code. Admin manages partners
+  from `/ops/partners`; a `PARTNER`-role login (provisioned the same non-self-service way as every other
+  staff/field role) gets a read-only dashboard at `/partner` of who they've referred and what's
+  happening for each — no financials, the same discipline as the corporate/family Account member view.
 
-What's left from the PRD — a real payment-provider integration in place of the webhook stand-in, Field
-Agent App offline support, and the rest of Section 12 P2 (a full subscription/billing engine, an
-advanced risk engine, a personal AI assistant, and a partner portal) — is scoped but not built. See the
-PRD's phased roadmap (Section 11.4) and feature priorities (Section 12) for what comes next.
+What's left from the PRD is everything the spec itself defers past P2: Section 12 P3
+(white-label, public APIs, multi-country support, marketplace, SaaS billing, partner ecosystem,
+predictive analytics) and the infrastructure Section 11.2 explicitly says not to build in-house
+(escrow, proprietary wallet, native mobile apps). See the PRD's phased roadmap (Section 11.4) for the
+scale-up gates beyond that.
 
 ## Running locally
 
@@ -181,13 +211,25 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
 
 ### Notes
 
-- Staff/agent/provider accounts are not self-service — `POST /api/auth/register` only creates
-  `CUSTOMER` accounts (Section 5.1 progressive-disclosure onboarding). Provision staff directly via
-  Prisma/psql until the Admin Console (Section 5.7) exists.
-- The AI Concierge endpoint (`POST /api/ai/concierge/message`) requires `ANTHROPIC_API_KEY` to be set;
-  without it, it fails closed rather than silently degrading.
-- The payment webhook (`POST /api/payments/webhook`) requires an `x-webhook-secret` header matching
-  `PAYMENT_WEBHOOK_SECRET` — a stand-in for real Paystack/Flutterwave signature verification.
+- Staff/agent/provider/partner accounts are not self-service — `POST /api/auth/register` only creates
+  `CUSTOMER` accounts (Section 5.1 progressive-disclosure onboarding). Provision staff, a `PARTNER`-role
+  login, or a `PartnerContact` link directly via Prisma/psql until the Admin Console (Section 5.7)
+  exists.
+- The AI Concierge endpoint (`POST /api/ai/concierge/message`) and the personal assistant
+  (`POST /api/ai/assistant/message`) both require `ANTHROPIC_API_KEY` to be set; without it, they fail
+  closed rather than silently degrading.
+- **Payments (Paystack)**: set `PAYSTACK_SECRET_KEY` to enable real hosted-checkout initialization
+  (`POST /api/invoices/:id/pay`, `POST /api/admin/subscriptions/run-billing`) and real webhook signature
+  verification (`POST /api/payments/webhook/paystack`, see `PaystackWebhookGuard`) — the guard verifies
+  Paystack's actual HMAC-SHA512 scheme over the raw request body (`app.rawBody`), not a shared secret.
+  Leave it unset to run checkout initialization in dry-run mode (logs, returns a placeholder URL, charges
+  nothing — see `PaystackService`); the webhook fails closed (rejects everything) without a key
+  configured, the same pattern as the AI Concierge. This has been verified two ways: dry-run
+  initialization end-to-end, and the webhook's signature verification against a hand-crafted,
+  correctly-signed payload (wrong signature → 401, amount mismatch → 400, correct signature → payment
+  marked PAID and case transitions) — neither this repo nor its test scripts have a real Paystack
+  account, so the outbound "call Paystack's live API" leg specifically is unverified, same caveat as
+  WhatsApp below.
 - A staff member needs to be an explicit `CaseCollaborator` on a case to act on it or view full detail
   (not just hold the right role) — triaging a request auto-attaches the triaging staff member;
   `POST /api/cases/:caseId/claim` self-attaches (used by the Ops Console); `.../collaborators`

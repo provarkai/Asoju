@@ -32,6 +32,10 @@ enum Role {
   COMPLIANCE_RISK
   ADMIN
   SUPER_ADMIN
+  /// Section 12 P2 "partner portal" — an external referral partner's own
+  /// login, distinct from staff and from the field workforce. Provisioned
+  /// the same non-self-service way as every other internal role.
+  PARTNER
 }
 
 /// Section 6 — MVP Service Catalogue (the three services active at launch),
@@ -245,6 +249,7 @@ model User {
   ratings           Rating[]
   rmPortfolio       Customer[]         @relation("CustomerRm")
   whatsAppThread    WhatsAppThread?
+  partnerContact    PartnerContact?
 
   @@index([role])
 }
@@ -282,6 +287,12 @@ model Customer {
   referredByCustomerId String?
   referredByCustomer   Customer?  @relation("Referrals", fields: [referredByCustomerId], references: [id])
   referredCustomers    Customer[] @relation("Referrals")
+
+  /// Section 12 P2 "partner portal" — organisation-level referral,
+  /// alongside (not instead of) the peer-to-peer referral above. Set at
+  /// registration from a partner code, e.g. /register?partner=CODE.
+  referredByPartnerId String?
+  referredByPartner   Partner? @relation(fields: [referredByPartnerId], references: [id])
 
   /// Section 12 P1 "Concierge workflow" — a Relationship Manager owns a
   /// portfolio of Concierge-tier customers (Section 4). Portfolio-level,
@@ -330,6 +341,45 @@ model Account {
 enum AccountType {
   FAMILY
   CORPORATE
+}
+
+/// Section 12 P2 "partner portal" — an external organisation (a diaspora
+/// association, a Nigerian business, an individual agent — Section 1's
+/// "distribution/partnership channels") that refers customers to ASOJU.
+/// Deliberately not the P3 "partner ecosystem" (commissions, contracts,
+/// self-serve signup) — just attribution and a read-only dashboard.
+model Partner {
+  id        String        @id @default(uuid())
+  name      String
+  code      String        @unique
+  type      PartnerType
+  status    PartnerStatus @default(ACTIVE)
+  createdAt DateTime      @default(now())
+
+  contacts          PartnerContact[]
+  referredCustomers Customer[]
+}
+
+enum PartnerType {
+  ASSOCIATION
+  BUSINESS
+  AGENT
+}
+
+enum PartnerStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// Links a PARTNER-role User (provisioned the same non-self-service way as
+/// every other internal role) to the Partner org they log in on behalf of.
+model PartnerContact {
+  id        String   @id @default(uuid())
+  partnerId String
+  partner   Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
 }
 
 // ---------------------------------------------------------------------------
@@ -440,6 +490,11 @@ model ServiceCase {
   spawnedFromScheduleId String?
   spawnedFromSchedule   RecurringSchedule? @relation("ScheduleSpawned", fields: [spawnedFromScheduleId], references: [id])
 
+  /// Section 12 P2 "advanced risk engine" — a trail of every deterministic
+  /// risk re-score, distinct from the generic AuditEvent log so
+  /// Compliance/Risk can review just the scoring history and its factors.
+  riskAssessments RiskAssessment[]
+
   @@index([status])
   @@index([customerId])
   @@index([serviceType])
@@ -483,6 +538,21 @@ model CaseRiskFlag {
   raisedById String?
   resolvedAt DateTime?
   createdAt  DateTime    @default(now())
+}
+
+/// Section 12 P2 "advanced risk engine" — a deterministic (not AI-driven,
+/// consistent with Non-Negotiable #9's philosophy) re-score computed by
+/// RiskEngineService at key case transitions. `factors` is the plain-code
+/// breakdown so Compliance/Risk can see exactly why a level was assigned,
+/// not just the resulting number.
+model RiskAssessment {
+  id         String      @id @default(uuid())
+  caseId     String
+  case       ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  score      Int
+  level      Int // 1-4, mirrors ServiceCase.riskLevel at the time of assessment
+  factors    Json
+  assessedAt DateTime    @default(now())
 }
 
 /// Case-scoped staff access — an RM/Case Manager/QC/Finance/Compliance user
@@ -789,7 +859,37 @@ model Subscription {
   renewsAt    DateTime?
   cancelledAt DateTime?
 
+  /// Section 12 P2 "full subscription engine" — deliberately bounded (the
+  /// PRD explicitly rules out a "complex subscription ecosystem"): one
+  /// flat recurring price per period, no proration, no plan changes.
+  /// `renewsAt` doubles as "next billing date" for SubscriptionBillingService.
+  amount   Decimal @default(15000) @db.Decimal(12, 2)
+  currency String  @default("NGN")
+
   memberships Membership[]
+  invoices    SubscriptionInvoice[]
+}
+
+/// One billing period's invoice for a Concierge subscription. Deliberately
+/// its own lightweight record rather than reusing case Invoice/Payment —
+/// a subscription period isn't a case, and this keeps the well-tested
+/// case-payment pipeline (Non-Negotiable #4) untouched.
+model SubscriptionInvoice {
+  id             String        @id @default(uuid())
+  subscriptionId String
+  subscription   Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  periodStart    DateTime
+  periodEnd      DateTime
+  amount         Decimal       @db.Decimal(12, 2)
+  currency       String        @default("NGN")
+  status         PaymentStatus @default(PENDING)
+
+  /// Set by PaystackService.initializeTransaction; looked up by the
+  /// verified webhook to mark this PAID (same verified-webhook-only rule
+  /// as case payments — see PaystackWebhookGuard).
+  paystackReference String?   @unique
+  paidAt            DateTime?
+  createdAt         DateTime  @default(now())
 }
 
 model Membership {

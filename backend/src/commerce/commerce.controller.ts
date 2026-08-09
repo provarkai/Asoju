@@ -1,20 +1,29 @@
-import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
+import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CaseAccessGuard } from '../common/guards/case-access.guard';
-import { WebhookSecretGuard } from '../common/guards/webhook-secret.guard';
+import { PaystackWebhookGuard } from '../payments/paystack-webhook.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
-import { CommerceService } from './commerce.service';
+import { CommerceService, CASE_INVOICE_REFERENCE_PREFIX } from './commerce.service';
+import { SubscriptionBillingService, SUBSCRIPTION_INVOICE_REFERENCE_PREFIX } from '../concierge/subscription-billing.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
-import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 
 const STAFF_QUOTE_ROLES = [Role.CASE_MANAGER, Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
 
+interface PaystackChargeEvent {
+  event: string;
+  data: { reference: string; amount: number; status: string };
+}
+
 @Controller()
 export class CommerceController {
-  constructor(private readonly commerceService: CommerceService) {}
+  constructor(
+    private readonly commerceService: CommerceService,
+    private readonly subscriptionBilling: SubscriptionBillingService,
+  ) {}
 
   @UseGuards(JwtAuthGuard, RolesGuard, CaseAccessGuard)
   @Roles(...STAFF_QUOTE_ROLES)
@@ -34,11 +43,39 @@ export class CommerceController {
     return this.commerceService.acceptQuote(user, quoteId);
   }
 
-  // Called by the payment provider, not a signed-in user — protected by a
-  // shared secret rather than JWT (see WebhookSecretGuard).
-  @UseGuards(WebhookSecretGuard)
-  @Post('payments/webhook')
-  handleWebhook(@Body() dto: PaymentWebhookDto) {
-    return this.commerceService.handlePaymentWebhook(dto);
+  /** Section 12 "real payment-provider integration" — customer starts
+   * checkout on an accepted invoice; gets back Paystack's hosted-checkout
+   * URL (or a dry-run placeholder without PAYSTACK_SECRET_KEY). */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.CUSTOMER)
+  @Post('invoices/:invoiceId/pay')
+  initiatePayment(@CurrentUser() user: AuthenticatedUser, @Param('invoiceId') invoiceId: string) {
+    return this.commerceService.initiatePayment(user, invoiceId);
+  }
+
+  /**
+   * Single Paystack webhook endpoint for the whole app — real signature
+   * verification (PaystackWebhookGuard), not a shared-secret stand-in
+   * (Non-Negotiable #4). Routes by reference prefix to whichever service
+   * actually owns that kind of payment; case payments and subscription
+   * billing intentionally share one endpoint, exactly as Paystack expects
+   * one webhook URL per account.
+   */
+  @UseGuards(PaystackWebhookGuard)
+  @Post('payments/webhook/paystack')
+  async handlePaystackWebhook(@Req() req: Request) {
+    const event = req.body as PaystackChargeEvent;
+    if (event.event !== 'charge.success') {
+      return { received: true, ignored: event.event };
+    }
+
+    const { reference, amount } = event.data;
+    if (reference.startsWith(CASE_INVOICE_REFERENCE_PREFIX)) {
+      return this.commerceService.handleVerifiedCasePayment(reference, amount);
+    }
+    if (reference.startsWith(SUBSCRIPTION_INVOICE_REFERENCE_PREFIX)) {
+      return this.subscriptionBilling.handleVerifiedSubscriptionPayment(reference, amount);
+    }
+    throw new BadRequestException(`Unrecognised payment reference: ${reference}`);
   }
 }

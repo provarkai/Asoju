@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { AiEscalation, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { CONCIERGE_SYSTEM_PROMPT } from './system-prompt';
+import { CONCIERGE_SYSTEM_PROMPT, PERSONAL_ASSISTANT_SYSTEM_PROMPT } from './system-prompt';
 import { scoreLead } from './scoring';
 import { ConciergeMessageDto } from './dto/concierge-message.dto';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -199,5 +199,80 @@ export class AiService {
     });
 
     return request.id;
+  }
+
+  /**
+   * Section 12 P2 "personal AI assistant" — grounded read-only Q&A for an
+   * existing customer over their own portfolio. Unlike converse() above,
+   * this makes NO tool call and writes NOTHING to the case/commerce
+   * pipeline: there is no action for it to take, so there is nothing to
+   * validate before acting on it (the reason converse() forces tool-use).
+   * Fails closed exactly like the intake Concierge without a configured key.
+   */
+  async assistantReply(user: AuthenticatedUser, dto: ConciergeMessageDto) {
+    if (!this.client) {
+      throw new Error('AI Assistant is not configured (missing ANTHROPIC_API_KEY).');
+    }
+    if (user.role !== Role.CUSTOMER) {
+      throw new Error('AI Assistant is customer-facing only.');
+    }
+
+    const customer = await this.prisma.customer.findUnique({
+      where: { userId: user.id },
+      include: {
+        serviceCases: {
+          orderBy: { createdAt: 'desc' },
+          select: { caseNumber: true, serviceType: true, status: true, tier: true, createdAt: true },
+        },
+        subscriptions: { orderBy: { startedAt: 'desc' }, take: 1 },
+        beneficiaries: { select: { fullName: true, relationship: true } },
+        properties: { select: { address: true, city: true, state: true } },
+        assets: { select: { assetType: true, location: true } },
+      },
+    });
+    if (!customer) throw new Error('No customer profile for this user');
+
+    const context = {
+      customer_name: customer.fullName,
+      cases: customer.serviceCases.map((c) => ({
+        case_number: c.caseNumber,
+        service_type: c.serviceType,
+        status: c.status,
+        tier: c.tier,
+        opened: c.createdAt.toISOString().slice(0, 10),
+      })),
+      subscription: customer.subscriptions[0]
+        ? { tier: customer.subscriptions[0].tier, status: customer.subscriptions[0].status }
+        : null,
+      beneficiaries: customer.beneficiaries,
+      properties: customer.properties,
+      assets: customer.assets,
+    };
+
+    const messages: Anthropic.MessageParam[] = [
+      { role: 'user', content: `CONTEXT (this customer's own account — nothing outside this exists):\n${JSON.stringify(context)}` },
+      { role: 'assistant', content: "Understood — I'll answer only from that context." },
+      ...(dto.history ?? []).map((turn) => ({ role: turn.role, content: turn.content }) as Anthropic.MessageParam),
+      { role: 'user', content: dto.message },
+    ];
+
+    const response = await this.client.messages.create({
+      model: process.env.AI_CONCIERGE_MODEL ?? 'claude-sonnet-5',
+      max_tokens: 1024,
+      system: PERSONAL_ASSISTANT_SYSTEM_PROMPT,
+      messages,
+    });
+
+    const textBlock = response.content.find((block): block is Anthropic.TextBlock => block.type === 'text');
+    const reply = textBlock?.text ?? "Sorry, I couldn't put together a reply — please try again.";
+
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'ai',
+      action: 'ai.assistant_turn',
+      metadata: { promptSummary: dto.message.slice(0, 500) },
+    });
+
+    return { reply };
   }
 }

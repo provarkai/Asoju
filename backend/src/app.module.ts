@@ -22,6 +22,8 @@ import { RecurringModule } from './recurring/recurring.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { AccountsModule } from './accounts/accounts.module';
+import { RiskEngineModule } from './risk/risk-engine.module';
+import { PartnersModule } from './partners/partners.module';
 
 @Module({
   imports: [
@@ -47,6 +49,8 @@ import { AccountsModule } from './accounts/accounts.module';
     AnalyticsModule,
     WhatsappModule,
     AccountsModule,
+    RiskEngineModule,
+    PartnersModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

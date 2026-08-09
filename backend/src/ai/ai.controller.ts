@@ -18,3 +18,18 @@ export class AiController {
     return this.aiService.converse(user, dto);
   }
 }
+
+/** Section 12 P2 "personal AI assistant" — deliberately its own controller
+ * (not a new method on AiController above) so the intake Concierge and the
+ * existing-customer assistant are obviously two different surfaces. */
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller('ai/assistant')
+export class AiAssistantController {
+  constructor(private readonly aiService: AiService) {}
+
+  @Roles(Role.CUSTOMER)
+  @Post('message')
+  sendMessage(@CurrentUser() user: AuthenticatedUser, @Body() dto: ConciergeMessageDto) {
+    return this.aiService.assistantReply(user, dto);
+  }
+}

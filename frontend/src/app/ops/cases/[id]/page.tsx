@@ -368,7 +368,7 @@ export default function OpsCaseDetailPage() {
         )}
       </div>
 
-      {(detail.riskFlags.length > 0 || detail.incidents.length > 0) && (
+{(detail.riskFlags.length > 0 || detail.incidents.length > 0 || detail.riskLevel > 1) && (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Risk flags &amp; incidents</h2>
           <ul>
@@ -378,7 +378,17 @@ export default function OpsCaseDetailPage() {
             {detail.incidents.map((i) => (
               <li key={i.id} className="error-text">[{i.severity}] {i.summary}</li>
             ))}
+            {detail.riskFlags.length === 0 && detail.incidents.length === 0 && (
+              <li className="muted">Nothing open — risk level {detail.riskLevel} from the last assessment.</li>
+            )}
           </ul>
+          <button
+            className="btn btn--ghost"
+            disabled={busy !== null}
+            onClick={() => run('risk', () => apiFetch(`/cases/${detail.id}/risk-assessment`, { method: 'POST' }))}
+          >
+            {busy === 'risk' ? 'Recomputing…' : 'Recompute risk level'}
+          </button>
         </div>
       )}
 

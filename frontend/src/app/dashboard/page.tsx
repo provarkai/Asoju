@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useAuthGuard } from '@/lib/useAuthGuard';
 import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
+import { AssistantChat } from '@/components/AssistantChat';
 
 interface CaseSummary {
   id: string;
@@ -100,6 +101,8 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      <AssistantChat />
     </div>
   );
 }

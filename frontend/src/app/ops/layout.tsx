@@ -30,6 +30,12 @@ export default function OpsLayout({ children }: { children: React.ReactNode }) {
   if (user && ADMIN_ROLES.includes(user.role)) {
     tabs.push({ href: '/ops/accounts', label: 'Accounts' });
   }
+  if (user && ADMIN_ROLES.includes(user.role)) {
+    tabs.push({ href: '/ops/partners', label: 'Partners' });
+  }
+  if (user && (ADMIN_ROLES.includes(user.role) || user.role === 'COMPLIANCE_RISK')) {
+    tabs.push({ href: '/ops/risk', label: 'Risk' });
+  }
   if (user && (ADMIN_ROLES.includes(user.role) || user.role === 'FINANCE')) {
     tabs.push({ href: '/ops/analytics', label: 'Analytics' });
   }

@@ -1,20 +1,28 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { CaseStatus, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CasesService } from '../cases/cases.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { PaystackService } from '../payments/paystack.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
-import { PaymentWebhookDto } from './dto/payment-webhook.dto';
+
+/** Prefix distinguishing case-invoice Paystack references from subscription
+ * ones so a single webhook endpoint can route both (see PaystackService). */
+export const CASE_INVOICE_REFERENCE_PREFIX = 'caseinv_';
 
 @Injectable()
 export class CommerceService {
+  private readonly logger = new Logger(CommerceService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly casesService: CasesService,
+    private readonly paystack: PaystackService,
   ) {}
 
   /**
@@ -97,34 +105,90 @@ export class CommerceService {
   }
 
   /**
-   * Vertical slice 2, step 3: Payment -> Scheduled. The ONLY method in the
-   * codebase permitted to set a Payment's verified-webhook timestamp
-   * (Non-Negotiable #4). Called by WebhookSecretGuard-protected routes only.
+   * Vertical slice 2, step 3a: customer starts payment on an accepted
+   * invoice. Creates the Payment row PENDING and hands back Paystack's
+   * hosted-checkout URL — real if PAYSTACK_SECRET_KEY is set, a dry-run
+   * placeholder otherwise (see PaystackService). Nothing here can mark a
+   * payment PAID; only the verified webhook below can (Non-Negotiable #4).
    */
-  async handlePaymentWebhook(dto: PaymentWebhookDto) {
+  async initiatePayment(actor: AuthenticatedUser, invoiceId: string) {
     const invoice = await this.prisma.invoice.findUnique({
-      where: { id: dto.invoiceId },
-      include: { case: { include: { customer: true } } },
+      where: { id: invoiceId },
+      include: { case: { include: { customer: { include: { user: true } } } }, payments: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
+    if (invoice.case.customer.userId !== actor.id) {
+      throw new ForbiddenException('Not authorised for this invoice');
+    }
 
-    const payment = await this.prisma.payment.upsert({
-      where: { providerReference: dto.providerReference },
-      update: {
-        status: PaymentStatus.PAID,
-        providerWebhookVerifiedAt: new Date(),
-      },
-      create: {
+    const alreadyPaid = invoice.payments.some((p) => p.status === PaymentStatus.PAID);
+    if (alreadyPaid) throw new BadRequestException('Invoice already paid');
+
+    const reference = `${CASE_INVOICE_REFERENCE_PREFIX}${invoice.id}_${randomBytes(4).toString('hex')}`;
+    const amountKobo = Math.round(Number(invoice.amount) * 100);
+
+    const result = await this.paystack.initializeTransaction({
+      email: invoice.case.customer.user.email ?? `${invoice.case.customer.user.id}@asoju.invalid`,
+      amountKobo,
+      reference,
+      currency: invoice.currency,
+      metadata: { invoiceId: invoice.id, caseId: invoice.caseId },
+    });
+
+    await this.prisma.payment.create({
+      data: {
         invoiceId: invoice.id,
-        amount: dto.amount,
-        currency: dto.currency ?? invoice.currency,
-        provider: dto.provider,
-        providerReference: dto.providerReference,
-        providerWebhookVerifiedAt: new Date(),
-        status: PaymentStatus.PAID,
+        amount: invoice.amount,
+        currency: invoice.currency,
+        provider: 'paystack',
+        providerReference: reference,
+        status: PaymentStatus.PENDING,
       },
     });
 
+    await this.audit.record({
+      caseId: invoice.caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'payment.initiated',
+      metadata: { invoiceId: invoice.id, reference, dryRun: result.dryRun },
+    });
+
+    return { authorizationUrl: result.authorizationUrl, reference: result.reference, dryRun: result.dryRun };
+  }
+
+  /**
+   * Vertical slice 2, step 3b: Payment -> Scheduled. The ONLY method in the
+   * codebase permitted to set a Payment's verified-webhook timestamp
+   * (Non-Negotiable #4). Called only from the PaystackWebhookGuard-protected
+   * route, after signature verification, for a `caseinv_` reference.
+   */
+  async handleVerifiedCasePayment(reference: string, amountKobo: number) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { providerReference: reference },
+      include: { invoice: { include: { case: { include: { customer: true } } } } },
+    });
+    if (!payment) throw new NotFoundException(`No payment pending for reference ${reference}`);
+
+    const expectedKobo = Math.round(Number(payment.amount) * 100);
+    if (expectedKobo !== amountKobo) {
+      // Signature is valid (Paystack really sent this), but the amount
+      // doesn't match what we initialized — surface loudly rather than
+      // silently trusting a mismatched figure.
+      this.logger.error(`Paystack amount mismatch for ${reference}: expected ${expectedKobo}kobo, got ${amountKobo}kobo`);
+      throw new BadRequestException('Payment amount does not match invoice');
+    }
+
+    if (payment.status === PaymentStatus.PAID) {
+      return payment; // already processed — webhooks can be delivered more than once
+    }
+
+    const updated = await this.prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: PaymentStatus.PAID, providerWebhookVerifiedAt: new Date() },
+    });
+
+    const invoice = payment.invoice;
     const serviceCase = await this.prisma.serviceCase.update({
       where: { id: invoice.caseId },
       data: { paymentStatus: PaymentStatus.PAID },
@@ -134,7 +198,7 @@ export class CommerceService {
       caseId: invoice.caseId,
       actorType: 'system',
       action: 'payment.webhook_verified',
-      metadata: { paymentId: payment.id, provider: dto.provider, providerReference: dto.providerReference },
+      metadata: { paymentId: updated.id, provider: 'paystack', providerReference: reference },
     });
     await this.notifications.notify(
       invoice.case.customer.userId,
@@ -146,10 +210,10 @@ export class CommerceService {
       await this.casesService.systemTransitionCase(
         invoice.caseId,
         CaseStatus.SCHEDULED,
-        'Payment verified by provider webhook',
+        'Payment verified by Paystack webhook',
       );
     }
 
-    return payment;
+    return updated;
   }
 }

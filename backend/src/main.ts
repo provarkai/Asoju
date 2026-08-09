@@ -4,7 +4,11 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: true preserves the exact request bytes on `request.rawBody`
+  // alongside normal JSON parsing — PaystackWebhookGuard needs those exact
+  // bytes to verify the HMAC signature; a re-serialized parsed body would
+  // not reproduce the same hash.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   app.use(helmet());
   app.enableCors({

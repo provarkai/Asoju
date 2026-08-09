@@ -3,9 +3,10 @@ import { EvidenceService } from './evidence.service';
 import { EvidenceController } from './evidence.controller';
 import { CasesModule } from '../cases/cases.module';
 import { CaseAccessGuard } from '../common/guards/case-access.guard';
+import { RiskEngineModule } from '../risk/risk-engine.module';
 
 @Module({
-  imports: [CasesModule],
+  imports: [CasesModule, RiskEngineModule],
   providers: [EvidenceService, CaseAccessGuard],
   controllers: [EvidenceController],
   exports: [EvidenceService],

@@ -14,8 +14,12 @@ export const ADMIN_ROLES = ['ADMIN', 'SUPER_ADMIN'];
 // Section 5.4 — Field Agent App / Provider Portal (shared workflow for MVP).
 export const FIELD_ROLES = ['FIELD_AGENT', 'PROVIDER'];
 
+// Section 12 P2 — Partner portal.
+export const PARTNER_ROLES = ['PARTNER'];
+
 export function landingPathForRole(role: string): string {
   if (OPS_ROLES.includes(role)) return '/ops';
   if (FIELD_ROLES.includes(role)) return '/field';
+  if (PARTNER_ROLES.includes(role)) return '/partner';
   return '/dashboard';
 }

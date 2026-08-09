@@ -13,6 +13,7 @@ interface SubscriptionSummary { status: string; tier: string; startedAt: string 
 interface AccountCaseSummary { id: string; caseNumber: string; serviceType: string; status: string; createdAt: string }
 interface AccountMember { id: string; fullName: string; email: string | null; cases: AccountCaseSummary[] }
 interface MyAccount { account: { id: string; name: string; type: string }; members: AccountMember[] }
+interface SubscriptionInvoice { id: string; periodStart: string; periodEnd: string; amount: string; currency: string; status: string }
 
 // Section 5.1 P1 — "saved properties/assets, multiple beneficiaries".
 export default function ProfilePage() {
@@ -23,6 +24,7 @@ export default function ProfilePage() {
   const [referral, setReferral] = useState<ReferralSummary | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
   const [myAccount, setMyAccount] = useState<MyAccount | null>(null);
+  const [invoices, setInvoices] = useState<SubscriptionInvoice[]>([]);
   const [subscribing, setSubscribing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +45,7 @@ export default function ProfilePage() {
     apiFetch<ReferralSummary>('/me/referral').then(setReferral).catch((e) => setError(e.message));
     apiFetch<SubscriptionSummary | null>('/me/subscription').then(setSubscription).catch((e) => setError(e.message));
     apiFetch<MyAccount | null>('/me/account').then(setMyAccount).catch((e) => setError(e.message));
+    apiFetch<SubscriptionInvoice[]>('/me/subscription/invoices').then(setInvoices).catch(() => {});
     apiFetch<{ preferredChannel: string | null }>('/me/preferences')
       .then((p) => setPreferredChannel(p.preferredChannel ?? 'whatsapp'))
       .catch((e) => setError(e.message));
@@ -169,6 +172,20 @@ export default function ProfilePage() {
               {subscribing ? 'Subscribing…' : 'Upgrade to Concierge'}
             </button>
           </>
+        )}
+        {invoices.length > 0 && (
+          <div style={{ marginTop: '1rem' }}>
+            <strong>Billing history</strong>
+            {invoices.map((inv) => (
+              <div key={inv.id} className="case-row">
+                <span className="muted">
+                  {new Date(inv.periodStart).toLocaleDateString()} – {new Date(inv.periodEnd).toLocaleDateString()}
+                </span>
+                <span>{inv.currency} {Number(inv.amount).toLocaleString()}</span>
+                <span className="badge">{inv.status === 'PAID' ? 'Paid' : 'Awaiting payment'}</span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

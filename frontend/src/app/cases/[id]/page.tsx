@@ -41,6 +41,18 @@ interface QuoteEntry {
   acceptedAt: string | null;
 }
 
+interface PaymentEntry {
+  id: string;
+  status: string;
+}
+
+interface InvoiceEntry {
+  id: string;
+  amount: string;
+  currency: string;
+  payments: PaymentEntry[];
+}
+
 interface RatingEntry {
   stars: number;
   comment: string | null;
@@ -68,6 +80,7 @@ interface CaseDetail {
   reports: ReportEntry[];
   approvals: ApprovalEntry[];
   quotes: QuoteEntry[];
+  invoices: InvoiceEntry[];
   rating: RatingEntry | null;
 }
 
@@ -160,6 +173,28 @@ export default function CaseDetailPage() {
     }
   }
 
+  async function payInvoice(invoiceId: string) {
+    setSubmitting('pay');
+    try {
+      const result = await apiFetch<{ authorizationUrl: string; dryRun: boolean }>(
+        `/invoices/${invoiceId}/pay`,
+        { method: 'POST' },
+      );
+      if (result.dryRun) {
+        setError(null);
+        window.alert(
+          `Test mode — no Paystack account configured yet. In production you'd be redirected to:\n${result.authorizationUrl}`,
+        );
+      } else {
+        window.location.href = result.authorizationUrl;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start payment');
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
   if (!ready) return null;
   if (error) return <p className="error-text">{error}</p>;
   if (!detail) return <p className="muted">Loading…</p>;
@@ -199,9 +234,17 @@ export default function CaseDetailPage() {
                   {submitting === 'accept-quote' ? 'Accepting…' : 'Accept & proceed to payment'}
                 </button>
               )}
-              {q.acceptedAt && detail.paymentStatus !== 'PAID' && (
-                <span className="badge">Awaiting payment</span>
-              )}
+              {q.acceptedAt && detail.paymentStatus !== 'PAID' && (() => {
+                const invoice = detail.invoices.find((inv) => inv.amount === q.amount) ?? detail.invoices[0];
+                const pending = invoice && !invoice.payments.some((p) => p.status === 'PAID');
+                return invoice && pending ? (
+                  <button className="btn" disabled={submitting !== null} onClick={() => payInvoice(invoice.id)}>
+                    {submitting === 'pay' ? 'Starting payment…' : 'Pay now'}
+                  </button>
+                ) : (
+                  <span className="badge">Awaiting payment</span>
+                );
+              })()}
               {detail.paymentStatus === 'PAID' && <span className="badge">Paid</span>}
             </div>
           ))}

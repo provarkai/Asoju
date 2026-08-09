@@ -33,4 +33,10 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   referralCode?: string;
+
+  /** Section 12 P2 "partner portal". An external partner org's code,
+   * e.g. /register?partner=CODE. */
+  @IsOptional()
+  @IsString()
+  partnerCode?: string;
 }

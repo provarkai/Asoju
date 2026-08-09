@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CasesService } from '../cases/cases.service';
+import { RiskEngineService } from '../risk/risk-engine.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateEvidenceDto } from './dto/create-evidence.dto';
 import { PerformQcDto } from './dto/perform-qc.dto';
@@ -21,6 +22,7 @@ export class EvidenceService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly casesService: CasesService,
+    private readonly riskEngine: RiskEngineService,
   ) {}
 
   /** Vertical slice 4: Assignment -> Field Execution. */
@@ -108,6 +110,8 @@ export class EvidenceService {
       metadata: { label, detail },
     });
 
+    await this.riskEngine.assessCase(caseId);
+
     return flag;
   }
 
@@ -188,6 +192,7 @@ export class EvidenceService {
 
     if (dto.outcome === QcOutcome.REWORK) {
       await this.casesService.transitionCase(actor, caseId, CaseStatus.IN_PROGRESS, dto.note ?? 'QC requested rework');
+      await this.riskEngine.assessCase(caseId);
       return { outcome: dto.outcome };
     }
 
@@ -206,6 +211,8 @@ export class EvidenceService {
         detail: dto.note,
       },
     });
+
+    await this.riskEngine.assessCase(caseId);
 
     return { outcome: dto.outcome, incident };
   }

@@ -3,12 +3,13 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { clearSession, getSessionUser, SessionUser } from '@/lib/api';
-import { FIELD_ROLES, landingPathForRole, OPS_ROLES } from '@/lib/roles';
+import { FIELD_ROLES, PARTNER_ROLES, landingPathForRole, OPS_ROLES } from '@/lib/roles';
 import { NotificationBell } from './NotificationBell';
 
 function navLabel(role: string): string {
   if (OPS_ROLES.includes(role)) return 'Ops Console';
   if (FIELD_ROLES.includes(role)) return 'My jobs';
+  if (PARTNER_ROLES.includes(role)) return 'Partner dashboard';
   return 'My cases';
 }
 

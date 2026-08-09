@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { useFieldGuard } from '@/lib/useFieldGuard';
 import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
+import { enqueue, flushQueue, getQueue, isNetworkFailure, QueuedAction } from '@/lib/offlineQueue';
 
 interface AssignmentDetail {
   id: string;
@@ -52,6 +53,12 @@ export default function FieldJobDetailPage() {
   const [exceptionLabel, setExceptionLabel] = useState('');
   const [exceptionDetail, setExceptionDetail] = useState('');
 
+  // Section 5.4 "offline support" — checklist ticks and evidence captured
+  // without a connection queue locally and sync automatically once one
+  // comes back (see lib/offlineQueue).
+  const [queued, setQueued] = useState<QueuedAction[]>([]);
+  const [isOnline, setIsOnline] = useState(true);
+
   function load() {
     setError(null);
     apiFetch<JobDetail>(`/cases/${params.id}`)
@@ -59,8 +66,35 @@ export default function FieldJobDetailPage() {
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load job'));
   }
 
+  function refreshQueue() {
+    if (params.id) setQueued(getQueue(params.id));
+  }
+
+  async function trySync() {
+    if (!params.id) return;
+    const flushed = await flushQueue(params.id);
+    refreshQueue();
+    if (flushed > 0) load();
+  }
+
   useEffect(() => {
-    if (ready) load();
+    if (!ready) return;
+    load();
+    refreshQueue();
+    setIsOnline(navigator.onLine);
+    trySync();
+
+    const onOnline = () => {
+      setIsOnline(true);
+      trySync();
+    };
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, params.id]);
 
@@ -94,6 +128,58 @@ export default function FieldJobDetailPage() {
     });
   }
 
+  async function toggleTask(taskId: string) {
+    if (!detail) return;
+    const path = `/cases/${detail.id}/tasks/${taskId}/complete`;
+    try {
+      await apiFetch(path, { method: 'POST' });
+      load();
+    } catch (err) {
+      if (!isNetworkFailure(err)) {
+        setError(err instanceof Error ? err.message : 'Action failed');
+        return;
+      }
+      // Offline — queue it and reflect the tick locally so the agent can
+      // keep working through the rest of the checklist.
+      enqueue({ kind: 'task', caseId: detail.id, path, body: {}, taskId });
+      refreshQueue();
+      setDetail({ ...detail, tasks: detail.tasks.map((t) => (t.id === taskId ? { ...t, isComplete: true } : t)) });
+    }
+  }
+
+  async function submitEvidence() {
+    if (!detail) return;
+    const path = `/cases/${detail.id}/evidence`;
+    const body = {
+      type: evidenceType,
+      description: evidenceDescription || undefined,
+      storageKey: evidenceRef,
+    };
+    setBusy('evidence');
+    setError(null);
+    try {
+      await apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
+      setEvidenceDescription('');
+      setEvidenceRef('');
+      load();
+    } catch (err) {
+      if (!isNetworkFailure(err)) {
+        setError(err instanceof Error ? err.message : 'Action failed');
+      } else {
+        enqueue({ kind: 'evidence', caseId: detail.id, path, body });
+        refreshQueue();
+        setDetail({
+          ...detail,
+          evidence: [...detail.evidence, { id: `queued-${Date.now()}`, type: evidenceType, description: evidenceDescription || null }],
+        });
+        setEvidenceDescription('');
+        setEvidenceRef('');
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (!ready) return null;
   if (error && !detail) return <p className="error-text">{error}</p>;
   if (!detail) return <p className="muted">Loading…</p>;
@@ -112,6 +198,14 @@ export default function FieldJobDetailPage() {
       </div>
 
       {error && <p className="error-text">{error}</p>}
+      {(!isOnline || queued.length > 0) && (
+        <p className="muted" style={{ background: 'var(--asoju-green-light)', padding: '0.6rem 0.9rem', borderRadius: '0.5rem' }}>
+          {!isOnline ? "You're offline — " : ''}
+          {queued.length > 0
+            ? `${queued.length} change${queued.length === 1 ? '' : 's'} saved on this device, will sync automatically once you're back online.`
+            : 'Back online.'}
+        </p>
+      )}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Instructions</h2>
@@ -163,13 +257,12 @@ export default function FieldJobDetailPage() {
                 <input
                   type="checkbox"
                   checked={t.isComplete}
-                  disabled={t.isComplete || !canWork || busy !== null}
-                  onChange={() =>
-                    run('task', () => apiFetch(`/cases/${detail.id}/tasks/${t.id}/complete`, { method: 'POST' }))
-                  }
+                  disabled={t.isComplete || !canWork}
+                  onChange={() => toggleTask(t.id)}
                   style={{ marginRight: '0.5rem' }}
                 />
                 {t.label}
+                {queued.some((q) => q.taskId === t.id) && <span className="muted"> (queued)</span>}
               </label>
             </li>
           ))}
@@ -181,7 +274,10 @@ export default function FieldJobDetailPage() {
         {detail.evidence.length > 0 && (
           <ul>
             {detail.evidence.map((e) => (
-              <li key={e.id}>{e.type} — {e.description ?? 'No description'}</li>
+              <li key={e.id}>
+                {e.type} — {e.description ?? 'No description'}
+                {e.id.startsWith('queued-') && <span className="muted"> (queued, will sync)</span>}
+              </li>
             ))}
           </ul>
         )}
@@ -206,20 +302,7 @@ export default function FieldJobDetailPage() {
               className="btn"
               style={{ alignSelf: 'flex-start' }}
               disabled={!evidenceRef || busy !== null}
-              onClick={() =>
-                run('evidence', async () => {
-                  await apiFetch(`/cases/${detail.id}/evidence`, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                      type: evidenceType,
-                      description: evidenceDescription || undefined,
-                      storageKey: evidenceRef,
-                    }),
-                  });
-                  setEvidenceDescription('');
-                  setEvidenceRef('');
-                })
-              }
+              onClick={submitEvidence}
             >
               {busy === 'evidence' ? 'Submitting…' : 'Add evidence'}
             </button>

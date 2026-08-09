@@ -29,14 +29,23 @@ export class AuthService {
     const passwordHash = await argon2.hash(dto.password);
     const referralCode = await generateUniqueReferralCode(this.prisma);
 
-    // A mistyped/expired referral code shouldn't block onboarding — treat
-    // it as "no referral" rather than failing the whole registration.
+    // A mistyped/expired referral or partner code shouldn't block
+    // onboarding — treat it as "no referral" rather than failing the whole
+    // registration.
     let referredByCustomerId: string | undefined;
     if (dto.referralCode) {
       const referrer = await this.prisma.customer.findUnique({
         where: { referralCode: dto.referralCode.toUpperCase() },
       });
       referredByCustomerId = referrer?.id;
+    }
+
+    let referredByPartnerId: string | undefined;
+    if (dto.partnerCode) {
+      const partner = await this.prisma.partner.findUnique({
+        where: { code: dto.partnerCode.toUpperCase() },
+      });
+      if (partner?.status === 'ACTIVE') referredByPartnerId = partner.id;
     }
 
     const user = await this.prisma.user.create({
@@ -47,7 +56,7 @@ export class AuthService {
         role: Role.CUSTOMER,
         countryOfResidence: dto.countryOfResidence,
         preferredChannel: dto.preferredChannel,
-        customer: { create: { fullName: dto.fullName, referralCode, referredByCustomerId } },
+        customer: { create: { fullName: dto.fullName, referralCode, referredByCustomerId, referredByPartnerId } },
       },
       include: { customer: true },
     });
@@ -56,7 +65,7 @@ export class AuthService {
       actorId: user.id,
       actorType: 'user',
       action: 'user.registered',
-      metadata: { role: user.role, referredByCustomerId },
+      metadata: { role: user.role, referredByCustomerId, referredByPartnerId },
     });
 
     const tokens = await this.issueTokens(user.id, user.role);

@@ -137,6 +137,11 @@ export class ConciergeService {
     });
   }
 
+  /** Shared with ConciergeController for the /me/subscription/invoices read. */
+  async requireCustomerForInvoices(user: AuthenticatedUser) {
+    return this.requireCustomer(user.id);
+  }
+
   private async requireCustomer(userId: string) {
     const customer = await this.prisma.customer.findUnique({ where: { userId } });
     if (!customer) throw new NotFoundException('No customer profile for this user');

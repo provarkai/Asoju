@@ -16,14 +16,18 @@ function RegisterForm() {
   const [countryOfResidence, setCountryOfResidence] = useState('United Kingdom');
   const [preferredChannel, setPreferredChannel] = useState('whatsapp');
   const [referralCode, setReferralCode] = useState('');
+  const [partnerCode, setPartnerCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   // Section 12 P1 referral flow — a shared link like /register?ref=CODE
-  // pre-fills the field rather than requiring it to be typed in.
+  // pre-fills the field rather than requiring it to be typed in. Section 12
+  // P2 partner portal does the same with /register?partner=CODE.
   useEffect(() => {
     const ref = searchParams.get('ref');
     if (ref) setReferralCode(ref);
+    const partner = searchParams.get('partner');
+    if (partner) setPartnerCode(partner);
   }, [searchParams]);
 
   async function onSubmit(e: FormEvent) {
@@ -45,6 +49,7 @@ function RegisterForm() {
           countryOfResidence,
           preferredChannel,
           referralCode: referralCode || undefined,
+          partnerCode: partnerCode || undefined,
         }),
       });
       setSession(result.accessToken, result.refreshToken, result.user);
@@ -103,6 +108,10 @@ function RegisterForm() {
         <label>
           Referral code (optional)
           <input value={referralCode} onChange={(e) => setReferralCode(e.target.value.toUpperCase())} />
+        </label>
+        <label>
+          Partner code (optional)
+          <input value={partnerCode} onChange={(e) => setPartnerCode(e.target.value.toUpperCase())} />
         </label>
         {error && <p className="error-text">{error}</p>}
         <button className="btn" type="submit" disabled={loading}>
