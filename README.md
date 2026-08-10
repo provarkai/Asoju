@@ -80,6 +80,23 @@ end-to-end against a real Postgres instance:
   separate increment). Covered by `backend/test/refund.e2e-spec.ts` (4 tests) — negative-control
   verified: disabling the over-refund guard lets a refund exceed the remaining balance and fails the
   test; restoring it passes again.
+- **Payment reconciliation resolution** (Database Schema & ERD Design v1.0 Section 17 "Finance Schema" —
+  `reconciliations | id, payment_id, reconciled_by, reconciled_at, status, notes`) — the webhook
+  amount-mismatch path above left a `RECONCILIATION_REQUIRED` payment with no way forward: no admin
+  action existed to resolve it, so the case (and payment) just sat stuck. `POST
+  /admin/payments/:paymentId/reconcile` (Finance/Admin/SuperAdmin) now closes that loop: Finance reviews
+  the mismatch (visible via the Audit Log's `payment.reconciliation_required` event, which carries the
+  expected/received amounts) and resolves it as either `MATCHED` — the amount actually received is
+  accepted as correct, optionally recording a corrected amount, and the payment moves to `PAID` — or
+  `REJECTED` — the mismatch was a genuine failure, the payment moves to `FAILED`, freeing the customer to
+  retry payment on the same invoice. `notes` is always required, same discipline as refunds' `reason`.
+  Every resolution is a permanent, append-only `Reconciliation` row (new model, never mutated after
+  creation — a re-review creates a new row, same discipline as `Refund`), not just a status flip. New
+  controls on the Ops case page's Payments card for `RECONCILIATION_REQUIRED` payments. Covered by
+  `backend/test/reconciliation.e2e-spec.ts` (6 tests) — negative-control verified: disabling the guard
+  that a payment must actually be `RECONCILIATION_REQUIRED` before it can be resolved fails 2 of the 6
+  tests (resolving an ineligible payment, and resolving the same payment twice); restoring it passes
+  again.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same

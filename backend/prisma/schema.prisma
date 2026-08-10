@@ -101,6 +101,19 @@ enum PaymentStatus {
   RECONCILIATION_REQUIRED
 }
 
+/// Database Schema & ERD Design v1.0 Section 17 "Finance Schema" —
+/// `reconciliations | id, payment_id, reconciled_by, reconciled_at,
+/// status, notes`. The outcome Finance reached reviewing a
+/// RECONCILIATION_REQUIRED payment: MATCHED accepts the amount actually
+/// received as correct (CommerceService.resolveReconciliation moves the
+/// Payment, and the case's paymentStatus, to PAID); REJECTED means the
+/// mismatch was a genuine failure (both move to FAILED instead, freeing
+/// the customer to retry payment on the same invoice).
+enum ReconciliationStatus {
+  MATCHED
+  REJECTED
+}
+
 /// Section 8.3 — Evidence levels. Never conflate these.
 enum EvidenceLevel {
   OBSERVED
@@ -943,7 +956,8 @@ model Payment {
   createdAt                 DateTime      @default(now())
   updatedAt                 DateTime      @updatedAt
 
-  refunds Refund[]
+  refunds         Refund[]
+  reconciliations Reconciliation[]
 }
 
 /// A Finance-initiated reversal — distinct from ScLedgerEntry's REVERSAL
@@ -958,6 +972,22 @@ model Refund {
   reason    String?
   actorId   String?
   createdAt DateTime @default(now())
+}
+
+/// Finance's resolution of a RECONCILIATION_REQUIRED payment
+/// (CommerceService.resolveReconciliation) — a permanent record of who
+/// decided what and why, separate from the transient Payment.status.
+/// Never updated after creation; a re-review creates a new row.
+model Reconciliation {
+  id           String               @id @default(uuid())
+  paymentId    String
+  payment      Payment              @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  status       ReconciliationStatus
+  notes        String
+  reconciledBy String?
+  reconciledAt DateTime             @default(now())
+
+  @@index([paymentId])
 }
 
 model Payout {

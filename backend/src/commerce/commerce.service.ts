@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { CaseStatus, CaseTier, PaymentStatus, QuoteLineCategory } from '@prisma/client';
+import { CaseStatus, CaseTier, PaymentStatus, QuoteLineCategory, ReconciliationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -11,6 +11,7 @@ import { MembershipService } from '../concierge/membership.service';
 import { ScopeService } from '../scope/scope.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
+import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
 
 /** Prefix distinguishing case-invoice Paystack references from subscription
  * ones so a single webhook endpoint can route both (see PaystackService). */
@@ -445,6 +446,70 @@ export class CommerceService {
     );
 
     return { refund, payment: updatedPayment };
+  }
+
+  /**
+   * Database Schema & ERD Design v1.0 Section 17 "Finance Schema" —
+   * `reconciliations`. Closes the loop `handleVerifiedCasePayment` opened:
+   * a webhook amount mismatch used to leave the Payment (and case) stuck
+   * on RECONCILIATION_REQUIRED forever with no action anyone could take.
+   * Finance reviews the mismatch (visible via the audit log's
+   * `payment.reconciliation_required` event, which carries the
+   * expected/received amounts) and resolves it one of two ways:
+   *   - MATCHED: the amount actually received is accepted as correct —
+   *     optionally recording the corrected amount — and the payment moves
+   *     to PAID, same as a normal verified webhook.
+   *   - REJECTED: the mismatch was a genuine failure — the payment moves
+   *     to FAILED and the case's payment status is freed up so the
+   *     customer can start a fresh payment attempt on the same invoice
+   *     (initiatePayment has no restriction against a second attempt).
+   * Every resolution is a permanent, append-only Reconciliation row —
+   * never a mutation of a prior one, same discipline as Refund.
+   */
+  async resolveReconciliation(actor: AuthenticatedUser, paymentId: string, dto: ResolveReconciliationDto) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { invoice: { include: { case: { include: { customer: true } } } } },
+    });
+    if (!payment) throw new NotFoundException('Payment not found');
+    if (payment.status !== PaymentStatus.RECONCILIATION_REQUIRED) {
+      throw new BadRequestException(`Payment is in status ${payment.status}, not awaiting reconciliation`);
+    }
+
+    const newAmount = dto.status === ReconciliationStatus.MATCHED && dto.resolvedAmount ? dto.resolvedAmount : undefined;
+    const newPaymentStatus = dto.status === ReconciliationStatus.MATCHED ? PaymentStatus.PAID : PaymentStatus.FAILED;
+
+    const updatedPayment = await this.prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        status: newPaymentStatus,
+        ...(newAmount !== undefined ? { amount: newAmount } : {}),
+        ...(newPaymentStatus === PaymentStatus.PAID ? { providerWebhookVerifiedAt: new Date() } : {}),
+      },
+    });
+    await this.prisma.serviceCase.update({ where: { id: payment.invoice.caseId }, data: { paymentStatus: newPaymentStatus } });
+
+    const reconciliation = await this.prisma.reconciliation.create({
+      data: { paymentId, status: dto.status, notes: dto.notes, reconciledBy: actor.id },
+    });
+
+    await this.audit.record({
+      caseId: payment.invoice.caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'payment.reconciliation_resolved',
+      metadata: { paymentId, reconciliationId: reconciliation.id, status: dto.status, notes: dto.notes, resolvedAmount: newAmount },
+    });
+
+    await this.notifications.notify(
+      payment.invoice.case.customer.userId,
+      dto.status === ReconciliationStatus.MATCHED ? 'Your payment has been confirmed' : 'Your payment could not be confirmed',
+      dto.status === ReconciliationStatus.MATCHED
+        ? `Your payment for ${payment.invoice.case.caseNumber} has been reviewed and confirmed.`
+        : `Your payment for ${payment.invoice.case.caseNumber} could not be confirmed — please try again from your case page.`,
+    );
+
+    return { reconciliation, payment: updatedPayment };
   }
 
   /**

@@ -93,6 +93,8 @@ export default function OpsCaseDetailPage() {
   ]);
   const [refundAmount, setRefundAmount] = useState<Record<string, string>>({});
   const [refundReason, setRefundReason] = useState<Record<string, string>>({});
+  const [reconcileNotes, setReconcileNotes] = useState<Record<string, string>>({});
+  const [reconcileAmount, setReconcileAmount] = useState<Record<string, string>>({});
   const [assignRole, setAssignRole] = useState<'FIELD_AGENT' | 'PROVIDER'>('FIELD_AGENT');
   const [assignTargetId, setAssignTargetId] = useState('');
   const [qcOutcome, setQcOutcome] = useState('APPROVED');
@@ -485,6 +487,63 @@ export default function OpsCaseDetailPage() {
                     >
                       {busy === `refund-${p.id}` ? 'Refunding…' : 'Issue refund'}
                     </button>
+                  </div>
+                )}
+                {p.status === 'RECONCILIATION_REQUIRED' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    <p className="muted" style={{ margin: 0 }}>
+                      Paystack&apos;s webhook amount didn&apos;t match this invoice — check the Audit Log
+                      (action <code>payment.reconciliation_required</code>) for the expected/received amounts,
+                      then resolve it below.
+                    </p>
+                    <div className="actions-row">
+                      <input
+                        type="number"
+                        placeholder="Corrected amount (optional, MATCHED only)"
+                        value={reconcileAmount[p.id] ?? ''}
+                        onChange={(e) => setReconcileAmount((r) => ({ ...r, [p.id]: e.target.value }))}
+                        style={{ maxWidth: '16rem' }}
+                      />
+                      <input
+                        placeholder="Notes (required)"
+                        value={reconcileNotes[p.id] ?? ''}
+                        onChange={(e) => setReconcileNotes((r) => ({ ...r, [p.id]: e.target.value }))}
+                      />
+                    </div>
+                    <div className="actions-row">
+                      <button
+                        className="btn btn--secondary"
+                        disabled={busy !== null || !reconcileNotes[p.id]}
+                        onClick={() =>
+                          run(`reconcile-${p.id}`, () =>
+                            apiFetch(`/admin/payments/${p.id}/reconcile`, {
+                              method: 'POST',
+                              body: JSON.stringify({
+                                status: 'MATCHED',
+                                notes: reconcileNotes[p.id],
+                                resolvedAmount: reconcileAmount[p.id] ? Number(reconcileAmount[p.id]) : undefined,
+                              }),
+                            }),
+                          )
+                        }
+                      >
+                        {busy === `reconcile-${p.id}` ? 'Resolving…' : 'Matched — mark paid'}
+                      </button>
+                      <button
+                        className="btn btn--ghost"
+                        disabled={busy !== null || !reconcileNotes[p.id]}
+                        onClick={() =>
+                          run(`reconcile-${p.id}`, () =>
+                            apiFetch(`/admin/payments/${p.id}/reconcile`, {
+                              method: 'POST',
+                              body: JSON.stringify({ status: 'REJECTED', notes: reconcileNotes[p.id] }),
+                            }),
+                          )
+                        }
+                      >
+                        {busy === `reconcile-${p.id}` ? 'Resolving…' : 'Rejected — let customer retry'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

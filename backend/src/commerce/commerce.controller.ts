@@ -11,6 +11,7 @@ import { CommerceService, CASE_INVOICE_REFERENCE_PREFIX } from './commerce.servi
 import { SubscriptionBillingService, SUBSCRIPTION_INVOICE_REFERENCE_PREFIX } from '../concierge/subscription-billing.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
+import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
 
 const STAFF_QUOTE_ROLES = [Role.CASE_MANAGER, Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
 const FINANCE_ROLES = [Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
@@ -69,6 +70,24 @@ export class CommerceController {
     @Body() dto: RefundPaymentDto,
   ) {
     return this.commerceService.refundPayment(user, paymentId, dto);
+  }
+
+  /** Database Schema & ERD Design v1.0 Section 17 "Finance Schema" —
+   * `reconciliations`. Finance-only. Resolves a payment stuck on
+   * RECONCILIATION_REQUIRED (a webhook amount mismatch) as either MATCHED
+   * (accept the amount received, move to PAID) or REJECTED (move to
+   * FAILED, freeing the case up for a fresh payment attempt). `notes` is
+   * always required. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...FINANCE_ROLES)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin/payments/:paymentId/reconcile')
+  resolveReconciliation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: ResolveReconciliationDto,
+  ) {
+    return this.commerceService.resolveReconciliation(user, paymentId, dto);
   }
 
   /** Same on-demand-sweep pattern as
