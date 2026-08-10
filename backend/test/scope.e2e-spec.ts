@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
-import { DEFAULT_PASSWORD, createCustomer, createStaff, createAgent, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -23,14 +23,6 @@ describe('Scope versioning and the quote gate', () => {
   let agentToken: string;
   let caseId: string;
 
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
-
   beforeAll(async () => {
     app = await createTestApp();
 
@@ -41,10 +33,10 @@ describe('Scope versioning and the quote gate', () => {
       createAgent('scope-agent'),
     ]);
     [tokenA, tokenB, adminToken, agentToken] = await Promise.all([
-      login(customerA.email),
-      login(customerB.email),
-      login(admin.email),
-      login(agent.email),
+      login(app, customerA.email),
+      login(app, customerB.email),
+      login(app, admin.email),
+      login(app, agent.email),
     ]);
 
     const reqRes = await request(app.getHttpServer())

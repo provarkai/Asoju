@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
-import { DEFAULT_PASSWORD, createCustomer, createStaff, createAgent, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -21,14 +21,6 @@ describe('QC outcomes: PASS_WITH_LIMITATION and REVISIT_REQUIRED', () => {
   let customerToken: string;
   let adminToken: string;
   let agentToken: string;
-
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
 
   /** Fast-forwards a fresh case to EVIDENCE_SUBMITTED — one piece of
    * evidence captured, fieldwork marked complete — the state QC actually
@@ -99,9 +91,9 @@ describe('QC outcomes: PASS_WITH_LIMITATION and REVISIT_REQUIRED', () => {
       createAgent('qc-outcomes-agent'),
     ]);
     [customerToken, adminToken, agentToken] = await Promise.all([
-      login(customer.email),
-      login(admin.email),
-      login(agent.email),
+      login(app, customer.email),
+      login(app, admin.email),
+      login(app, agent.email),
     ]);
   });
 

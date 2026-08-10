@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
-import { DEFAULT_PASSWORD, createCustomer, createStaff, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { PaymentStatus, Role } from '@prisma/client';
 
 /**
@@ -19,14 +19,6 @@ describe('Payment expiry sweep', () => {
   let customerToken: string;
   let adminToken: string;
   let financeToken: string;
-
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
 
   /** Builds a case through to a PENDING Payment, backdating its createdAt
    * so it's eligible for the expiry sweep (the built-in default window is
@@ -100,9 +92,9 @@ describe('Payment expiry sweep', () => {
       createStaff('pay-expiry-finance', Role.FINANCE),
     ]);
     [customerToken, adminToken, financeToken] = await Promise.all([
-      login(customer.email),
-      login(admin.email),
-      login(finance.email),
+      login(app, customer.email),
+      login(app, admin.email),
+      login(app, finance.email),
     ]);
   });
 

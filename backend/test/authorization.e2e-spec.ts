@@ -2,11 +2,11 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
 import {
-  DEFAULT_PASSWORD,
   createAgent,
   createCustomer,
   createPartnerContact,
   createStaff,
+  login,
   prisma,
 } from './utils/fixtures';
 import { Role } from '@prisma/client';
@@ -45,13 +45,6 @@ describe('Authorization (IDOR/BOLA)', () => {
   let allVisibleDocId: string;
   let staffOnlyDocId: string;
 
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -70,14 +63,14 @@ describe('Authorization (IDOR/BOLA)', () => {
 
     [tokenA, tokenB, adminToken, caseManagerToken, rmToken, ownAgentToken, strangerAgentToken, partnerToken] =
       await Promise.all([
-        login(customerA.email),
-        login(customerB.email),
-        login(admin.email),
-        login(caseManager.email),
-        login(relationshipManager.email),
-        login(ownAgent.email),
-        login(strangerAgent.email),
-        login(partner.email),
+        login(app, customerA.email),
+        login(app, customerB.email),
+        login(app, admin.email),
+        login(app, caseManager.email),
+        login(app, relationshipManager.email),
+        login(app, ownAgent.email),
+        login(app, strangerAgent.email),
+        login(app, partner.email),
       ]);
 
     // Build a real case for customer A: request -> admin converts -> admin

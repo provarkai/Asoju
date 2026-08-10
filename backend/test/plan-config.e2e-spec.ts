@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
-import { DEFAULT_PASSWORD, createCustomer, createStaff, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -32,14 +32,6 @@ describe('Membership plan pricing configuration', () => {
 
   const DEFAULT_PREMIUM = { priceUsd: 299, scGrantUsd: 150, discountPercent: 15, eligibleRequestsPerMonth: 5 };
 
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
-
   beforeAll(async () => {
     app = await createTestApp();
 
@@ -49,9 +41,9 @@ describe('Membership plan pricing configuration', () => {
       createStaff('plan-config-finance', Role.FINANCE),
     ]);
     [customerToken, adminToken, financeToken] = await Promise.all([
-      login(customer.email),
-      login(admin.email),
-      login(finance.email),
+      login(app, customer.email),
+      login(app, admin.email),
+      login(app, finance.email),
     ]);
   });
 

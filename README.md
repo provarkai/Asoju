@@ -239,6 +239,31 @@ now built and verified end-to-end**:
   bar, a sortable table, expandable per-row metadata. Covered by `backend/test/audit-log.e2e-spec.ts` (8
   tests) — negative-control verified: disabling the role gate, and separately disabling the `caseId`
   filter, each independently fail their test; restoring both passes again.
+- **Mandatory MFA for privileged roles** (Admin Console & Platform Admin Architecture v1.0 Section 4
+  "Admin Roles" / UX/UI Specification v1.0 Section 42 "Security UX" — "Privileged Admin accounts should
+  require MFA") — MFA existed but was opt-in for every role, including Admin, Super Admin, Finance, and
+  Compliance/Risk. Login for those four roles now returns no real session at all until MFA is enrolled:
+  `{ mfaEnrollmentRequired: true, enrollmentToken }` — a short-lived (5 min), single-purpose JWT
+  (`purpose: 'mfa_enrollment_required'`), signed with the same secret as the existing `mfa_pending`
+  challenge token but never interchangeable with it (each endpoint explicitly checks `payload.purpose`).
+  `POST /auth/mfa/enrollment-required/start` returns a fresh TOTP secret + `otpAuthUrl`;
+  `POST /auth/mfa/enrollment-required/confirm` verifies a real 6-digit code, sets `mfaEnabled: true`, and
+  only then issues actual access/refresh tokens. This is enforced entirely server-side by withholding the
+  session token — "hiding a button is not security" (the API spec's own words) — so there is no way to
+  reach a privileged account's data without completing enrollment first, regardless of what the frontend
+  does. `/login` gained a third screen for this flow, styled like the existing self-service enrollment UI
+  in Security Settings. Because this ripples into every staff-login helper across the e2e suite, the
+  previously per-file duplicated `login(email)` test helper was centralized into
+  `test/utils/fixtures.ts` as `login(app, email)`, which transparently completes real MFA enrollment
+  (via a real computed TOTP code, not a stub) whenever a role requires it — all 11 affected spec files
+  now import the shared helper. Covered by `backend/test/mandatory-mfa.e2e-spec.ts` (7 tests): enrollment
+  is required for Admin/Finance/Compliance-Risk and not for Case Manager or Customer; a garbage
+  enrollment token is rejected on both endpoints; a different account's real `mfa_pending` token is
+  rejected on the enrollment-required endpoint (proving the two token purposes are not interchangeable);
+  a wrong code is rejected leaving no session; and the full enroll → confirm flow with a real generated
+  TOTP code returns a working session, after which a *second* login goes through the normal MFA
+  challenge, not enrollment again. Negative-control verified: disabling the mandatory-enrollment check
+  fails 4 of the 7 tests; restoring it passes again.
 - **Notification preferences** — customers pick their preferred channel (WhatsApp/email/SMS) from
   `/profile`; this is the field a real channel fan-out would read from once it exists.
 - **WhatsApp AI integration — outbound verified live, inbound still a stand-in.** Provider is Zavu

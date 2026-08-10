@@ -20,6 +20,16 @@ export interface TokenPair {
 const MFA_PENDING_TTL = '5m';
 const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+/** Admin Console & Platform Admin Architecture v1.0 Section 4 "Admin
+ * Roles" / UX/UI Specification Section 42 "Security UX" — "MFA for
+ * privileged admin." The roles with the most sensitive reach in this
+ * codebase: full platform configuration (ADMIN/SUPER_ADMIN), money
+ * movement (FINANCE — refunds, SC adjustments, reconciliation), and
+ * compliance/risk data. Case-scoped staff (Case Manager, QC,
+ * Relationship Manager) aren't included — real access, but not this
+ * tier. */
+const MFA_REQUIRED_ROLES: Role[] = [Role.ADMIN, Role.SUPER_ADMIN, Role.FINANCE, Role.COMPLIANCE_RISK];
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -100,6 +110,20 @@ export class AuthService {
     const valid = await argon2.verify(user.passwordHash, dto.password);
     if (!valid) throw new UnauthorizedException('Invalid credentials');
 
+    // "Privileged Admin accounts should require MFA" — a privileged user
+    // who hasn't enrolled yet gets no real session at all, just a
+    // restricted token that can only enroll+confirm MFA (below). This is
+    // checked before the existing mfaEnabled branch since it's the same
+    // password-verified moment but a materially different response.
+    if (MFA_REQUIRED_ROLES.includes(user.role) && !user.mfaEnabled) {
+      const enrollmentToken = await this.jwt.signAsync(
+        { sub: user.id, purpose: 'mfa_enrollment_required' },
+        { secret: this.mfaPendingSecret(), expiresIn: MFA_PENDING_TTL },
+      );
+      await this.audit.record({ actorId: user.id, actorType: 'user', action: 'user.login_mfa_enrollment_required' });
+      return { mfaEnrollmentRequired: true, enrollmentToken };
+    }
+
     if (user.mfaEnabled) {
       const mfaToken = await this.jwt.signAsync(
         { sub: user.id, purpose: 'mfa_pending' },
@@ -136,6 +160,53 @@ export class AuthService {
     }
 
     await this.audit.record({ actorId: user.id, actorType: 'user', action: 'user.login_mfa_verified' });
+    const tokens = await this.issueTokens(user.id, user.role);
+    return { user: this.toPublicUser(user), ...tokens };
+  }
+
+  /** Verifies an `enrollmentToken` from the mandatory-MFA login branch
+   * above and returns the user it's for — shared by both steps of that
+   * flow. Never accepts a `mfa_pending` token (the normal-login-challenge
+   * purpose) or vice versa; the two are deliberately non-interchangeable
+   * even though they share a signing secret. */
+  private async requireMfaEnrollmentUser(enrollmentToken: string) {
+    let payload: { sub: string; purpose: string };
+    try {
+      payload = await this.jwt.verifyAsync(enrollmentToken, { secret: this.mfaPendingSecret() });
+    } catch {
+      throw new UnauthorizedException('Enrollment session expired or invalid — please log in again');
+    }
+    if (payload.purpose !== 'mfa_enrollment_required') throw new UnauthorizedException('Invalid enrollment session');
+
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user || !user.isActive) throw new UnauthorizedException('Invalid enrollment session');
+    return user;
+  }
+
+  /** Step one of mandatory MFA enrollment — same as enrollMfa(), just
+   * authorized by the restricted enrollmentToken instead of a real
+   * session, since a privileged user without MFA never gets one. */
+  async enrollMfaWithToken(enrollmentToken: string) {
+    const user = await this.requireMfaEnrollmentUser(enrollmentToken);
+    return this.enrollMfa(user.id);
+  }
+
+  /** Step two — confirms the code and, unlike self-service confirmMfa()
+   * (called by an already-logged-in user from Security Settings), also
+   * completes the login: this is the only way a privileged user without
+   * MFA ever gets real session tokens. */
+  async confirmMfaEnrollmentRequired(enrollmentToken: string, code: string) {
+    const user = await this.requireMfaEnrollmentUser(enrollmentToken);
+    if (!user.mfaSecret) throw new BadRequestException('Call the enrollment start step first');
+    if (!verifyTotpCode(user.mfaSecret, code)) {
+      await this.audit.record({ actorId: user.id, actorType: 'user', action: 'user.mfa_enrollment_failed' });
+      throw new UnauthorizedException('Incorrect code');
+    }
+
+    await this.prisma.user.update({ where: { id: user.id }, data: { mfaEnabled: true } });
+    await this.audit.record({ actorId: user.id, actorType: 'user', action: 'user.mfa_enabled' });
+    await this.audit.record({ actorId: user.id, actorType: 'user', action: 'user.login' });
+
     const tokens = await this.issueTokens(user.id, user.role);
     return { user: this.toPublicUser(user), ...tokens };
   }

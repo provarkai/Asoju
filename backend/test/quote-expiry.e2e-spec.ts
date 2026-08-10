@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
-import { DEFAULT_PASSWORD, createCustomer, createStaff, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -22,13 +22,6 @@ describe('Quote expiry', () => {
   let adminToken: string;
   let financeToken: string;
 
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
 
   /** Builds a fresh case through to a just-issued quote, returning both
    * the caseId and quoteId. */
@@ -90,9 +83,9 @@ describe('Quote expiry', () => {
       createStaff('quote-expiry-finance', Role.FINANCE),
     ]);
     [customerToken, adminToken, financeToken] = await Promise.all([
-      login(customer.email),
-      login(admin.email),
-      login(finance.email),
+      login(app, customer.email),
+      login(app, admin.email),
+      login(app, finance.email),
     ]);
   });
 

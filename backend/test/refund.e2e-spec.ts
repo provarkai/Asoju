@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
-import { DEFAULT_PASSWORD, createCustomer, createStaff, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { PaymentStatus, Role } from '@prisma/client';
 
 /**
@@ -30,14 +30,6 @@ describe('Payment refunds', () => {
   let customerToken: string;
   let adminToken: string;
   let financeToken: string;
-
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
 
   /** Builds a case through to a PAID Payment of the given amount (NGN),
    * returning the paymentId. */
@@ -107,9 +99,9 @@ describe('Payment refunds', () => {
       createStaff('refund-finance', Role.FINANCE),
     ]);
     [customerToken, adminToken, financeToken] = await Promise.all([
-      login(customer.email),
-      login(admin.email),
-      login(finance.email),
+      login(app, customer.email),
+      login(app, admin.email),
+      login(app, finance.email),
     ]);
   });
 

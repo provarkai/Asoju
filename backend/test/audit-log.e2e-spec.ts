@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
-import { DEFAULT_PASSWORD, createCustomer, createStaff, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -24,14 +24,6 @@ describe('Admin audit log', () => {
   let caseManagerToken: string;
   let caseId: string;
 
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
-
   beforeAll(async () => {
     app = await createTestApp();
 
@@ -41,9 +33,9 @@ describe('Admin audit log', () => {
       createStaff('audit-log-cm', Role.CASE_MANAGER),
     ]);
     [customerToken, adminToken, caseManagerToken] = await Promise.all([
-      login(customer.email),
-      login(admin.email),
-      login(caseManager.email),
+      login(app, customer.email),
+      login(app, admin.email),
+      login(app, caseManager.email),
     ]);
 
     // Generates a handful of real, distinct audit events tied to a known

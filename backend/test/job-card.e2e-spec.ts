@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
-import { DEFAULT_PASSWORD, createCustomer, createStaff, createAgent, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -23,14 +23,6 @@ describe('Job card — confirmed scope surfaced to the field agent', () => {
   let adminToken: string;
   let agentToken: string;
 
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
-
   beforeAll(async () => {
     app = await createTestApp();
 
@@ -40,9 +32,9 @@ describe('Job card — confirmed scope surfaced to the field agent', () => {
       createAgent('job-card-agent'),
     ]);
     [customerToken, adminToken, agentToken] = await Promise.all([
-      login(customer.email),
-      login(admin.email),
-      login(agent.email),
+      login(app, customer.email),
+      login(app, admin.email),
+      login(app, agent.email),
     ]);
   });
 

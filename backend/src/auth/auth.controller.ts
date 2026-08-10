@@ -6,7 +6,7 @@ import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-use
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
-import { ConfirmMfaDto, DisableMfaDto, VerifyMfaDto } from './dto/mfa.dto';
+import { ConfirmMfaDto, ConfirmMfaEnrollmentDto, DisableMfaDto, StartMfaEnrollmentDto, VerifyMfaDto } from './dto/mfa.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
 
 // Security hardening (independent readiness review, P0-06) — a tighter,
@@ -56,6 +56,26 @@ export class AuthController {
   @Post('mfa/enroll')
   enrollMfa(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.enrollMfa(user.id);
+  }
+
+  /** Mandatory-MFA login branch — a privileged user without MFA enabled
+   * gets an `enrollmentToken` instead of real session tokens (see
+   * AuthService.login). No JwtAuthGuard: there is no real session to
+   * guard yet — the enrollmentToken itself, verified inside the service
+   * (single-purpose, 5-minute TTL, same mechanism as mfa/verify), is the
+   * only thing authorizing these two calls. */
+  @Throttle(BRUTE_FORCE_THROTTLE)
+  @HttpCode(HttpStatus.OK)
+  @Post('mfa/enrollment-required/start')
+  startRequiredMfaEnrollment(@Body() dto: StartMfaEnrollmentDto) {
+    return this.authService.enrollMfaWithToken(dto.enrollmentToken);
+  }
+
+  @Throttle(BRUTE_FORCE_THROTTLE)
+  @HttpCode(HttpStatus.OK)
+  @Post('mfa/enrollment-required/confirm')
+  confirmRequiredMfaEnrollment(@Body() dto: ConfirmMfaEnrollmentDto) {
+    return this.authService.confirmMfaEnrollmentRequired(dto.enrollmentToken, dto.code);
   }
 
   @UseGuards(JwtAuthGuard)

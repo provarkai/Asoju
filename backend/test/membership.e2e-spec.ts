@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
-import { DEFAULT_PASSWORD, createCustomer, createStaff, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -28,14 +28,6 @@ describe('Membership / SC ledger', () => {
   let adminToken: string;
   let financeToken: string;
   let subscriptionId: string;
-
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
 
   /** Fast-forwards a fresh CONCIERGE-tier case to UNDER_REVIEW with a
    * confirmed scope (now a prerequisite for quoting — see
@@ -104,9 +96,9 @@ describe('Membership / SC ledger', () => {
       createStaff('membership-finance', Role.FINANCE),
     ]);
     [customerToken, adminToken, financeToken] = await Promise.all([
-      login(customer.email),
-      login(admin.email),
-      login(finance.email),
+      login(app, customer.email),
+      login(app, admin.email),
+      login(app, finance.email),
     ]);
   });
 

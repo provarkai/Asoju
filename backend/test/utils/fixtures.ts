@@ -1,7 +1,10 @@
 import { randomBytes } from 'crypto';
+import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
 import { PrismaClient, Role } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { generateUniqueReferralCode } from '../../src/common/referral-code';
+import { generateTotpCode } from '../../src/auth/totp';
 import type { PrismaService } from '../../src/prisma/prisma.service';
 
 export const prisma = new PrismaClient();
@@ -33,6 +36,38 @@ export async function createStaff(prefix: string, role: Role) {
   const email = uniqueEmail(prefix);
   const user = await createUser(email, role);
   return { user, email };
+}
+
+/** Logs in as `email` and returns a real access token, completing the
+ * mandatory-MFA enrollment flow first if the account needs it (ADMIN/
+ * SUPER_ADMIN/FINANCE/COMPLIANCE_RISK without MFA enabled yet — see
+ * AuthService.login's MFA_REQUIRED_ROLES). Exercises the actual
+ * server-side flow with a real generated TOTP code rather than working
+ * around it, so every e2e spec's staff fixtures stay honest about what
+ * login for a privileged role actually requires. */
+export async function login(app: INestApplication, email: string): Promise<string> {
+  const loginRes = await request(app.getHttpServer())
+    .post('/api/auth/login')
+    .send({ email, password: DEFAULT_PASSWORD })
+    .expect(200);
+
+  if (!loginRes.body.mfaEnrollmentRequired) {
+    return loginRes.body.accessToken;
+  }
+
+  const { enrollmentToken } = loginRes.body;
+  const startRes = await request(app.getHttpServer())
+    .post('/api/auth/mfa/enrollment-required/start')
+    .send({ enrollmentToken })
+    .expect(200);
+
+  const code = generateTotpCode(startRes.body.secret);
+  const confirmRes = await request(app.getHttpServer())
+    .post('/api/auth/mfa/enrollment-required/confirm')
+    .send({ enrollmentToken, code })
+    .expect(200);
+
+  return confirmRes.body.accessToken;
 }
 
 export async function createAgent(prefix: string) {

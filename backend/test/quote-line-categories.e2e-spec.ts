@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp } from './utils/bootstrap';
-import { DEFAULT_PASSWORD, createCustomer, createStaff, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -26,13 +26,6 @@ describe('Quote line categories', () => {
   let customerToken: string;
   let adminToken: string;
 
-  async function login(email: string): Promise<string> {
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email, password: DEFAULT_PASSWORD })
-      .expect(200);
-    return res.body.accessToken;
-  }
 
   /** Fast-forwards a fresh CONCIERGE-tier case to UNDER_REVIEW with a
    * confirmed scope — mirrors membership.e2e-spec.ts's helper. */
@@ -86,7 +79,7 @@ describe('Quote line categories', () => {
       createCustomer('quote-lines'),
       createStaff('quote-lines-admin', Role.ADMIN),
     ]);
-    [customerToken, adminToken] = await Promise.all([login(customer.email), login(admin.email)]);
+    [customerToken, adminToken] = await Promise.all([login(app, customer.email), login(app, admin.email)]);
 
     await request(app.getHttpServer())
       .post('/api/me/subscription')
