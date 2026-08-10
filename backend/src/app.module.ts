@@ -10,6 +10,7 @@ import { HealthModule } from './health/health.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CasesModule } from './cases/cases.module';
+import { ScopeModule } from './scope/scope.module';
 import { AiModule } from './ai/ai.module';
 import { CommerceModule } from './commerce/commerce.module';
 import { AssignmentsModule } from './assignments/assignments.module';
@@ -41,6 +42,7 @@ import { PartnersModule } from './partners/partners.module';
     NotificationsModule,
     AuthModule,
     CasesModule,
+    ScopeModule,
     AiModule,
     CommerceModule,
     AssignmentsModule,

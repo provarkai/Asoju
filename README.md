@@ -130,6 +130,21 @@ now built and verified end-to-end**:
   by `backend/test/membership.e2e-spec.ts` (8 tests, real Postgres) — confirmed to actually enforce the
   numbers, not just plausible-looking code: verified live that a broken discount calculation fails 3 of
   the 8 tests, restoring it passes all 8 again.
+- **Scope, versioned and confirmed before a quote can exist** (P0 Technical Build Spec Section 14 /
+  Engineering Backlog EPIC F, same follow-up) — a `CaseScope` (objective, tasks, deliverables,
+  exclusions, evidence requirements) is now a real prerequisite for `POST /cases/:id/quotes`, not just a
+  free-text description: no scope, or the latest version unconfirmed by the customer, and quoting is
+  rejected outright. Staff propose it from the Ops case page's new "Scope" card; the customer sees and
+  confirms it from their case page before any price appears. Revising the scope after a quote already
+  exists starts a new, unconfirmed version rather than mutating the old one in place — issuing another
+  quote needs that new version confirmed too, so "material scope changes create a traceable new version
+  and cannot silently expand execution" (the spec's own acceptance line) is enforced, not just written
+  down. Every `Quote` now carries `scopeId`, recording exactly which confirmed version it was issued
+  against. Covered by `backend/test/scope.e2e-spec.ts` (8 tests) — verified with the same negative-control
+  discipline as the membership work: temporarily removing the confirmation check breaks 2 of the 8 tests
+  (with a state-machine side effect, not just the obvious one — the case gets stuck QUOTED from the
+  incorrectly-allowed first quote, which is itself a useful confirmation the gate matters), restoring it
+  passes all 8 again.
 - **Recurring services** (Section 6 — Construction Supervision is "the first recurring-revenue
   product") — staff turn a completed case into a recurring schedule from the Ops case page; a daily
   cron sweep (plus an admin-triggerable manual run for ops/testing) spawns the next case on schedule,

@@ -44,6 +44,18 @@ interface CaseDetail {
   recurringSchedule: { id: string; cadenceDays: number; nextRunAt: string; active: boolean } | null;
 }
 
+interface ScopeDetail {
+  id: string;
+  version: number;
+  objective: string;
+  tasks: string[];
+  deliverables: string[];
+  exclusions: string[];
+  evidenceRequirements: string[];
+  confirmedAt: string | null;
+  createdAt: string;
+}
+
 export default function OpsCaseDetailPage() {
   const { user, ready } = useOpsGuard();
   const params = useParams<{ id: string }>();
@@ -68,6 +80,13 @@ export default function OpsCaseDetailPage() {
   const [documentLabel, setDocumentLabel] = useState('');
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentVisibility, setDocumentVisibility] = useState('ALL');
+  const [scope, setScope] = useState<ScopeDetail | null>(null);
+  const [scopeObjective, setScopeObjective] = useState('');
+  const [scopeTasks, setScopeTasks] = useState('');
+  const [scopeDeliverables, setScopeDeliverables] = useState('');
+  const [scopeExclusions, setScopeExclusions] = useState('');
+  const [scopeEvidence, setScopeEvidence] = useState('');
+  const [scopeFormOpen, setScopeFormOpen] = useState(false);
   const [documentAssignmentId, setDocumentAssignmentId] = useState('');
   const [cadenceDays, setCadenceDays] = useState('30');
 
@@ -83,6 +102,7 @@ export default function OpsCaseDetailPage() {
           setError(err instanceof Error ? err.message : 'Failed to load case');
         }
       });
+    apiFetch<ScopeDetail | null>(`/cases/${params.id}/scope`).then(setScope).catch(() => {});
   }
 
   useEffect(() => {
@@ -189,13 +209,110 @@ export default function OpsCaseDetailPage() {
       </div>
 
       <div className="card">
+        <h2 style={{ marginTop: 0 }}>Scope</h2>
+        <p className="muted">
+          What&apos;s actually agreed before there&apos;s a price — the customer must confirm this version before
+          a quote can be issued. Proposing a new version replaces this one and needs re-confirmation.
+        </p>
+        {scope ? (
+          <div style={{ marginBottom: '1rem' }}>
+            <p>
+              <strong>v{scope.version}</strong> —{' '}
+              {scope.confirmedAt ? (
+                <span className="badge">Confirmed {new Date(scope.confirmedAt).toLocaleDateString()}</span>
+              ) : (
+                <span className="badge" style={{ borderColor: 'var(--asoju-gold, orange)' }}>Awaiting customer confirmation</span>
+              )}
+            </p>
+            <p><strong>Objective:</strong> {scope.objective}</p>
+            <p><strong>Tasks:</strong> {scope.tasks.join('; ')}</p>
+            {scope.deliverables.length > 0 && <p><strong>Deliverables:</strong> {scope.deliverables.join('; ')}</p>}
+            {scope.exclusions.length > 0 && <p><strong>Exclusions:</strong> {scope.exclusions.join('; ')}</p>}
+            {scope.evidenceRequirements.length > 0 && (
+              <p><strong>Evidence required:</strong> {scope.evidenceRequirements.join('; ')}</p>
+            )}
+          </div>
+        ) : (
+          <p className="muted">No scope proposed yet.</p>
+        )}
+        {detail.status === 'UNDER_REVIEW' && !scopeFormOpen && (
+          <button className="btn btn--ghost" onClick={() => setScopeFormOpen(true)}>
+            {scope ? 'Propose a revised scope' : 'Propose scope'}
+          </button>
+        )}
+        {detail.status === 'UNDER_REVIEW' && scopeFormOpen && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxWidth: '32rem' }}>
+            <input placeholder="Objective" value={scopeObjective} onChange={(e) => setScopeObjective(e.target.value)} />
+            <textarea
+              placeholder="Tasks — one per line"
+              value={scopeTasks}
+              onChange={(e) => setScopeTasks(e.target.value)}
+              rows={3}
+            />
+            <textarea
+              placeholder="Deliverables — one per line (optional)"
+              value={scopeDeliverables}
+              onChange={(e) => setScopeDeliverables(e.target.value)}
+              rows={2}
+            />
+            <textarea
+              placeholder="Exclusions — one per line (optional)"
+              value={scopeExclusions}
+              onChange={(e) => setScopeExclusions(e.target.value)}
+              rows={2}
+            />
+            <textarea
+              placeholder="Evidence required — one per line (optional)"
+              value={scopeEvidence}
+              onChange={(e) => setScopeEvidence(e.target.value)}
+              rows={2}
+            />
+            <div className="actions-row">
+              <button
+                className="btn"
+                disabled={!scopeObjective || !scopeTasks || busy !== null}
+                onClick={() =>
+                  run('scope', async () => {
+                    await apiFetch(`/cases/${detail.id}/scope`, {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        objective: scopeObjective,
+                        tasks: scopeTasks.split('\n').map((s) => s.trim()).filter(Boolean),
+                        deliverables: scopeDeliverables.split('\n').map((s) => s.trim()).filter(Boolean),
+                        exclusions: scopeExclusions.split('\n').map((s) => s.trim()).filter(Boolean),
+                        evidenceRequirements: scopeEvidence.split('\n').map((s) => s.trim()).filter(Boolean),
+                      }),
+                    });
+                    setScopeObjective('');
+                    setScopeTasks('');
+                    setScopeDeliverables('');
+                    setScopeExclusions('');
+                    setScopeEvidence('');
+                    setScopeFormOpen(false);
+                  })
+                }
+              >
+                {busy === 'scope' ? 'Sending…' : 'Send to customer for confirmation'}
+              </button>
+              <button className="btn btn--ghost" onClick={() => setScopeFormOpen(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
         <h2 style={{ marginTop: 0 }}>Quote</h2>
         {detail.quotes.map((q) => (
           <p key={q.id}>
             {q.currency} {Number(q.amount).toLocaleString()} — {q.acceptedAt ? `accepted ${new Date(q.acceptedAt).toLocaleDateString()}` : 'awaiting customer acceptance'}
           </p>
         ))}
-        {detail.quotes.length === 0 && detail.status === 'UNDER_REVIEW' && (
+        {detail.quotes.length === 0 && detail.status === 'UNDER_REVIEW' && !scope?.confirmedAt && (
+          <p className="muted">
+            {scope ? 'The customer needs to confirm the scope above before a quote can be issued.' : 'Propose a scope above and have the customer confirm it before issuing a quote.'}
+          </p>
+        )}
+        {detail.quotes.length === 0 && detail.status === 'UNDER_REVIEW' && scope?.confirmedAt && (
           <div className="actions-row">
             <input
               type="number"

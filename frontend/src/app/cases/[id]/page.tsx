@@ -41,6 +41,17 @@ interface QuoteEntry {
   acceptedAt: string | null;
 }
 
+interface ScopeEntry {
+  id: string;
+  version: number;
+  objective: string;
+  tasks: string[];
+  deliverables: string[];
+  exclusions: string[];
+  evidenceRequirements: string[];
+  confirmedAt: string | null;
+}
+
 interface PaymentEntry {
   id: string;
   status: string;
@@ -101,11 +112,25 @@ export default function CaseDetailPage() {
   const [ratingComment, setRatingComment] = useState('');
   const [documentLabel, setDocumentLabel] = useState('');
   const [documentRef, setDocumentRef] = useState('');
+  const [scope, setScope] = useState<ScopeEntry | null>(null);
 
   function load() {
     apiFetch<CaseDetail>(`/cases/${params.id}`)
       .then(setDetail)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load case'));
+    apiFetch<ScopeEntry | null>(`/cases/${params.id}/scope`).then(setScope).catch(() => {});
+  }
+
+  async function confirmScope() {
+    setSubmitting('confirm-scope');
+    try {
+      await apiFetch(`/cases/${params.id}/scope/confirm`, { method: 'POST' });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to confirm scope');
+    } finally {
+      setSubmitting(null);
+    }
   }
 
   useEffect(() => {
@@ -215,6 +240,39 @@ export default function CaseDetailPage() {
         <h2 style={{ marginTop: 0 }}>What you asked us to do</h2>
         <p>{detail.description}</p>
       </div>
+
+      {scope && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Scope of work</h2>
+          <p className="muted">Exactly what&apos;s included before you see a price.</p>
+          <p><strong>{scope.objective}</strong></p>
+          <ul>
+            {scope.tasks.map((t, i) => <li key={i}>{t}</li>)}
+          </ul>
+          {scope.deliverables.length > 0 && (
+            <>
+              <p style={{ marginBottom: '0.25rem' }}><strong>You&apos;ll receive:</strong></p>
+              <ul>{scope.deliverables.map((d, i) => <li key={i}>{d}</li>)}</ul>
+            </>
+          )}
+          {scope.exclusions.length > 0 && (
+            <>
+              <p style={{ marginBottom: '0.25rem' }}><strong>Not included:</strong></p>
+              <ul>{scope.exclusions.map((e, i) => <li key={i}>{e}</li>)}</ul>
+            </>
+          )}
+          {scope.confirmedAt ? (
+            <p className="muted">Confirmed {new Date(scope.confirmedAt).toLocaleDateString()}.</p>
+          ) : (
+            <>
+              <p>Work won&apos;t be quoted until you confirm this is what you want done.</p>
+              <button className="btn" disabled={submitting !== null} onClick={confirmScope}>
+                {submitting === 'confirm-scope' ? 'Confirming…' : 'Confirm scope'}
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {detail.quotes.length > 0 && (
         <div className="card">

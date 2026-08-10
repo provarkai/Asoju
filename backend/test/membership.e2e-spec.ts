@@ -37,8 +37,11 @@ describe('Membership / SC ledger', () => {
     return res.body.accessToken;
   }
 
-  /** Fast-forwards a fresh CONCIERGE-tier case to UNDER_REVIEW — the
-   * quote/membership machinery is what's under test here, not the
+  /** Fast-forwards a fresh CONCIERGE-tier case to UNDER_REVIEW with a
+   * confirmed scope (now a prerequisite for quoting — see
+   * scope.e2e-spec.ts for the scope-gate tests themselves; this helper
+   * exists so the membership/SC tests don't have to re-derive that setup) —
+   * the quote/membership machinery is what's under test here, not the
    * request->case conversion chain (covered in authorization.e2e-spec.ts). */
   async function createConciergeCaseUnderReview(): Promise<string> {
     const reqRes = await request(app.getHttpServer())
@@ -70,6 +73,16 @@ describe('Membership / SC ledger', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ toStatus: 'UNDER_REVIEW' })
       .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/cases/${caseId}/scope`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ objective: 'Handle the request', tasks: ['Visit site', 'Compile report'] })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/cases/${caseId}/scope/confirm`)
+      .set('Authorization', `Bearer ${customerToken}`)
+      .expect(200);
 
     return caseId;
   }

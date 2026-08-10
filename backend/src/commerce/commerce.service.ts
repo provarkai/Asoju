@@ -8,6 +8,7 @@ import { CasesService } from '../cases/cases.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { PaystackService } from '../payments/paystack.service';
 import { MembershipService } from '../concierge/membership.service';
+import { ScopeService } from '../scope/scope.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
 
 /** Prefix distinguishing case-invoice Paystack references from subscription
@@ -25,6 +26,7 @@ export class CommerceService {
     private readonly casesService: CasesService,
     private readonly paystack: PaystackService,
     private readonly membership: MembershipService,
+    private readonly scope: ScopeService,
   ) {}
 
   /**
@@ -40,6 +42,21 @@ export class CommerceService {
     if (!serviceCase) throw new NotFoundException('Case not found');
     if (serviceCase.status !== CaseStatus.UNDER_REVIEW) {
       throw new BadRequestException(`Cannot quote a case in status ${serviceCase.status}`);
+    }
+
+    // P0 Technical Build Spec Section 14 / EPIC F — "cannot silently
+    // expand execution": a quote can only ever be issued against a scope
+    // the customer has actually confirmed, never a bare description.
+    // Revising the scope after this starts a new, unconfirmed version
+    // (ScopeService.createOrRevise) — it does not retroactively invalidate
+    // an already-issued quote, but staff can't issue a *new* one until the
+    // customer re-confirms.
+    const latestScope = await this.scope.getLatest(caseId);
+    if (!latestScope) {
+      throw new BadRequestException('This case has no scope yet — create one and have the customer confirm it before quoting');
+    }
+    if (!latestScope.confirmedAt) {
+      throw new BadRequestException('The customer has not confirmed the current scope yet — cannot quote until they do');
     }
 
     // P0 Technical Build Spec Section 17 — "Membership discounts are
@@ -58,6 +75,7 @@ export class CommerceService {
         amount: benefit ? benefit.finalAmount : dto.amount,
         currency: dto.currency ?? 'NGN',
         breakdown: dto.breakdown as any,
+        scopeId: latestScope.id,
         subscriptionId: benefit?.subscriptionId,
         baseAmount: benefit ? dto.amount : undefined,
         discountPercent: benefit?.discountPercent,

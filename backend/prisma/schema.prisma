@@ -252,6 +252,8 @@ model User {
   rmPortfolio         Customer[]           @relation("CustomerRm")
   whatsAppThread      WhatsAppThread?
   partnerContact      PartnerContact?
+  scopesCreated       CaseScope[]          @relation("ScopeCreatedBy")
+  scopesConfirmed     CaseScope[]          @relation("ScopeConfirmedBy")
 
   @@index([role])
 }
@@ -516,6 +518,9 @@ model ServiceCase {
   /// case's quote — see ScLedgerEntry.
   scLedgerEntries ScLedgerEntry[]
 
+  /// P0 Technical Build Spec Section 14 "Scope Versioning" — see CaseScope.
+  scopes CaseScope[]
+
   @@index([status])
   @@index([customerId])
   @@index([serviceType])
@@ -533,6 +538,50 @@ model CaseTask {
   createdAt   DateTime    @default(now())
 
   evidence Evidence[]
+}
+
+/// P0 Technical Build Spec Section 14 "Scope Versioning" / P0 Engineering
+/// Backlog EPIC F — "material scope changes create a traceable new version
+/// and cannot silently expand execution." This is what a customer confirms
+/// and what CommerceService.createQuote() gates on (see the comment there)
+/// — separate from CaseTask, which is the field-execution checklist
+/// generated later from the same case's service-type template; wiring the
+/// two together so Job Cards are generated strictly from an approved
+/// scope's task list is a further, not-yet-built increment, not this one.
+model CaseScope {
+  id     String      @id @default(uuid())
+  caseId String
+  case   ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  /// Incrementing per case (1, 2, 3, ...) — never reused, never mutated
+  /// after creation. A revision always inserts a new row.
+  version Int
+
+  objective String
+
+  /// string[] each — deliberately simple JSON arrays rather than child
+  /// tables: order matters, items are short, and nothing here needs its
+  /// own independent lifecycle (no per-task status — that's CaseTask's job).
+  tasks                Json
+  deliverables         Json
+  exclusions           Json
+  evidenceRequirements Json
+
+  createdById String
+  createdBy   User     @relation("ScopeCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  /// Null until the customer confirms this specific version — a new
+  /// version always starts unconfirmed, even if a prior version was
+  /// approved (P0 UX Spec: "Scope changes require explicit confirmation").
+  confirmedById String?
+  confirmedBy   User?     @relation("ScopeConfirmedBy", fields: [confirmedById], references: [id])
+  confirmedAt   DateTime?
+
+  quotes Quote[]
+
+  @@unique([caseId, version])
+  @@index([caseId])
 }
 
 /// Append-only per-case status trail (distinct from the global AuditEvent
@@ -779,6 +828,14 @@ model Quote {
   discountPercent Decimal?      @db.Decimal(5, 2)
   discountAmount  Decimal?      @db.Decimal(12, 2)
   scAppliedNgn    Decimal?      @db.Decimal(12, 2)
+
+  /// Which confirmed CaseScope version this was quoted against (P0
+  /// Technical Build Spec Section 14) — CommerceService.createQuote()
+  /// requires this to be set; nullable only because a quote can outlive
+  /// the case's scope history in principle (onDelete: SetNull), not
+  /// because a quote is ever meant to exist without one.
+  scopeId String?
+  scope   CaseScope? @relation(fields: [scopeId], references: [id], onDelete: SetNull)
 
   invoices        Invoice[]
   scLedgerEntries ScLedgerEntry[]
