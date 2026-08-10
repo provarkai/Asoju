@@ -839,13 +839,47 @@ model Report {
 // Commercial: quotes, invoices, payments, refunds, payouts
 // ---------------------------------------------------------------------------
 
+/// P0 Technical Build Spec Section 16 "Quote Line Categories". DISCOUNT and
+/// SC_CREDIT from the spec's table aren't included here — those are
+/// system-computed *outputs* of a quote (Quote.discountAmount/scAppliedNgn
+/// below), never something staff enter as an input line, unlike the four
+/// categories here.
+enum QuoteLineCategory {
+  /// "Eligible for membership discount/SC according to configured rules" —
+  /// the only category CommerceService.createQuote() sums into the
+  /// discount/SC-eligible base; everything else passes through untouched.
+  ASOJU_SERVICE_FEE
+  /// "Separate customer-authorized cost."
+  EXTERNAL_COST
+  /// "Separate professional fee."
+  THIRD_PARTY_PROFESSIONAL
+  /// "Separate where applicable."
+  TAX_STATUTORY
+}
+
+/// One line on a Quote — replaces the old free-form `breakdown` JSON
+/// (unstructured, unused in any calculation, never rendered anywhere) with
+/// the categorized lines the spec actually calls for. Never mutated after
+/// creation; a revised quote is a new Quote with new lines (see the
+/// scopeId comment below re: quote-versioning being a separate increment).
+model QuoteLine {
+  id       String            @id @default(uuid())
+  quoteId  String
+  quote    Quote             @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  category QuoteLineCategory
+  label    String
+  amount   Decimal           @db.Decimal(12, 2)
+
+  @@index([quoteId])
+}
+
 model Quote {
   id         String      @id @default(uuid())
   caseId     String
   case       ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
   amount     Decimal     @db.Decimal(12, 2)
   currency   String      @default("NGN")
-  breakdown  Json?
+  lines      QuoteLine[]
   expiresAt  DateTime?
   acceptedAt DateTime?
   createdAt  DateTime    @default(now())
@@ -854,15 +888,18 @@ model Quote {
   /// 17) — nullable-throughout: only populated when the case's customer
   /// had an eligible active Subscription at quote-creation time. `amount`
   /// above is always the final payable total either way; these fields
-  /// exist so that total stays explainable rather than opaque, without
-  /// requiring the full quote-line-category rework (a separate, larger,
-  /// not-yet-built increment — see README).
-  subscriptionId  String?
-  subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
-  baseAmount      Decimal?      @db.Decimal(12, 2)
-  discountPercent Decimal?      @db.Decimal(5, 2)
-  discountAmount  Decimal?      @db.Decimal(12, 2)
-  scAppliedNgn    Decimal?      @db.Decimal(12, 2)
+  /// exist so that total stays explainable rather than opaque.
+  /// `baseAmount` is specifically the sum of this quote's ASOJU_SERVICE_FEE
+  /// lines (what the discount/SC actually apply against, per Section 16 —
+  /// never the whole quote); `nonServiceFeeAmount` is the sum of every
+  /// other line, added back on top untouched by either.
+  subscriptionId      String?
+  subscription        Subscription? @relation(fields: [subscriptionId], references: [id])
+  baseAmount          Decimal?      @db.Decimal(12, 2)
+  nonServiceFeeAmount Decimal?      @db.Decimal(12, 2)
+  discountPercent     Decimal?      @db.Decimal(5, 2)
+  discountAmount      Decimal?      @db.Decimal(12, 2)
+  scAppliedNgn        Decimal?      @db.Decimal(12, 2)
 
   /// Which confirmed CaseScope version this was quoted against (P0
   /// Technical Build Spec Section 14) — CommerceService.createQuote()

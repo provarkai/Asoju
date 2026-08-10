@@ -383,7 +383,7 @@ describe('Authorization (IDOR/BOLA)', () => {
       await request(app.getHttpServer())
         .post(`/api/cases/${caseId}/quotes`)
         .set('Authorization', `Bearer ${ownAgentToken}`)
-        .send({ amount: 1000 })
+        .send({ lines: [{ category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: 1000 }] })
         .expect(403);
     });
 

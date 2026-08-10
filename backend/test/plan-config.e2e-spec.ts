@@ -204,7 +204,7 @@ describe('Membership plan pricing configuration', () => {
       const quoteRes = await request(app.getHttpServer())
         .post(`/api/cases/${caseId}/quotes`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ amount: 100000 })
+        .send({ lines: [{ category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: 100000 }] })
         .expect(201);
       // 25% of 100,000 = 25,000 — the live config at quote time, not
       // whatever the discount was when this customer originally subscribed.

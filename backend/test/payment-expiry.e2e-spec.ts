@@ -69,7 +69,7 @@ describe('Payment expiry sweep', () => {
     const quoteRes = await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/quotes`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ amount: 50000 })
+      .send({ lines: [{ category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: 50000 }] })
       .expect(201);
     const acceptRes = await request(app.getHttpServer())
       .post(`/api/quotes/${quoteRes.body.id}/accept`)

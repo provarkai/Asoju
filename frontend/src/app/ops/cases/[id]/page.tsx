@@ -39,7 +39,18 @@ interface CaseDetail {
   evidence: { id: string; type: string; description: string | null; uploader?: { email: string } | null; viewUrl: string }[];
   documents: { id: string; label: string; createdAt: string; visibility: string; restrictedToAssignmentId: string | null; viewUrl: string }[];
   reports: { id: string; summary: string; limitation: string | null; createdAt: string }[];
-  quotes: { id: string; amount: string; currency: string; acceptedAt: string | null }[];
+  quotes: {
+    id: string;
+    amount: string;
+    currency: string;
+    acceptedAt: string | null;
+    baseAmount: string | null;
+    nonServiceFeeAmount: string | null;
+    discountPercent: string | null;
+    discountAmount: string | null;
+    scAppliedNgn: string | null;
+    lines: { id: string; category: string; label: string; amount: string }[];
+  }[];
   invoices: {
     id: string;
     amount: string;
@@ -75,7 +86,10 @@ export default function OpsCaseDetailPage() {
   // Form state
   const [nextStatus, setNextStatus] = useState('');
   const [transitionReason, setTransitionReason] = useState('');
-  const [quoteAmount, setQuoteAmount] = useState('');
+  interface QuoteLineDraft { category: string; label: string; amount: string }
+  const [quoteLines, setQuoteLines] = useState<QuoteLineDraft[]>([
+    { category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: '' },
+  ]);
   const [refundAmount, setRefundAmount] = useState<Record<string, string>>({});
   const [refundReason, setRefundReason] = useState<Record<string, string>>({});
   const [assignRole, setAssignRole] = useState<'FIELD_AGENT' | 'PROVIDER'>('FIELD_AGENT');
@@ -311,9 +325,40 @@ export default function OpsCaseDetailPage() {
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Quote</h2>
         {detail.quotes.map((q) => (
-          <p key={q.id}>
-            {q.currency} {Number(q.amount).toLocaleString()} — {q.acceptedAt ? `accepted ${new Date(q.acceptedAt).toLocaleDateString()}` : 'awaiting customer acceptance'}
-          </p>
+          <div key={q.id} style={{ marginBottom: '0.75rem' }}>
+            {q.lines.map((line) => (
+              <div key={line.id} className="case-row">
+                <span className="muted">
+                  {line.label}
+                  {line.category !== 'ASOJU_SERVICE_FEE' && (
+                    <span className="badge" style={{ marginLeft: '0.4rem', fontSize: '0.7rem' }}>
+                      {line.category.replace(/_/g, ' ').toLowerCase()}
+                    </span>
+                  )}
+                </span>
+                <span>{q.currency} {Number(line.amount).toLocaleString()}</span>
+              </div>
+            ))}
+            {q.discountPercent && (
+              <div className="case-row">
+                <span className="muted">Membership discount ({Number(q.discountPercent)}%)</span>
+                <span>−{q.currency} {Number(q.discountAmount).toLocaleString()}</span>
+              </div>
+            )}
+            {q.scAppliedNgn && Number(q.scAppliedNgn) > 0 && (
+              <div className="case-row">
+                <span className="muted">SC applied</span>
+                <span>−{q.currency} {Number(q.scAppliedNgn).toLocaleString()}</span>
+              </div>
+            )}
+            <div className="case-row">
+              <strong>Total</strong>
+              <strong>{q.currency} {Number(q.amount).toLocaleString()}</strong>
+            </div>
+            <p className="muted" style={{ margin: 0 }}>
+              {q.acceptedAt ? `Accepted ${new Date(q.acceptedAt).toLocaleDateString()}` : 'Awaiting customer acceptance'}
+            </p>
+          </div>
         ))}
         {detail.quotes.length === 0 && detail.status === 'UNDER_REVIEW' && !scope?.confirmedAt && (
           <p className="muted">
@@ -321,27 +366,61 @@ export default function OpsCaseDetailPage() {
           </p>
         )}
         {detail.quotes.length === 0 && detail.status === 'UNDER_REVIEW' && scope?.confirmedAt && (
-          <div className="actions-row">
-            <input
-              type="number"
-              placeholder="Amount (NGN)"
-              value={quoteAmount}
-              onChange={(e) => setQuoteAmount(e.target.value)}
-            />
-            <button
-              className="btn"
-              disabled={!quoteAmount || busy !== null}
-              onClick={() =>
-                run('quote', () =>
-                  apiFetch(`/cases/${detail.id}/quotes`, {
-                    method: 'POST',
-                    body: JSON.stringify({ amount: Number(quoteAmount), currency: 'NGN' }),
-                  }),
-                )
-              }
-            >
-              {busy === 'quote' ? 'Issuing…' : 'Issue quote'}
-            </button>
+          <div>
+            {quoteLines.map((line, i) => (
+              <div key={i} className="actions-row" style={{ marginBottom: '0.4rem' }}>
+                <select
+                  value={line.category}
+                  onChange={(e) => setQuoteLines((ls) => ls.map((l, j) => (j === i ? { ...l, category: e.target.value } : l)))}
+                >
+                  <option value="ASOJU_SERVICE_FEE">ASOJU service fee</option>
+                  <option value="EXTERNAL_COST">External cost</option>
+                  <option value="THIRD_PARTY_PROFESSIONAL">Third-party professional fee</option>
+                  <option value="TAX_STATUTORY">Tax / statutory</option>
+                </select>
+                <input
+                  placeholder="Label"
+                  value={line.label}
+                  onChange={(e) => setQuoteLines((ls) => ls.map((l, j) => (j === i ? { ...l, label: e.target.value } : l)))}
+                />
+                <input
+                  type="number"
+                  placeholder="Amount (NGN)"
+                  value={line.amount}
+                  onChange={(e) => setQuoteLines((ls) => ls.map((l, j) => (j === i ? { ...l, amount: e.target.value } : l)))}
+                />
+                {quoteLines.length > 1 && (
+                  <button className="btn btn--ghost" onClick={() => setQuoteLines((ls) => ls.filter((_, j) => j !== i))}>
+                    Remove
+                  </button>
+                )}
+              </div>
+            ))}
+            <div className="actions-row">
+              <button
+                className="btn btn--secondary"
+                onClick={() => setQuoteLines((ls) => [...ls, { category: 'EXTERNAL_COST', label: '', amount: '' }])}
+              >
+                Add line
+              </button>
+              <button
+                className="btn"
+                disabled={busy !== null || quoteLines.some((l) => !l.label || !l.amount)}
+                onClick={() =>
+                  run('quote', () =>
+                    apiFetch(`/cases/${detail.id}/quotes`, {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        currency: 'NGN',
+                        lines: quoteLines.map((l) => ({ category: l.category, label: l.label, amount: Number(l.amount) })),
+                      }),
+                    }),
+                  )
+                }
+              >
+                {busy === 'quote' ? 'Issuing…' : 'Issue quote'}
+              </button>
+            </div>
           </div>
         )}
         {detail.quotes.length === 0 && detail.status !== 'UNDER_REVIEW' && (

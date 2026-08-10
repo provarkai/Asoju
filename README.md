@@ -36,6 +36,20 @@ end-to-end against a real Postgres instance:
 **Case → Quote → Payment**
 - Staff issue a `Quote` on a case under review (`UNDER_REVIEW` → `QUOTED`); the customer accepts it,
   creating an `Invoice` (→ `AWAITING_PAYMENT`).
+- **Quote Line Categories** (P0 Technical Build Spec Section 15/16 "Quote Engine / Quote Line
+  Categories") — a quote is its categorized `QuoteLine[]` now, not one flat number: `ASOJU_SERVICE_FEE`,
+  `EXTERNAL_COST`, `THIRD_PARTY_PROFESSIONAL`, `TAX_STATUTORY` (Section 4's "Do not hide external costs
+  inside ASOJU fees"). This closes a real correctness gap the old flat-amount shape had: membership
+  discount/SC now apply **only** to the `ASOJU_SERVICE_FEE` lines' sum (`Quote.baseAmount`) — everything
+  else (`Quote.nonServiceFeeAmount`) passes through untouched, added back on top, at both quote-creation
+  (`CommerceService.createQuote`) and acceptance (`MembershipService.commitBenefit`). A quote made up
+  entirely of external/third-party costs is never discount-eligible and never counts against the
+  monthly Concierge allowance. Ops issues quotes from a line-item builder (`/ops/cases/:id`); the
+  customer and ops quote views both show the ASOJU fee, discount, SC, external costs, and third-party
+  fees as separate lines, per the P0 UX Spec's "Customer Screen — Quote" table. Covered by
+  `backend/test/quote-line-categories.e2e-spec.ts` (4 tests) — negative-control verified: computing the
+  discount against the whole quote (service fee + external + professional) instead of the service fee
+  alone fails the precise-math test; restoring it passes again.
 - Payment status changes **only** via a real Paystack integration (`POST /api/invoices/:id/pay` starts
   hosted checkout; `POST /api/payments/webhook/paystack` verifies Paystack's actual HMAC-SHA512
   signature over the raw request body, not a shared-secret stand-in — Non-Negotiable #4, never a

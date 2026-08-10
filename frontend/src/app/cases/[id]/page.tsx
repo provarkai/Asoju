@@ -35,11 +35,22 @@ interface ApprovalEntry {
   createdAt: string;
 }
 
+interface QuoteLineEntry {
+  id: string;
+  category: string;
+  label: string;
+  amount: string;
+}
+
 interface QuoteEntry {
   id: string;
   amount: string;
   currency: string;
   acceptedAt: string | null;
+  discountPercent: string | null;
+  discountAmount: string | null;
+  scAppliedNgn: string | null;
+  lines: QuoteLineEntry[];
 }
 
 interface ScopeEntry {
@@ -279,15 +290,73 @@ export default function CaseDetailPage() {
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Quote</h2>
           {detail.quotes.map((q) => (
-            <div key={q.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <strong>
-                  {q.currency} {Number(q.amount).toLocaleString()}
-                </strong>
-                {q.acceptedAt && (
-                  <div className="muted">Accepted {new Date(q.acceptedAt).toLocaleString()}</div>
-                )}
+            <div key={q.id} style={{ marginBottom: '0.75rem' }}>
+              {q.lines
+                .filter((l) => l.category === 'ASOJU_SERVICE_FEE')
+                .map((line) => (
+                  <div key={line.id} className="case-row">
+                    <span className="muted">ASOJU service fee — {line.label}</span>
+                    <span>{q.currency} {Number(line.amount).toLocaleString()}</span>
+                  </div>
+                ))}
+              {q.discountPercent && (
+                <div className="case-row">
+                  <span className="muted">Membership discount ({Number(q.discountPercent)}%)</span>
+                  <span>−{q.currency} {Number(q.discountAmount).toLocaleString()}</span>
+                </div>
+              )}
+              {q.scAppliedNgn && Number(q.scAppliedNgn) > 0 && (
+                <div className="case-row">
+                  <span className="muted">SC applied</span>
+                  <span>−{q.currency} {Number(q.scAppliedNgn).toLocaleString()}</span>
+                </div>
+              )}
+              {q.lines.some((l) => l.category === 'EXTERNAL_COST') && (
+                <>
+                  <p className="muted" style={{ margin: '0.5rem 0 0.2rem' }}>External costs (separate from our fee)</p>
+                  {q.lines
+                    .filter((l) => l.category === 'EXTERNAL_COST')
+                    .map((line) => (
+                      <div key={line.id} className="case-row">
+                        <span className="muted">{line.label}</span>
+                        <span>{q.currency} {Number(line.amount).toLocaleString()}</span>
+                      </div>
+                    ))}
+                </>
+              )}
+              {q.lines.some((l) => l.category === 'THIRD_PARTY_PROFESSIONAL') && (
+                <>
+                  <p className="muted" style={{ margin: '0.5rem 0 0.2rem' }}>Third-party professional fees</p>
+                  {q.lines
+                    .filter((l) => l.category === 'THIRD_PARTY_PROFESSIONAL')
+                    .map((line) => (
+                      <div key={line.id} className="case-row">
+                        <span className="muted">{line.label}</span>
+                        <span>{q.currency} {Number(line.amount).toLocaleString()}</span>
+                      </div>
+                    ))}
+                </>
+              )}
+              {q.lines.some((l) => l.category === 'TAX_STATUTORY') && (
+                <>
+                  <p className="muted" style={{ margin: '0.5rem 0 0.2rem' }}>Tax / statutory</p>
+                  {q.lines
+                    .filter((l) => l.category === 'TAX_STATUTORY')
+                    .map((line) => (
+                      <div key={line.id} className="case-row">
+                        <span className="muted">{line.label}</span>
+                        <span>{q.currency} {Number(line.amount).toLocaleString()}</span>
+                      </div>
+                    ))}
+                </>
+              )}
+              <div className="case-row" style={{ marginTop: '0.4rem' }}>
+                <strong>Total due</strong>
+                <strong>{q.currency} {Number(q.amount).toLocaleString()}</strong>
               </div>
+              {q.acceptedAt && (
+                <div className="muted">Accepted {new Date(q.acceptedAt).toLocaleString()}</div>
+              )}
               {!q.acceptedAt && detail.status === 'QUOTED' && (
                 <button className="btn" disabled={submitting !== null} onClick={() => acceptQuote(q.id)}>
                   {submitting === 'accept-quote' ? 'Accepting…' : 'Accept & proceed to payment'}

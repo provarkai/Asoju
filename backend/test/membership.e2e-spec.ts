@@ -155,7 +155,7 @@ describe('Membership / SC ledger', () => {
     const quoteRes = await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/quotes`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ amount: 100000 })
+      .send({ lines: [{ category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: 100000 }] })
       .expect(201);
 
     // 10% of 100,000 = 10,000 discount -> 90,000 after discount. $50 SC
@@ -186,7 +186,7 @@ describe('Membership / SC ledger', () => {
     const quoteRes = await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/quotes`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ amount: 500000 })
+      .send({ lines: [{ category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: 500000 }] })
       .expect(201);
 
     // Still the 2nd eligible request this period (Priority allows 2), so
@@ -209,7 +209,7 @@ describe('Membership / SC ledger', () => {
     const quoteRes = await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/quotes`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ amount: 50000 })
+      .send({ lines: [{ category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: 50000 }] })
       .expect(201);
 
     expect(quoteRes.body.subscriptionId).toBeFalsy();

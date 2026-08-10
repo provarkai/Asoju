@@ -107,6 +107,7 @@ export class MembershipService {
     caseId: string;
     subscriptionId: string | null;
     baseAmount: Prisma.Decimal | null;
+    nonServiceFeeAmount: Prisma.Decimal | null;
     discountAmount: Prisma.Decimal | null;
     scAppliedNgn: Prisma.Decimal | null;
     amount: Prisma.Decimal;
@@ -114,7 +115,12 @@ export class MembershipService {
     if (!quote.subscriptionId) return { finalAmount: Number(quote.amount), adjusted: false };
 
     const subscription = await this.prisma.subscription.findUnique({ where: { id: quote.subscriptionId } });
+    // P0 Technical Build Spec Section 16 — the discount/SC only ever apply
+    // to the ASOJU_SERVICE_FEE lines (baseAmount); nonServiceFeeAmount
+    // (external/third-party/tax lines) is added back on top untouched,
+    // same as at quote-creation time.
     const baseAmount = Number(quote.baseAmount ?? quote.amount);
+    const nonServiceFeeAmount = Number(quote.nonServiceFeeAmount ?? 0);
     const discountAmount = Number(quote.discountAmount ?? 0);
 
     // Membership lapsed between quote creation and acceptance — the
@@ -122,7 +128,7 @@ export class MembershipService {
     // undiscounted base amount rather than silently keeping a benefit
     // they no longer hold.
     if (!subscription || subscription.status !== SubscriptionStatus.ACTIVE) {
-      const finalAmount = Math.round(baseAmount);
+      const finalAmount = Math.round(baseAmount) + nonServiceFeeAmount;
       return { finalAmount, adjusted: finalAmount !== Math.round(Number(quote.amount)) };
     }
 
@@ -134,7 +140,7 @@ export class MembershipService {
       fxRate,
     });
 
-    const finalAmount = Math.max(0, Math.round(baseAmount - discountAmount - appliedNgn));
+    const finalAmount = Math.max(0, Math.round(baseAmount - discountAmount - appliedNgn)) + nonServiceFeeAmount;
     const adjusted = finalAmount !== Math.round(Number(quote.amount));
     return { finalAmount, adjusted };
   }

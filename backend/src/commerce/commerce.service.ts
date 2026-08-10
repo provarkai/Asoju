@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { CaseStatus, CaseTier, PaymentStatus } from '@prisma/client';
+import { CaseStatus, CaseTier, PaymentStatus, QuoteLineCategory } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -72,29 +72,48 @@ export class CommerceService {
       throw new BadRequestException('The customer has not confirmed the current scope yet — cannot quote until they do');
     }
 
+    // P0 Technical Build Spec Section 16 "Quote Line Categories" —
+    // discount/SC eligibility is explicit per line: only ASOJU_SERVICE_FEE
+    // lines feed the discountable base; EXTERNAL_COST/THIRD_PARTY_
+    // PROFESSIONAL/TAX_STATUTORY pass through untouched, added back on top
+    // afterwards (Section 4's "Do not hide external costs inside ASOJU
+    // fees").
+    const serviceFeeTotal = dto.lines
+      .filter((l) => l.category === QuoteLineCategory.ASOJU_SERVICE_FEE)
+      .reduce((sum, l) => sum + l.amount, 0);
+    const nonServiceFeeTotal = dto.lines
+      .filter((l) => l.category !== QuoteLineCategory.ASOJU_SERVICE_FEE)
+      .reduce((sum, l) => sum + l.amount, 0);
+
     // P0 Technical Build Spec Section 17 — "Membership discounts are
-    // calculated server-side," never entered by staff. This is a
-    // read-only projection (no SC ledger write yet — see acceptQuote);
-    // dto.amount is always the ASOJU fee staff actually intends, whether
-    // or not a benefit ends up applying.
+    // calculated server-side," never entered by staff. Read-only
+    // projection (no SC ledger write yet — see acceptQuote), against the
+    // service-fee lines only — a quote made up entirely of external/
+    // third-party costs (serviceFeeTotal === 0) is never eligible, and
+    // never counts against the monthly allowance either.
     const benefit =
-      serviceCase.tier === CaseTier.CONCIERGE
-        ? await this.membership.previewBenefit(serviceCase.customerId, serviceCase.tier, dto.amount)
+      serviceCase.tier === CaseTier.CONCIERGE && serviceFeeTotal > 0
+        ? await this.membership.previewBenefit(serviceCase.customerId, serviceCase.tier, serviceFeeTotal)
         : null;
+
+    const finalServiceFee = benefit ? benefit.finalAmount : serviceFeeTotal;
+    const amount = finalServiceFee + nonServiceFeeTotal;
 
     const quote = await this.prisma.quote.create({
       data: {
         caseId,
-        amount: benefit ? benefit.finalAmount : dto.amount,
+        amount,
         currency: dto.currency ?? 'NGN',
-        breakdown: dto.breakdown as any,
         scopeId: latestScope.id,
         subscriptionId: benefit?.subscriptionId,
-        baseAmount: benefit ? dto.amount : undefined,
+        baseAmount: serviceFeeTotal,
+        nonServiceFeeAmount: nonServiceFeeTotal,
         discountPercent: benefit?.discountPercent,
         discountAmount: benefit?.discountAmount,
         scAppliedNgn: benefit?.scAppliedNgn,
+        lines: { create: dto.lines.map((l) => ({ category: l.category, label: l.label, amount: l.amount })) },
       },
+      include: { lines: true },
     });
 
     await this.casesService.transitionCase(actor, caseId, CaseStatus.QUOTED, 'Quote issued');
@@ -106,12 +125,13 @@ export class CommerceService {
       metadata: { quoteId: quote.id, amount: quote.amount, currency: quote.currency, membershipApplied: Boolean(benefit) },
     });
     const benefitNote = benefit
-      ? ` (includes your membership discount and SC — ${quote.currency} ${dto.amount.toLocaleString()} before benefits)`
+      ? ` (includes your membership discount and SC on the service fee — ${quote.currency} ${serviceFeeTotal.toLocaleString()} before benefits)`
       : '';
+    const externalNote = nonServiceFeeTotal > 0 ? ` This includes ${quote.currency} ${nonServiceFeeTotal.toLocaleString()} in external/third-party costs, separate from our fee.` : '';
     await this.notifications.notify(
       serviceCase.customer.userId,
       'Your quote is ready',
-      `We've put together a quote of ${quote.currency} ${Number(quote.amount).toLocaleString()} for ${serviceCase.caseNumber}${benefitNote}. Review and accept it to get scheduled.`,
+      `We've put together a quote of ${quote.currency} ${Number(quote.amount).toLocaleString()} for ${serviceCase.caseNumber}${benefitNote}.${externalNote} Review and accept it to get scheduled.`,
     );
 
     return quote;

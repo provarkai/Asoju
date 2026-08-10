@@ -81,7 +81,7 @@ describe('Scope versioning and the quote gate', () => {
     const res = await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/quotes`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ amount: 50000 })
+      .send({ lines: [{ category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: 50000 }] })
       .expect(400);
     expect(res.body.message).toMatch(/no scope/i);
   });
@@ -114,7 +114,7 @@ describe('Scope versioning and the quote gate', () => {
     const res = await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/quotes`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ amount: 50000 })
+      .send({ lines: [{ category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: 50000 }] })
       .expect(400);
     expect(res.body.message).toMatch(/not confirmed/i);
   });
@@ -144,7 +144,7 @@ describe('Scope versioning and the quote gate', () => {
     const res = await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/quotes`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ amount: 50000 })
+      .send({ lines: [{ category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: 50000 }] })
       .expect(201);
 
     const latestScope = await request(app.getHttpServer())
@@ -175,7 +175,7 @@ describe('Scope versioning and the quote gate', () => {
     await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/quotes`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ amount: 60000 })
+      .send({ lines: [{ category: 'ASOJU_SERVICE_FEE', label: 'ASOJU service fee', amount: 60000 }] })
       .expect(400);
   });
 });
