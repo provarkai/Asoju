@@ -31,6 +31,7 @@ const SERVICE_TYPE_LABELS: Record<string, string> = {
   BUSINESS_VERIFICATION: 'Business Verification',
   INVESTMENT_SUPPORT: 'Investment Support',
   AGRICULTURE_SUPPORT: 'Agriculture Support',
+  BEREAVEMENT_SUPPORT: 'Bereavement & Funeral Logistics',
 };
 
 const APPROVAL_ACTION_LABELS: Record<string, string> = {

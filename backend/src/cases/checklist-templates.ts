@@ -88,4 +88,21 @@ export const CHECKLIST_TEMPLATES: Record<ServiceType, string[]> = {
     'Identify exceptions',
     'Complete inspection submission',
   ],
+
+  // Tier 2 vertical (strategic-suggestions pass) — the most time-critical,
+  // emotionally-sensitive service on the catalogue, so the checklist is a
+  // vendor-coordination sub-checklist rather than an inspection one:
+  // confirming the mortuary/venue/permit chain is actually moving, not
+  // photographing a site. See SERVICE_TYPE_DEFAULT_PRIORITY (cases.service.ts)
+  // for the accompanying default-urgent SLA override.
+  [ServiceType.BEREAVEMENT_SUPPORT]: [
+    'Confirm next of kin / family point of contact',
+    'Confirm mortuary — location, hold status, and release requirements',
+    'Confirm burial/venue booking and date',
+    'Confirm permits and documentation required (death certificate, burial permit)',
+    'Coordinate with officiant / clergy if requested',
+    'Record observations',
+    'Identify exceptions',
+    'Complete coordination submission',
+  ],
 };

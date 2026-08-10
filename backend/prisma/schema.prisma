@@ -42,6 +42,13 @@ enum Role {
 /// extended per Section 12 P2 "diaspora operations layer" expansion — new
 /// case-shaped service categories using the same engine, not new
 /// marketplaces (Section 11.2 explicitly rules those out).
+///
+/// BEREAVEMENT_SUPPORT (Tier 2 vertical, strategic-suggestions pass) — same
+/// case-shaped execution as every other service, but the single most
+/// time-critical, emotionally-sensitive one on the catalogue; see
+/// SERVICE_TYPE_DEFAULT_PRIORITY in cases.service.ts (defaults to URGENT
+/// when staff don't explicitly pick a priority) and its
+/// vendor-coordination checklist in checklist-templates.ts.
 enum ServiceType {
   PROPERTY_INSPECTION
   CONSTRUCTION_SUPERVISION
@@ -51,6 +58,7 @@ enum ServiceType {
   BUSINESS_VERIFICATION
   INVESTMENT_SUPPORT
   AGRICULTURE_SUPPORT
+  BEREAVEMENT_SUPPORT
 }
 
 enum CaseTier {

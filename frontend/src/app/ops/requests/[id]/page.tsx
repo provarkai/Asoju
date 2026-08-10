@@ -28,6 +28,7 @@ const SERVICE_TYPES = [
   'BUSINESS_VERIFICATION',
   'INVESTMENT_SUPPORT',
   'AGRICULTURE_SUPPORT',
+  'BEREAVEMENT_SUPPORT',
 ];
 
 export default function ConvertRequestPage() {
@@ -113,6 +114,11 @@ export default function ConvertRequestPage() {
               ))}
             </select>
           </label>
+          {serviceType === 'BEREAVEMENT_SUPPORT' && (
+            <p className="muted" style={{ margin: 0 }}>
+              This case will default to Urgent priority (24h SLA) unless you set a priority explicitly.
+            </p>
+          )}
           <label>
             Description
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} />

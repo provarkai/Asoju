@@ -34,6 +34,16 @@ const DEFAULT_SLA_HOURS: Record<CasePriority, number> = {
   [CasePriority.URGENT]: 24,
 };
 
+// Tier 2 vertical scoping ("SLA_HOURS_* keys only off CasePriority, not
+// ServiceType — small real gap this exposes"): a handful of services are
+// inherently urgent regardless of what a staff member happens to pick at
+// triage — bereavement logistics chief among them. This only supplies the
+// *default* when `dto.priority` is omitted; an explicit staff choice
+// always wins (see convertToCase).
+const SERVICE_TYPE_DEFAULT_PRIORITY: Partial<Record<ServiceType, CasePriority>> = {
+  [ServiceType.BEREAVEMENT_SUPPORT]: CasePriority.URGENT,
+};
+
 function slaHoursForPriority(priority: CasePriority): number {
   const envVar = `SLA_HOURS_${priority}`;
   const configured = process.env[envVar];
@@ -143,6 +153,12 @@ export class CasesService {
       tier = activeSubscription ? activeSubscription.tier : undefined;
     }
 
+    // Some services (bereavement logistics) are inherently urgent
+    // regardless of what a staff member happens to pick — see
+    // SERVICE_TYPE_DEFAULT_PRIORITY. An explicit dto.priority always wins;
+    // this only fills in what staff left unset.
+    const priority = dto.priority ?? SERVICE_TYPE_DEFAULT_PRIORITY[dto.serviceType] ?? CasePriority.STANDARD;
+
     const created = await this.prisma.serviceCase.create({
       data: {
         // Placeholder, unique on its own — replaced with the real
@@ -152,7 +168,7 @@ export class CasesService {
         serviceType: dto.serviceType,
         description: dto.description,
         location: dto.location,
-        priority: dto.priority,
+        priority,
         riskLevel: dto.riskLevel,
         tier,
         beneficiaryId: dto.beneficiaryId,
@@ -160,7 +176,7 @@ export class CasesService {
         assetId: dto.assetId,
         status: CaseStatus.DRAFT,
         originRequest: { connect: { id: request.id } },
-        slaTargetAt: new Date(Date.now() + slaHoursForPriority(dto.priority ?? CasePriority.STANDARD) * 60 * 60 * 1000),
+        slaTargetAt: new Date(Date.now() + slaHoursForPriority(priority) * 60 * 60 * 1000),
       },
     });
 

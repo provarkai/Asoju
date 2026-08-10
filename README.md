@@ -200,6 +200,22 @@ end-to-end against a real Postgres instance:
   verified: disabling `CaseAccessGuard`'s `BENEFICIARY` branch fails the legitimate-access test (falls
   through to the staff-collaborator fallback and 403s a beneficiary who should see their own named case);
   restoring it passes again.
+- **Bereavement & funeral logistics vertical** (strategic-suggestions pass, Tier 2 "top pick — cheapest
+  vertical-add, tightest urgency profile of anything on the list") — a new `ServiceType.BEREAVEMENT_SUPPORT`
+  rides the exact same case engine as every other service (Section 11.2 rules out anything more bespoke),
+  but exposed one real, small gap the scoping called out by name: `SLA_HOURS_*` only ever keyed off
+  `CasePriority`, never `ServiceType`, so an unqualified triage would silently land a bereavement case on
+  the 72h `STANDARD` clock like any other request. New `SERVICE_TYPE_DEFAULT_PRIORITY` map in
+  `cases.service.ts` fills in `URGENT` (24h SLA) for `BEREAVEMENT_SUPPORT` specifically whenever staff
+  triage a request without picking a priority explicitly — an explicit choice always still wins, so
+  nothing about the existing priority system changed for any other service. New checklist in
+  `checklist-templates.ts` is deliberately a vendor-coordination sub-checklist (mortuary/venue/permits),
+  not an inspection one — "confirm the chain is moving," not "photograph a site." Convert-to-case page
+  (`/ops/requests/:id`) surfaces the URGENT-by-default note inline when this service is selected. Covered
+  by `backend/test/bereavement.e2e-spec.ts` (5 tests) — negative-control verified: disabling
+  `SERVICE_TYPE_DEFAULT_PRIORITY` lets an unqualified bereavement case fall back to `STANDARD` and fails
+  the test; restoring it passes again. Includes an explicit regression check that an unrelated service
+  (`PROPERTY_INSPECTION`) still defaults to `STANDARD` unchanged.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same
