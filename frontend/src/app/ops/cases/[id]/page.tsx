@@ -38,7 +38,7 @@ interface CaseDetail {
   }[];
   evidence: { id: string; type: string; description: string | null; uploader?: { email: string } | null; viewUrl: string }[];
   documents: { id: string; label: string; createdAt: string; visibility: string; restrictedToAssignmentId: string | null; viewUrl: string }[];
-  reports: { id: string; summary: string; createdAt: string }[];
+  reports: { id: string; summary: string; limitation: string | null; createdAt: string }[];
   quotes: { id: string; amount: string; currency: string; acceptedAt: string | null }[];
   approvals: { id: string; action: string; note: string | null; createdAt: string }[];
   recurringSchedule: { id: string; cadenceDays: number; nextRunAt: string; active: boolean } | null;
@@ -490,17 +490,20 @@ export default function OpsCaseDetailPage() {
         {detail.reports.map((r) => (
           <p key={r.id}>
             <strong>Report issued:</strong> {r.summary}
+            {r.limitation && <span className="muted"> — limitation: {r.limitation}</span>}
           </p>
         ))}
         {['EVIDENCE_SUBMITTED', 'QUALITY_CONTROL'].includes(detail.status) ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxWidth: '32rem' }}>
             <select value={qcOutcome} onChange={(e) => setQcOutcome(e.target.value)}>
               <option value="APPROVED">Approve (issues report)</option>
+              <option value="PASS_WITH_LIMITATION">Approve with a noted limitation (issues report)</option>
               <option value="REWORK">Send back for rework</option>
+              <option value="REVISIT_REQUIRED">Require a site revisit</option>
               <option value="ESCALATE">Escalate</option>
               <option value="INCIDENT">Log incident</option>
             </select>
-            {qcOutcome === 'APPROVED' && (
+            {(qcOutcome === 'APPROVED' || qcOutcome === 'PASS_WITH_LIMITATION') && (
               <textarea
                 placeholder="Report summary (required to approve)"
                 value={qcSummary}
@@ -508,13 +511,23 @@ export default function OpsCaseDetailPage() {
               />
             )}
             <input
-              placeholder="Note (optional)"
+              placeholder={
+                qcOutcome === 'PASS_WITH_LIMITATION'
+                  ? 'Limitation to record on the report (required)'
+                  : qcOutcome === 'REVISIT_REQUIRED'
+                    ? 'What the revisit needs to cover (required)'
+                    : 'Note (optional)'
+              }
               value={qcNote}
               onChange={(e) => setQcNote(e.target.value)}
             />
             <button
               className="btn"
-              disabled={busy !== null || (qcOutcome === 'APPROVED' && !qcSummary)}
+              disabled={
+                busy !== null ||
+                ((qcOutcome === 'APPROVED' || qcOutcome === 'PASS_WITH_LIMITATION') && !qcSummary) ||
+                ((qcOutcome === 'PASS_WITH_LIMITATION' || qcOutcome === 'REVISIT_REQUIRED') && !qcNote)
+              }
               onClick={() =>
                 run('qc', () =>
                   apiFetch(`/cases/${detail.id}/qc`, {

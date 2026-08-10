@@ -24,6 +24,7 @@ interface EvidenceEntry {
 interface ReportEntry {
   id: string;
   summary: string;
+  limitation: string | null;
   createdAt: string;
 }
 
@@ -377,6 +378,11 @@ export default function CaseDetailPage() {
           detail.reports.map((r) => (
             <div key={r.id}>
               <p>{r.summary}</p>
+              {r.limitation && (
+                <p className="muted">
+                  <strong>Noted limitation:</strong> {r.limitation}
+                </p>
+              )}
               <p className="muted">{new Date(r.createdAt).toLocaleString()}</p>
             </div>
           ))

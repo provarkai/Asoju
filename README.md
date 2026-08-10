@@ -49,9 +49,17 @@ end-to-end against a real Postgres instance:
   key, never a predictable public URL) and marks fieldwork complete (→ `EVIDENCE_SUBMITTED`).
 
 **Evidence → QC → Report → Completion**
-- QC reviews and either approves (creates the customer-facing `Report`, → `CUSTOMER_REVIEW`), sends
-  the case back for rework (→ `IN_PROGRESS`), or escalates/flags an incident without silently
-  advancing the case (Section 8.5 — "a field submission is never automatically a completed case").
+- QC reviews and picks one of six outcomes (P0 Technical Build Spec Section 26 "QC Engine"): approve
+  (creates the customer-facing `Report`, → `CUSTOMER_REVIEW`), approve with a recorded limitation
+  (`PASS_WITH_LIMITATION` — same delivery path, but `note` is required and stored on the report as
+  `limitation`, shown to the customer alongside the summary rather than silently folded into a clean
+  pass), send back for rework (→ `IN_PROGRESS`), require a site revisit (`REVISIT_REQUIRED` — `note` is
+  required and becomes a new, required `CaseTask` on the case, so it's a real checklist item the field
+  agent sees, not just a status-history line, → `IN_PROGRESS`), or escalate/flag an incident without
+  silently advancing the case (Section 8.5 — "a field submission is never automatically a completed
+  case"). Covered by `backend/test/qc-outcomes.e2e-spec.ts` — negative-control verified: disabling the
+  PASS_WITH_LIMITATION note requirement or the REVISIT_REQUIRED task's `isRequired` flag each fail their
+  respective test; restoring both passes both again.
 - The customer approves from the case detail page (→ `APPROVED` → auto-`COMPLETED`); closing
   (`COMPLETED` → `CLOSED`) stays a deliberate staff/finance action.
 

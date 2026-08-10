@@ -123,10 +123,28 @@ enum ReviewStatus {
   REJECTED
 }
 
-/// Section 8.5 — Quality Control outcomes.
+/// Section 8.5 — Quality Control outcomes. APPROVED/REWORK map to the P0
+/// Technical Build Spec Section 26 "QC Engine" table's PASS/FAIL_CORRECTION
+/// (kept under their original names — a cosmetic rename would touch every
+/// caller/test/UI string for no functional gain); PASS_WITH_LIMITATION and
+/// REVISIT_REQUIRED are that same table's two outcomes this shipped
+/// without. INCIDENT predates the spec table and stays — a strictly
+/// heavier "raise a real Incident record" option ESCALATE alone doesn't
+/// cover.
 enum QcOutcome {
   APPROVED
+  /// Spec: "Allows delivery with recorded limitation" — same delivery path
+  /// as APPROVED (a Report is issued, case moves to CUSTOMER_REVIEW), but
+  /// the limitation is a required, recorded field on that Report rather
+  /// than folded silently into a clean pass.
+  PASS_WITH_LIMITATION
   REWORK
+  /// Spec: "Creates operational revisit task" — distinct from REWORK's
+  /// "fix it without leaving the office": this creates a real, required
+  /// CaseTask on the case (so it shows up in the field agent's checklist)
+  /// rather than just a status-history note, because what's missing needs
+  /// an actual return to site.
+  REVISIT_REQUIRED
   ESCALATE
   INCIDENT
 }
@@ -788,17 +806,23 @@ model Evidence {
 
 /// Customer-facing deliverable.
 model Report {
-  id             String      @id @default(uuid())
-  caseId         String
-  case           ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  summary        String
-  findings       Json // structured findings, leads with results not metadata
-  qcOutcome      QcOutcome?
+  id        String      @id @default(uuid())
+  caseId    String
+  case      ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  summary   String
+  findings  Json // structured findings, leads with results not metadata
+  qcOutcome QcOutcome?
+
+  /// Set only when qcOutcome is PASS_WITH_LIMITATION — the spec's
+  /// "recorded limitation" the customer sees alongside the report,
+  /// required at QC time rather than left implicit in `findings`.
+  limitation String?
+
   qcReviewedById String?
   qcReviewedAt   DateTime?
   deliveredAt    DateTime?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 // ---------------------------------------------------------------------------

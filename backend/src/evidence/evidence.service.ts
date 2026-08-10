@@ -213,15 +213,19 @@ export class EvidenceService {
       metadata: { outcome: dto.outcome, note: dto.note },
     });
 
-    if (dto.outcome === QcOutcome.APPROVED) {
+    if (dto.outcome === QcOutcome.APPROVED || dto.outcome === QcOutcome.PASS_WITH_LIMITATION) {
       if (!dto.summary) throw new BadRequestException('summary is required to approve and issue a report');
+      if (dto.outcome === QcOutcome.PASS_WITH_LIMITATION && !dto.note?.trim()) {
+        throw new BadRequestException('note is required as the recorded limitation for PASS_WITH_LIMITATION');
+      }
 
       const report = await this.prisma.report.create({
         data: {
           caseId,
           summary: dto.summary,
           findings: (dto.findings ?? {}) as any,
-          qcOutcome: QcOutcome.APPROVED,
+          qcOutcome: dto.outcome,
+          limitation: dto.outcome === QcOutcome.PASS_WITH_LIMITATION ? dto.note : undefined,
           qcReviewedById: actor.id,
           qcReviewedAt: new Date(),
         },
@@ -231,7 +235,9 @@ export class EvidenceService {
       await this.notifications.notify(
         serviceCase.customer.userId,
         'Your report is ready',
-        `The report for ${serviceCase.caseNumber} is ready for your review — approve it or let us know if something needs another look.`,
+        dto.outcome === QcOutcome.PASS_WITH_LIMITATION
+          ? `The report for ${serviceCase.caseNumber} is ready for your review — it includes a noted limitation, see the report for details.`
+          : `The report for ${serviceCase.caseNumber} is ready for your review — approve it or let us know if something needs another look.`,
       );
       return { outcome: dto.outcome, report };
     }
@@ -240,6 +246,29 @@ export class EvidenceService {
       await this.casesService.transitionCase(actor, caseId, CaseStatus.IN_PROGRESS, dto.note ?? 'QC requested rework');
       await this.riskEngine.assessCase(caseId);
       return { outcome: dto.outcome };
+    }
+
+    if (dto.outcome === QcOutcome.REVISIT_REQUIRED) {
+      if (!dto.note?.trim()) throw new BadRequestException('note is required describing what the revisit needs to cover');
+
+      const maxSortOrder = await this.prisma.caseTask.aggregate({ where: { caseId }, _max: { sortOrder: true } });
+      const task = await this.prisma.caseTask.create({
+        data: {
+          caseId,
+          label: `Revisit required: ${dto.note}`,
+          isRequired: true,
+          sortOrder: (maxSortOrder._max.sortOrder ?? 0) + 1,
+        },
+      });
+
+      await this.casesService.transitionCase(actor, caseId, CaseStatus.IN_PROGRESS, `QC requires a revisit — ${dto.note}`);
+      await this.notifications.notify(
+        serviceCase.customer.userId,
+        'A follow-up site visit is needed',
+        `Quality control found that ${serviceCase.caseNumber} needs another site visit before we can finish — we've scheduled the follow-up and will keep you posted.`,
+      );
+      await this.riskEngine.assessCase(caseId);
+      return { outcome: dto.outcome, task };
     }
 
     // ESCALATE / INCIDENT — Section 8.5: never hide the issue, but also
