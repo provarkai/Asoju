@@ -10,7 +10,16 @@ interface Beneficiary { id: string; fullName: string; relationship: string | nul
 interface Property { id: string; address: string; city: string | null; state: string | null }
 interface Asset { id: string; assetType: string; description: string | null; location: string | null }
 interface ReferralSummary { code: string; referredCount: number }
-interface SubscriptionSummary { status: string; tier: string; startedAt: string }
+interface SubscriptionSummary {
+  status: string;
+  tier: string;
+  startedAt: string;
+  plan: 'PRIORITY' | 'PREMIUM';
+  planConfig: { priceUsd: number; scGrantUsd: number; discountPercent: number; eligibleRequestsPerMonth: number };
+  scBalanceUsd: number;
+  eligibleUsedThisPeriod: number;
+  eligibleRemainingThisPeriod: number;
+}
 interface AccountCaseSummary { id: string; caseNumber: string; serviceType: string; status: string; createdAt: string }
 interface AccountMember { id: string; fullName: string; email: string | null; cases: AccountCaseSummary[] }
 interface MyAccount { account: { id: string; name: string; type: string }; members: AccountMember[] }
@@ -28,6 +37,7 @@ export default function ProfilePage() {
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [invoices, setInvoices] = useState<SubscriptionInvoice[]>([]);
   const [subscribing, setSubscribing] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<'PRIORITY' | 'PREMIUM'>('PRIORITY');
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preferredChannel, setPreferredChannel] = useState('whatsapp');
@@ -69,7 +79,7 @@ export default function ProfilePage() {
   async function subscribeConcierge() {
     setSubscribing(true);
     try {
-      await apiFetch('/me/subscription', { method: 'POST' });
+      await apiFetch('/me/subscription', { method: 'POST', body: JSON.stringify({ plan: selectedPlan }) });
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to subscribe');
@@ -156,12 +166,33 @@ export default function ProfilePage() {
       <SecuritySettings mfaEnabled={mfaEnabled} />
 
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>ASOJU Concierge</h2>
+        <h2 style={{ marginTop: 0 }}>ASOJU Concierge — Membership</h2>
         {subscription?.status === 'ACTIVE' ? (
           <>
             <p>
-              You&apos;re on <strong>Concierge</strong> since {new Date(subscription.startedAt).toLocaleDateString()} —
-              new cases default to relationship-managed service.
+              You&apos;re on <strong>{subscription.plan === 'PREMIUM' ? 'Premium' : 'Priority'}</strong> since{' '}
+              {new Date(subscription.startedAt).toLocaleDateString()} — new cases default to
+              relationship-managed service.
+            </p>
+            <div className="actions-row" style={{ flexWrap: 'wrap', marginBottom: '1rem' }}>
+              <div className="card" style={{ flex: '1 1 10rem' }}>
+                <div className="muted" style={{ fontSize: '0.8rem' }}>SC balance</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>${subscription.scBalanceUsd.toFixed(2)}</div>
+              </div>
+              <div className="card" style={{ flex: '1 1 10rem' }}>
+                <div className="muted" style={{ fontSize: '0.8rem' }}>Discount on eligible fees</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>{subscription.planConfig.discountPercent}%</div>
+              </div>
+              <div className="card" style={{ flex: '1 1 10rem' }}>
+                <div className="muted" style={{ fontSize: '0.8rem' }}>Eligible requests this month</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>
+                  {subscription.eligibleRemainingThisPeriod} / {subscription.planConfig.eligibleRequestsPerMonth} left
+                </div>
+              </div>
+            </div>
+            <p className="muted" style={{ fontSize: '0.85rem' }}>
+              SC never becomes cash — it's automatically applied to your next eligible Concierge quote,
+              up to what's available. Discount and SC are calculated for you; nothing to redeem manually.
             </p>
             <button className="btn btn--ghost" disabled={subscribing} onClick={cancelConcierge}>
               {subscribing ? 'Cancelling…' : 'Cancel Concierge'}
@@ -170,11 +201,42 @@ export default function ProfilePage() {
         ) : (
           <>
             <p className="muted">
-              Essential is pay-per-service. Concierge adds a dedicated relationship manager and
-              relationship-managed service by default.
+              Essential is pay-per-service. Concierge adds a dedicated relationship manager, an SC
+              credit, and a discount on eligible fees.
             </p>
+            <div className="actions-row" style={{ flexWrap: 'wrap', marginBottom: '1rem' }}>
+              {(
+                [
+                  { plan: 'PRIORITY' as const, price: 99, sc: 50, discount: 10, requests: 2 },
+                  { plan: 'PREMIUM' as const, price: 299, sc: 150, discount: 15, requests: 5 },
+                ]
+              ).map((p) => (
+                <label
+                  key={p.plan}
+                  className="card"
+                  style={{
+                    flex: '1 1 12rem',
+                    cursor: 'pointer',
+                    borderColor: selectedPlan === p.plan ? 'var(--asoju-green)' : undefined,
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="membershipPlan"
+                    checked={selectedPlan === p.plan}
+                    onChange={() => setSelectedPlan(p.plan)}
+                    style={{ marginRight: '0.5rem' }}
+                  />
+                  <strong>{p.plan === 'PREMIUM' ? 'Premium' : 'Priority'}</strong>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>${p.price}/mo</div>
+                  <div className="muted" style={{ fontSize: '0.85rem' }}>
+                    ${p.sc} SC · {p.discount}% off eligible fees · up to {p.requests} eligible requests/mo
+                  </div>
+                </label>
+              ))}
+            </div>
             <button className="btn" disabled={subscribing} onClick={subscribeConcierge}>
-              {subscribing ? 'Subscribing…' : 'Upgrade to Concierge'}
+              {subscribing ? 'Subscribing…' : `Subscribe to ${selectedPlan === 'PREMIUM' ? 'Premium' : 'Priority'}`}
             </button>
           </>
         )}

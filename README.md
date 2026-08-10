@@ -113,6 +113,23 @@ now built and verified end-to-end**:
 - **Concierge workflow** — customers subscribe/cancel ASOJU Concierge from `/profile`; admin assigns a
   Relationship Manager to a customer's whole portfolio from `/ops/concierge` (not per-case); the RM
   sees their book from `/ops/portfolio`; a Concierge subscriber's new cases default to that tier.
+- **Membership plans + SC ledger** (ASOJU P0 Technical Build Spec v1.0 Section 17/18, independent
+  readiness review follow-up) — subscribing to Concierge now means choosing Priority ($99/mo, $50 SC,
+  10% discount, 2 eligible requests/mo) or Premium ($299/mo, $150 SC, 15%, 5/mo), configured in
+  `backend/src/concierge/membership-plans.ts`. SC is a real append-only ledger
+  (`ScLedgerEntry`/`ScLedgerService`, GRANT/DEBIT/REVERSAL/ADJUSTMENT/EXPIRY) — balance is always
+  computed from the ledger, never a stored column a request can overwrite. `MembershipService` applies
+  the discount/SC as a read-only *preview* when staff quote a CONCIERGE-tier case (`POST
+  /cases/:id/quotes`), and only actually debits the ledger when the customer accepts — re-validated
+  against the live balance at that moment, not the stale preview, and capped so the ledger can never go
+  negative. A manual Finance/Admin adjustment (`POST /admin/subscriptions/:id/sc-adjustment`, UI at
+  `/ops/concierge/:subscriptionId`) always requires a reason and is itself just another ledger row.
+  Membership pricing is USD; the NGN amount actually charged/applied uses a manually configured
+  `USD_TO_NGN_RATE` (not a live FX feed — see the env template), locked onto each subscription at
+  subscribe time so a later rate change never retroactively alters an existing member's price. Covered
+  by `backend/test/membership.e2e-spec.ts` (8 tests, real Postgres) — confirmed to actually enforce the
+  numbers, not just plausible-looking code: verified live that a broken discount calculation fails 3 of
+  the 8 tests, restoring it passes all 8 again.
 - **Recurring services** (Section 6 — Construction Supervision is "the first recurring-revenue
   product") — staff turn a completed case into a recurring schedule from the Ops case page; a daily
   cron sweep (plus an admin-triggerable manual run for ops/testing) spawns the next case on schedule,

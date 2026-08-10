@@ -1,12 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { CaseStatus, PaymentStatus } from '@prisma/client';
+import { CaseStatus, CaseTier, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CasesService } from '../cases/cases.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { PaystackService } from '../payments/paystack.service';
+import { MembershipService } from '../concierge/membership.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
 
 /** Prefix distinguishing case-invoice Paystack references from subscription
@@ -23,6 +24,7 @@ export class CommerceService {
     private readonly notifications: NotificationsService,
     private readonly casesService: CasesService,
     private readonly paystack: PaystackService,
+    private readonly membership: MembershipService,
   ) {}
 
   /**
@@ -40,12 +42,27 @@ export class CommerceService {
       throw new BadRequestException(`Cannot quote a case in status ${serviceCase.status}`);
     }
 
+    // P0 Technical Build Spec Section 17 — "Membership discounts are
+    // calculated server-side," never entered by staff. This is a
+    // read-only projection (no SC ledger write yet — see acceptQuote);
+    // dto.amount is always the ASOJU fee staff actually intends, whether
+    // or not a benefit ends up applying.
+    const benefit =
+      serviceCase.tier === CaseTier.CONCIERGE
+        ? await this.membership.previewBenefit(serviceCase.customerId, serviceCase.tier, dto.amount)
+        : null;
+
     const quote = await this.prisma.quote.create({
       data: {
         caseId,
-        amount: dto.amount,
+        amount: benefit ? benefit.finalAmount : dto.amount,
         currency: dto.currency ?? 'NGN',
         breakdown: dto.breakdown as any,
+        subscriptionId: benefit?.subscriptionId,
+        baseAmount: benefit ? dto.amount : undefined,
+        discountPercent: benefit?.discountPercent,
+        discountAmount: benefit?.discountAmount,
+        scAppliedNgn: benefit?.scAppliedNgn,
       },
     });
 
@@ -55,12 +72,15 @@ export class CommerceService {
       actorId: actor.id,
       actorType: 'user',
       action: 'quote.created',
-      metadata: { quoteId: quote.id, amount: dto.amount, currency: quote.currency },
+      metadata: { quoteId: quote.id, amount: quote.amount, currency: quote.currency, membershipApplied: Boolean(benefit) },
     });
+    const benefitNote = benefit
+      ? ` (includes your membership discount and SC — ${quote.currency} ${dto.amount.toLocaleString()} before benefits)`
+      : '';
     await this.notifications.notify(
       serviceCase.customer.userId,
       'Your quote is ready',
-      `We've put together a quote of ${quote.currency} ${dto.amount.toLocaleString()} for ${serviceCase.caseNumber}. Review and accept it to get scheduled.`,
+      `We've put together a quote of ${quote.currency} ${Number(quote.amount).toLocaleString()} for ${serviceCase.caseNumber}${benefitNote}. Review and accept it to get scheduled.`,
     );
 
     return quote;
@@ -85,10 +105,18 @@ export class CommerceService {
       throw new BadRequestException('Quote already accepted');
     }
 
+    // The point of real commitment — re-validates SC availability against
+    // *now*, not the stale preview from createQuote, and only here does an
+    // actual DEBIT ledger entry get written (MembershipService.commitBenefit).
+    const { finalAmount, adjusted } = await this.membership.commitBenefit(quote);
+
     const [, invoice] = await this.prisma.$transaction([
-      this.prisma.quote.update({ where: { id: quoteId }, data: { acceptedAt: new Date() } }),
+      this.prisma.quote.update({
+        where: { id: quoteId },
+        data: { acceptedAt: new Date(), ...(adjusted ? { amount: finalAmount } : {}) },
+      }),
       this.prisma.invoice.create({
-        data: { caseId: quote.caseId, quoteId: quote.id, amount: quote.amount, currency: quote.currency },
+        data: { caseId: quote.caseId, quoteId: quote.id, amount: finalAmount, currency: quote.currency },
       }),
     ]);
 
@@ -98,8 +126,18 @@ export class CommerceService {
       actorId: actor.id,
       actorType: 'user',
       action: 'quote.accepted',
-      metadata: { quoteId, invoiceId: invoice.id },
+      metadata: { quoteId, invoiceId: invoice.id, finalAmount, adjusted },
     });
+    if (adjusted) {
+      // The displayed quote amount and what's actually payable diverged
+      // between createQuote and now (e.g. SC got spent on another case in
+      // the meantime) — surfaced, not silently charged.
+      await this.notifications.notify(
+        quote.case.customer.userId,
+        'Your invoice amount was adjusted',
+        `Your membership benefit changed since this quote was issued, so the payable amount is now ${quote.currency} ${finalAmount.toLocaleString()} instead of the originally shown amount.`,
+      );
+    }
 
     return invoice;
   }

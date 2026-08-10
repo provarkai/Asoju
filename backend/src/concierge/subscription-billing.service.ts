@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { PaymentStatus, Prisma, SubscriptionStatus } from '@prisma/client';
+import { MembershipPlan, PaymentStatus, Prisma, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaystackService } from '../payments/paystack.service';
+import { ScLedgerService } from './sc-ledger.service';
+import { MEMBERSHIP_PLANS } from './membership-plans';
 
 /** Reference prefix distinguishing subscription-billing Paystack references
  * from case-invoice ones (CASE_INVOICE_REFERENCE_PREFIX in commerce.service)
@@ -37,6 +39,7 @@ export class SubscriptionBillingService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly paystack: PaystackService,
+    private readonly scLedger: ScLedgerService,
   ) {}
 
   /** Daily sweep (see SubscriptionBillingSchedulerService), also triggerable
@@ -147,6 +150,13 @@ export class SubscriptionBillingService {
       where: { id: invoice.id },
       data: { status: PaymentStatus.PAID, paidAt: new Date() },
     });
+
+    // P0 Technical Build Spec Section 18: "GRANT | Monthly membership SC"
+    // — granted on confirmed payment, not at invoice-creation time, so a
+    // renewal that never gets paid never hands out free SC that would
+    // otherwise need clawing back.
+    const plan = invoice.subscription.plan as MembershipPlan;
+    await this.scLedger.grant(invoice.subscriptionId, MEMBERSHIP_PLANS[plan].scGrantUsd);
 
     await this.audit.record({
       actorType: 'system',

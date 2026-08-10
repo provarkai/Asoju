@@ -1,9 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CaseTier, Role, SubscriptionStatus } from '@prisma/client';
+import { CaseTier, MembershipPlan, Role, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { ScLedgerService } from './sc-ledger.service';
+import { MembershipService } from './membership.service';
+import { MEMBERSHIP_PLANS, usdToNgnRate } from './membership-plans';
 
 /**
  * Section 12 P1 "Concierge workflow" — the subscription/relationship-
@@ -19,9 +22,17 @@ export class ConciergeService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly scLedger: ScLedgerService,
+    private readonly membership: MembershipService,
   ) {}
 
-  async subscribe(user: AuthenticatedUser) {
+  /** P0 Technical Build Spec Section 17 — Priority ($99/mo, $50 SC, 10%
+   * discount, 2 eligible requests/mo) or Premium ($299/mo, $150 SC, 15%,
+   * 5/mo). Locks the plan's USD price and the current FX rate onto the
+   * subscription row at subscribe time (never recomputed retroactively —
+   * see the schema comment), and grants the first period's SC immediately
+   * so a new member doesn't wait for the first renewal sweep to have any. */
+  async subscribe(user: AuthenticatedUser, plan: MembershipPlan = MembershipPlan.PRIORITY) {
     const customer = await this.requireCustomer(user.id);
 
     const existing = await this.prisma.subscription.findFirst({
@@ -29,26 +40,70 @@ export class ConciergeService {
     });
     if (existing) throw new BadRequestException('Already subscribed to Concierge');
 
+    const planConfig = MEMBERSHIP_PLANS[plan];
+    const fxRate = usdToNgnRate();
+
     const subscription = await this.prisma.subscription.create({
-      data: { customerId: customer.id, tier: CaseTier.CONCIERGE, status: SubscriptionStatus.ACTIVE },
+      data: {
+        customerId: customer.id,
+        tier: CaseTier.CONCIERGE,
+        plan,
+        status: SubscriptionStatus.ACTIVE,
+        priceUsd: planConfig.priceUsd,
+        fxRate,
+        amount: Math.round(planConfig.priceUsd * fxRate),
+      },
     });
+
+    await this.scLedger.grant(subscription.id, planConfig.scGrantUsd);
 
     await this.audit.record({
       actorId: user.id,
       actorType: 'user',
       action: 'concierge.subscribed',
-      metadata: { subscriptionId: subscription.id },
+      metadata: { subscriptionId: subscription.id, plan, priceUsd: planConfig.priceUsd, scGrantUsd: planConfig.scGrantUsd },
     });
 
     return subscription;
   }
 
+  /** Enriched with the same computed fields the customer's Membership
+   * screen and profile need — plan benefits, live SC balance, and this
+   * period's eligible-request usage — so the frontend doesn't need a
+   * second round trip to the SC ledger just to render a summary. */
   async getMySubscription(user: AuthenticatedUser) {
     const customer = await this.requireCustomer(user.id);
-    return this.prisma.subscription.findFirst({
+    const subscription = await this.prisma.subscription.findFirst({
       where: { customerId: customer.id },
       orderBy: { startedAt: 'desc' },
     });
+    if (!subscription) return null;
+
+    const planConfig = MEMBERSHIP_PLANS[subscription.plan];
+    const [scBalanceUsd, eligibleUsedThisPeriod] = await Promise.all([
+      this.scLedger.getBalanceUsd(subscription.id),
+      this.membership.getEligibleUsageThisPeriod(subscription),
+    ]);
+
+    return {
+      ...subscription,
+      planConfig,
+      scBalanceUsd,
+      eligibleUsedThisPeriod,
+      eligibleRemainingThisPeriod: Math.max(0, planConfig.eligibleRequestsPerMonth - eligibleUsedThisPeriod),
+    };
+  }
+
+  /** Customer's own SC ledger — Finance Screen "SC Ledger" has the
+   * cross-customer equivalent (see ScLedgerController). */
+  async getMyScLedger(user: AuthenticatedUser) {
+    const customer = await this.requireCustomer(user.id);
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { customerId: customer.id },
+      orderBy: { startedAt: 'desc' },
+    });
+    if (!subscription) return [];
+    return this.scLedger.listForSubscription(subscription.id);
   }
 
   async cancelSubscription(user: AuthenticatedUser) {

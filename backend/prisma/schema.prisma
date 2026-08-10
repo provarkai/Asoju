@@ -237,21 +237,21 @@ model User {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  customer          Customer?
-  agentProfile      Agent?
-  providerProfile   Provider?
-  refreshTokens     RefreshToken[]
+  customer            Customer?
+  agentProfile        Agent?
+  providerProfile     Provider?
+  refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
-  caseCollaborators CaseCollaborator[]
-  uploadedEvidence  Evidence[]         @relation("EvidenceUploader")
-  auditEvents       AuditEvent[]
-  messagesSent      Message[]          @relation("MessageSender")
-  notifications     Notification[]
-  approvals         Approval[]
-  ratings           Rating[]
-  rmPortfolio       Customer[]         @relation("CustomerRm")
-  whatsAppThread    WhatsAppThread?
-  partnerContact    PartnerContact?
+  caseCollaborators   CaseCollaborator[]
+  uploadedEvidence    Evidence[]           @relation("EvidenceUploader")
+  auditEvents         AuditEvent[]
+  messagesSent        Message[]            @relation("MessageSender")
+  notifications       Notification[]
+  approvals           Approval[]
+  ratings             Rating[]
+  rmPortfolio         Customer[]           @relation("CustomerRm")
+  whatsAppThread      WhatsAppThread?
+  partnerContact      PartnerContact?
 
   @@index([role])
 }
@@ -503,7 +503,7 @@ model ServiceCase {
 
   /// Section 12 P1 "recurring services" — set when this case was the one
   /// a recurring schedule was configured from.
-  recurringSchedule    RecurringSchedule? @relation("ScheduleOrigin")
+  recurringSchedule     RecurringSchedule? @relation("ScheduleOrigin")
   spawnedFromScheduleId String?
   spawnedFromSchedule   RecurringSchedule? @relation("ScheduleSpawned", fields: [spawnedFromScheduleId], references: [id])
 
@@ -511,6 +511,10 @@ model ServiceCase {
   /// risk re-score, distinct from the generic AuditEvent log so
   /// Compliance/Risk can review just the scoring history and its factors.
   riskAssessments RiskAssessment[]
+
+  /// SC (Service Credit) ledger entries that debited/reversed against this
+  /// case's quote — see ScLedgerEntry.
+  scLedgerEntries ScLedgerEntry[]
 
   @@index([status])
   @@index([customerId])
@@ -592,15 +596,15 @@ model CaseCollaborator {
 // ---------------------------------------------------------------------------
 
 model Agent {
-  id        String   @id @default(uuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  fullName  String
-  city      String?
-  state     String?
-  isActive  Boolean  @default(true)
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName         String
+  city             String?
+  state            String?
+  isActive         Boolean  @default(true)
   performanceScore Float? // Section 12 P1 "provider performance scoring", applied to agents too
-  createdAt DateTime @default(now())
+  createdAt        DateTime @default(now())
 
   assignments Assignment[]
 }
@@ -637,17 +641,17 @@ model ProviderCredential {
 
 /// Links case <-> agent/provider (Section 3).
 model Assignment {
-  id           String           @id @default(uuid())
-  caseId       String
-  case         ServiceCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  role         AssignmentRole
-  agentId      String?
-  agent        Agent?           @relation(fields: [agentId], references: [id])
-  providerId   String?
-  provider     Provider?        @relation(fields: [providerId], references: [id])
-  status       AssignmentStatus @default(OFFERED)
-  scheduledFor DateTime?
-  acceptedAt   DateTime?
+  id              String           @id @default(uuid())
+  caseId          String
+  case            ServiceCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  role            AssignmentRole
+  agentId         String?
+  agent           Agent?           @relation(fields: [agentId], references: [id])
+  providerId      String?
+  provider        Provider?        @relation(fields: [providerId], references: [id])
+  status          AssignmentStatus @default(OFFERED)
+  scheduledFor    DateTime?
+  acceptedAt      DateTime?
   /// Section 5.4 Field Agent App workflow: Accept -> Navigate -> Check-in
   /// (timestamp + location) -> Execute checklist -> ...
   checkInAt       DateTime?
@@ -728,8 +732,8 @@ model Evidence {
   /// against each other.
   clientRequestId String?
 
-  @@index([caseId])
   @@unique([caseId, clientRequestId])
+  @@index([caseId])
 }
 
 /// Customer-facing deliverable.
@@ -762,7 +766,22 @@ model Quote {
   acceptedAt DateTime?
   createdAt  DateTime    @default(now())
 
-  invoices Invoice[]
+  /// Membership discount/SC application (P0 Technical Build Spec Section
+  /// 17) — nullable-throughout: only populated when the case's customer
+  /// had an eligible active Subscription at quote-creation time. `amount`
+  /// above is always the final payable total either way; these fields
+  /// exist so that total stays explainable rather than opaque, without
+  /// requiring the full quote-line-category rework (a separate, larger,
+  /// not-yet-built increment — see README).
+  subscriptionId  String?
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
+  baseAmount      Decimal?      @db.Decimal(12, 2)
+  discountPercent Decimal?      @db.Decimal(5, 2)
+  discountAmount  Decimal?      @db.Decimal(12, 2)
+  scAppliedNgn    Decimal?      @db.Decimal(12, 2)
+
+  invoices        Invoice[]
+  scLedgerEntries ScLedgerEntry[]
 }
 
 model Invoice {
@@ -894,25 +913,87 @@ model AuditEvent {
 // Concierge tier
 // ---------------------------------------------------------------------------
 
+/// Priority/Premium membership tiers (independent readiness review follow-up
+/// — P0 Technical Build Spec v1.0 Section 17 "Membership Engine"). Distinct
+/// from CaseTier: `plan` is the commercial membership product (price/SC/
+/// discount), `tier` is still what governs how a linked case is handled.
+enum MembershipPlan {
+  PRIORITY
+  PREMIUM
+}
+
+/// SC (Service Credit) ledger transaction types — P0 Technical Build Spec
+/// Section 18: "SC must be implemented as a transaction ledger, not as a
+/// manually editable balance."
+enum ScTransactionType {
+  GRANT
+  DEBIT
+  REVERSAL
+  ADJUSTMENT
+  EXPIRY
+}
+
 model Subscription {
   id          String             @id @default(uuid())
   customerId  String
   customer    Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
   tier        CaseTier           @default(CONCIERGE)
+  plan        MembershipPlan     @default(PRIORITY)
   status      SubscriptionStatus @default(ACTIVE)
   startedAt   DateTime           @default(now())
   renewsAt    DateTime?
   cancelledAt DateTime?
 
-  /// Section 12 P2 "full subscription engine" — deliberately bounded (the
-  /// PRD explicitly rules out a "complex subscription ecosystem"): one
-  /// flat recurring price per period, no proration, no plan changes.
-  /// `renewsAt` doubles as "next billing date" for SubscriptionBillingService.
-  amount   Decimal @default(15000) @db.Decimal(12, 2)
+  /// Locked at subscribe/renewal time from MEMBERSHIP_PLANS config (see
+  /// backend/src/concierge/membership-plans.ts) plus the configured
+  /// USD_TO_NGN_RATE — never recomputed retroactively if plan pricing or
+  /// the rate changes later (P0 Tech Spec Section 19: "a later FX change
+  /// should not silently alter" a locked commercial calculation, applied
+  /// here to the subscription's own price the same way it applies to a
+  /// quote). `amount`/`currency` remain the actual NGN execution charge
+  /// Paystack bills — unchanged in shape from before this migration.
+  priceUsd Decimal @default(99) @db.Decimal(12, 2)
+  fxRate   Decimal @default(1600) @db.Decimal(12, 4)
+  amount   Decimal @default(158400) @db.Decimal(12, 2)
   currency String  @default("NGN")
 
-  memberships Membership[]
-  invoices    SubscriptionInvoice[]
+  scLedger ScLedgerEntry[]
+  invoices SubscriptionInvoice[]
+  Quote    Quote[]
+}
+
+/// P0 Technical Build Spec Section 18 — append-only. Available SC = sum of
+/// valid ledger credits (GRANT, REVERSAL) minus valid debits/reductions
+/// (DEBIT, EXPIRY), plus signed ADJUSTMENT entries. Never a directly
+/// editable balance column anywhere in this schema.
+model ScLedgerEntry {
+  id             String            @id @default(uuid())
+  subscriptionId String
+  subscription   Subscription      @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  type           ScTransactionType
+
+  /// Magnitude in USD (the ledger's authoritative unit, matching the
+  /// plan's $50/$150 grant). Always positive for GRANT/DEBIT/REVERSAL/
+  /// EXPIRY; ADJUSTMENT may be negative (a direct signed correction).
+  amountUsd Decimal @db.Decimal(12, 2)
+
+  /// Set on a DEBIT — which case/quote consumed it, and the NGN amount
+  /// actually applied plus the rate used, for the same traceability reason
+  /// Subscription locks its own fxRate.
+  caseId        String?
+  case          ServiceCase? @relation(fields: [caseId], references: [id])
+  quoteId       String?
+  quote         Quote?       @relation(fields: [quoteId], references: [id])
+  fxRateApplied Decimal?     @db.Decimal(12, 4)
+  amountNgn     Decimal?     @db.Decimal(12, 2)
+
+  /// Required for ADJUSTMENT/REVERSAL — never a silent balance edit.
+  reason    String?
+  actorId   String?
+  createdAt DateTime @default(now())
+
+  @@index([subscriptionId])
+  @@index([caseId])
 }
 
 /// One billing period's invoice for a Concierge subscription. Deliberately
@@ -935,14 +1016,6 @@ model SubscriptionInvoice {
   paystackReference String?   @unique
   paidAt            DateTime?
   createdAt         DateTime  @default(now())
-}
-
-model Membership {
-  id             String       @id @default(uuid())
-  subscriptionId String
-  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  benefit        String
-  createdAt      DateTime     @default(now())
 }
 
 /// Section 12 P1 "recurring services" — Section 6 Service 2 (Construction

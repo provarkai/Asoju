@@ -11,7 +11,7 @@ interface CustomerRow {
   fullName: string;
   user: { email: string | null };
   assignedRm: Rm | null;
-  subscriptions: { status: string; tier: string }[];
+  subscriptions: { id: string; status: string; tier: string; plan: string }[];
 }
 
 // Section 12 P1 "Concierge workflow" — admin assigns a Relationship
@@ -79,7 +79,14 @@ export default function OpsConciergePage() {
                       <Link href={`/ops/customers/${c.id}`}>{c.fullName}</Link> <span className="muted">({c.user.email})</span>
                     </td>
                     <td style={{ padding: '0.4rem' }}>
-                      {sub ? <span className="badge">{sub.tier} · {sub.status.toLowerCase()}</span> : <span className="muted">Essential</span>}
+                      {sub ? (
+                        <>
+                          <span className="badge">{sub.plan} · {sub.status.toLowerCase()}</span>{' '}
+                          <Link href={`/ops/concierge/${sub.id}`} className="muted">SC ledger</Link>
+                        </>
+                      ) : (
+                        <span className="muted">Essential</span>
+                      )}
                     </td>
                     <td style={{ padding: '0.4rem' }}>
                       <select

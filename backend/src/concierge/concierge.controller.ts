@@ -6,7 +6,12 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ConciergeService } from './concierge.service';
 import { SubscriptionBillingService } from './subscription-billing.service';
+import { ScLedgerService } from './sc-ledger.service';
 import { AssignRmDto } from './dto/assign-rm.dto';
+import { SubscribeDto } from './dto/subscribe.dto';
+import { ScAdjustmentDto } from './dto/sc-adjustment.dto';
+
+const FINANCE_ROLES = [Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller()
@@ -14,20 +19,29 @@ export class ConciergeController {
   constructor(
     private readonly conciergeService: ConciergeService,
     private readonly billingService: SubscriptionBillingService,
+    private readonly scLedgerService: ScLedgerService,
   ) {}
 
   // -- Customer self-service --------------------------------------------
 
   @Roles(Role.CUSTOMER)
   @Post('me/subscription')
-  subscribe(@CurrentUser() user: AuthenticatedUser) {
-    return this.conciergeService.subscribe(user);
+  subscribe(@CurrentUser() user: AuthenticatedUser, @Body() dto: SubscribeDto) {
+    return this.conciergeService.subscribe(user, dto.plan);
   }
 
   @Roles(Role.CUSTOMER)
   @Get('me/subscription')
   getMySubscription(@CurrentUser() user: AuthenticatedUser) {
     return this.conciergeService.getMySubscription(user);
+  }
+
+  /** P0 UX Spec "Customer Screen — Membership": SC credit/debit history
+   * behind the plan's balance summary. */
+  @Roles(Role.CUSTOMER)
+  @Get('me/subscription/sc-ledger')
+  getMyScLedger(@CurrentUser() user: AuthenticatedUser) {
+    return this.conciergeService.getMyScLedger(user);
   }
 
   @Roles(Role.CUSTOMER)
@@ -53,6 +67,28 @@ export class ConciergeController {
   @Post('admin/subscriptions/run-billing')
   runBillingSweep() {
     return this.billingService.runBillingSweep();
+  }
+
+  // -- Finance: SC ledger (P0 UX Spec "Finance Screen — SC Ledger") -------
+
+  @Roles(...FINANCE_ROLES)
+  @Get('admin/subscriptions/:id/sc-ledger')
+  getScLedger(@Param('id') subscriptionId: string) {
+    return this.scLedgerService.listForSubscription(subscriptionId);
+  }
+
+  /** "No manual balance edits without an auditable adjustment" — the one
+   * way a human can move a customer's SC balance directly, and only with
+   * a reason (enforced by ScAdjustmentDto/ScLedgerService.adjust). */
+  @Roles(...FINANCE_ROLES)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin/subscriptions/:id/sc-adjustment')
+  adjustScBalance(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') subscriptionId: string,
+    @Body() dto: ScAdjustmentDto,
+  ) {
+    return this.scLedgerService.adjust(subscriptionId, dto.amountUsd, dto.reason, user.id);
   }
 
   // -- Admin: assigning Relationship Managers -----------------------------

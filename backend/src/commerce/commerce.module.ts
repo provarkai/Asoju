@@ -7,6 +7,9 @@ import { PaymentsModule } from '../payments/payments.module';
 import { ConciergeModule } from '../concierge/concierge.module';
 
 @Module({
+  // MembershipService (discount/SC application on quotes) comes in via
+  // ConciergeModule's exports, already imported below for the
+  // subscription-invoice webhook routing.
   imports: [CasesModule, PaymentsModule, ConciergeModule],
   providers: [CommerceService, CaseAccessGuard],
   controllers: [CommerceController],
