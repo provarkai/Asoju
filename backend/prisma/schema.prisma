@@ -1,0 +1,1464 @@
+// ASOJU — Prisma schema
+// Canonical data model per ASOJU Master PRD, Section 3.
+// The ServiceCase is the central object; everything else attaches to it.
+// Keep this file the single source of truth for the domain shape —
+// module code should never assume a shape this schema doesn't define.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Section 4 — User Roles. Role membership alone is never sufficient for
+/// access to a specific case — see CaseCollaborator / Assignment for the
+/// case-scoped layer (Non-Negotiable #6).
+enum Role {
+  CUSTOMER
+  BENEFICIARY
+  FIELD_AGENT
+  PROVIDER
+  RELATIONSHIP_MANAGER
+  CASE_MANAGER
+  QUALITY_CONTROL
+  FINANCE
+  COMPLIANCE_RISK
+  ADMIN
+  SUPER_ADMIN
+  /// Section 12 P2 "partner portal" — an external referral partner's own
+  /// login, distinct from staff and from the field workforce. Provisioned
+  /// the same non-self-service way as every other internal role.
+  PARTNER
+}
+
+/// Section 6 — MVP Service Catalogue (the three services active at launch),
+/// extended per Section 12 P2 "diaspora operations layer" expansion — new
+/// case-shaped service categories using the same engine, not new
+/// marketplaces (Section 11.2 explicitly rules those out).
+///
+/// BEREAVEMENT_SUPPORT (Tier 2 vertical, strategic-suggestions pass) — same
+/// case-shaped execution as every other service, but the single most
+/// time-critical, emotionally-sensitive one on the catalogue; see
+/// SERVICE_TYPE_DEFAULT_PRIORITY in cases.service.ts (defaults to URGENT
+/// when staff don't explicitly pick a priority) and its
+/// vendor-coordination checklist in checklist-templates.ts.
+enum ServiceType {
+  PROPERTY_INSPECTION
+  CONSTRUCTION_SUPERVISION
+  ASSET_INSPECTION
+  FAMILY_SUPPORT
+  PROCUREMENT
+  BUSINESS_VERIFICATION
+  INVESTMENT_SUPPORT
+  AGRICULTURE_SUPPORT
+  BEREAVEMENT_SUPPORT
+}
+
+enum CaseTier {
+  ESSENTIAL
+  CONCIERGE
+}
+
+enum CasePriority {
+  STANDARD
+  PRIORITY
+  URGENT
+}
+
+/// Section 5.2 — Case state machine. Backend-enforced; AI may recommend
+/// but never force a transition (Non-Negotiable #9).
+enum CaseStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  QUOTED
+  AWAITING_PAYMENT
+  SCHEDULED
+  ASSIGNED
+  IN_PROGRESS
+  EVIDENCE_SUBMITTED
+  QUALITY_CONTROL
+  CUSTOMER_REVIEW
+  ADDITIONAL_WORK
+  APPROVED
+  COMPLETED
+  CLOSED
+  /// P0 Tech Platform Requirements §8 "Case Status Model" — "ON HOLD |
+  /// Blocked pending information/decision/condition. | Block removed or
+  /// case cancelled." Deliberately outside the static TRANSITIONS map in
+  /// case-state-machine.ts — where a held case resumes *to* is dynamic
+  /// (whatever it was before), not a fixed edge, so CasesService.holdCase/
+  /// resumeCase manage this status directly rather than going through the
+  /// generic POST /transition, using ServiceCase.heldFromStatus to
+  /// remember the way back.
+  ON_HOLD
+}
+
+/// P0 Technical Build Spec Section 21 "Payment States". PROCESSING and
+/// EXPIRED are the two states this doesn't yet set anywhere (they'd need,
+/// respectively, a provider-status poll and a payment-window timeout
+/// sweep — real, but a separate increment, not this one); PARTIALLY_REFUNDED
+/// and RECONCILIATION_REQUIRED are wired into real behavior in
+/// CommerceService (refundPayment / the amount-mismatch path).
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+  EXPIRED
+  REFUNDED
+  PARTIALLY_REFUNDED
+  RECONCILIATION_REQUIRED
+}
+
+/// Database Schema & ERD Design v1.0 Section 17 "Finance Schema" —
+/// `reconciliations | id, payment_id, reconciled_by, reconciled_at,
+/// status, notes`. The outcome Finance reached reviewing a
+/// RECONCILIATION_REQUIRED payment: MATCHED accepts the amount actually
+/// received as correct (CommerceService.resolveReconciliation moves the
+/// Payment, and the case's paymentStatus, to PAID); REJECTED means the
+/// mismatch was a genuine failure (both move to FAILED instead, freeing
+/// the customer to retry payment on the same invoice).
+enum ReconciliationStatus {
+  MATCHED
+  REJECTED
+}
+
+/// Section 8.3 — Evidence levels. Never conflate these.
+enum EvidenceLevel {
+  OBSERVED
+  REPORTED
+  PROFESSIONALLY_ASSESSED
+  PLATFORM_VERIFIED
+}
+
+/// Section 8.2 — Trust labels. Never a single vague "Verified" badge.
+enum TrustLabel {
+  ASOJU_VERIFIED
+  PROFESSIONALLY_REVIEWED
+  CUSTOMER_PROVIDED
+  THIRD_PARTY_STATEMENT
+  NOT_INDEPENDENTLY_VERIFIED
+}
+
+enum EvidenceType {
+  PHOTO
+  VIDEO
+  DOCUMENT
+  VOICE
+  LOCATION
+  NOTE
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Section 8.5 — Quality Control outcomes. APPROVED/REWORK map to the P0
+/// Technical Build Spec Section 26 "QC Engine" table's PASS/FAIL_CORRECTION
+/// (kept under their original names — a cosmetic rename would touch every
+/// caller/test/UI string for no functional gain); PASS_WITH_LIMITATION and
+/// REVISIT_REQUIRED are that same table's two outcomes this shipped
+/// without. INCIDENT predates the spec table and stays — a strictly
+/// heavier "raise a real Incident record" option ESCALATE alone doesn't
+/// cover.
+enum QcOutcome {
+  APPROVED
+  /// Spec: "Allows delivery with recorded limitation" — same delivery path
+  /// as APPROVED (a Report is issued, case moves to CUSTOMER_REVIEW), but
+  /// the limitation is a required, recorded field on that Report rather
+  /// than folded silently into a clean pass.
+  PASS_WITH_LIMITATION
+  REWORK
+  /// Spec: "Creates operational revisit task" — distinct from REWORK's
+  /// "fix it without leaving the office": this creates a real, required
+  /// CaseTask on the case (so it shows up in the field agent's checklist)
+  /// rather than just a status-history note, because what's missing needs
+  /// an actual return to site.
+  REVISIT_REQUIRED
+  ESCALATE
+  INCIDENT
+}
+
+/// Section 7.4 — Scoring/segment tag, deterministic (not another LLM call).
+enum LeadTag {
+  HOT
+  WARM
+  COLD
+}
+
+/// Section 7.3 / 7.5 — AI escalation triggers.
+enum AiEscalation {
+  NONE
+  HUMAN_REQUESTED
+  VIP
+  FRUSTRATION
+  LEGAL_QUESTION
+}
+
+/// Section 7.6 — AI action permission levels.
+enum AiActionLevel {
+  INFORM
+  ASSIST
+  EXECUTE_LOW_RISK
+  HUMAN_APPROVAL_REQUIRED
+}
+
+enum ApprovalAction {
+  APPROVED
+  REQUEST_CLARIFICATION
+  REQUEST_ADDITIONAL_WORK
+  ESCALATE
+}
+
+enum AssignmentRole {
+  FIELD_AGENT
+  PROVIDER
+}
+
+enum AssignmentStatus {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  IN_PROGRESS
+  COMPLETED
+  REVOKED
+}
+
+/// Case-scoped staff access (Section 4) — distinct from field
+/// Assignment, which covers agents/providers doing the physical/professional work.
+enum CollaboratorRole {
+  RELATIONSHIP_MANAGER
+  CASE_MANAGER
+  QUALITY_CONTROL
+  FINANCE
+  COMPLIANCE_RISK
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  EXPIRED
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+}
+
+/// Provider verification lifecycle (Gate 2 — Trust & Provider Network,
+/// working-session source doc). A provider is not bookable until VERIFIED.
+enum ProviderStatus {
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  ACTIVE
+  RESTRICTED
+  SUSPENDED
+  REMOVED
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access
+// ---------------------------------------------------------------------------
+
+model User {
+  id                 String   @id @default(uuid())
+  email              String?  @unique
+  phone              String?  @unique
+  passwordHash       String?
+  role               Role
+  mfaEnabled         Boolean  @default(false)
+  mfaSecret          String?
+  isActive           Boolean  @default(true)
+  countryOfResidence String?
+  preferredChannel   String? // e.g. whatsapp | email | sms
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  customer              Customer?
+  agentProfile          Agent?
+  providerProfile       Provider?
+  refreshTokens         RefreshToken[]
+  passwordResetTokens   PasswordResetToken[]
+  caseCollaborators     CaseCollaborator[]
+  uploadedEvidence      Evidence[]             @relation("EvidenceUploader")
+  auditEvents           AuditEvent[]
+  messagesSent          Message[]              @relation("MessageSender")
+  notifications         Notification[]
+  approvals             Approval[]
+  ratings               Rating[]
+  rmPortfolio           Customer[]             @relation("CustomerRm")
+  whatsAppThread        WhatsAppThread?
+  partnerContact        PartnerContact?
+  scopesCreated         CaseScope[]            @relation("ScopeCreatedBy")
+  scopesConfirmed       CaseScope[]            @relation("ScopeConfirmedBy")
+  planConfigsUpdated    MembershipPlanConfig[] @relation("PlanConfigUpdatedBy")
+  ownedCases            ServiceCase[]          @relation("CaseOwner")
+  directCostsRecorded   DirectCost[]
+  refundRequestsMade    RefundRequest[]        @relation("RefundRequestedBy")
+  refundRequestsDecided RefundRequest[]        @relation("RefundDecidedBy")
+  beneficiaryProfile    Beneficiary?           @relation("BeneficiaryUser")
+
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// Security hardening (independent readiness review, P0-06 "privileged
+/// authentication") — single-use, short-lived password reset tokens.
+/// Only the hash is stored, same discipline as RefreshToken.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Customers, beneficiaries, accounts
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName  String
+  accountId String?
+  account   Account? @relation(fields: [accountId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Section 5.1 P1 / Section 12 P1 — "referral flow", "referral system".
+  // Kept deliberately simple for MVP: a stable code, a self-relation
+  // recording who referred whom, no reward/credit tracking yet.
+  referralCode         String     @unique
+  referredByCustomerId String?
+  referredByCustomer   Customer?  @relation("Referrals", fields: [referredByCustomerId], references: [id])
+  referredCustomers    Customer[] @relation("Referrals")
+
+  /// Section 12 P2 "partner portal" — organisation-level referral,
+  /// alongside (not instead of) the peer-to-peer referral above. Set at
+  /// registration from a partner code, e.g. /register?partner=CODE.
+  referredByPartnerId String?
+  referredByPartner   Partner? @relation(fields: [referredByPartnerId], references: [id])
+
+  /// Section 12 P1 "Concierge workflow" — a Relationship Manager owns a
+  /// portfolio of Concierge-tier customers (Section 4). Portfolio-level,
+  /// not case-level — distinct from the case-scoped RM CaseCollaborator role.
+  assignedRmUserId String?
+  assignedRm       User?   @relation("CustomerRm", fields: [assignedRmUserId], references: [id])
+
+  beneficiaries      Beneficiary[]
+  properties         Property[]
+  assets             Asset[]
+  serviceRequests    ServiceRequest[]
+  serviceCases       ServiceCase[]
+  subscriptions      Subscription[]
+  complaints         Complaint[]
+  recurringSchedules RecurringSchedule[]
+}
+
+/// e.g. customer's parents/family being helped.
+/// "Who is a Beneficiary" — the person in Nigeria a diaspora Customer names
+/// as connected to a case (who the service is for, or who's on the ground
+/// dealing with it), distinct from the Customer (always the account holder/
+/// payer) and from Agent/Provider (paid field executors). userId is
+/// optional and starts null — a Beneficiary is just a contact record until
+/// the Customer invites them (ProfileService.inviteBeneficiary /
+/// BeneficiaryInvite below), at which point they get their own limited,
+/// read-only login (Role.BENEFICIARY) scoped to cases naming them.
+model Beneficiary {
+  id           String   @id @default(uuid())
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  fullName     String
+  relationship String?
+  phone        String?
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  userId String? @unique
+  user   User?   @relation("BeneficiaryUser", fields: [userId], references: [id])
+
+  serviceCases ServiceCase[]
+  invites      BeneficiaryInvite[]
+}
+
+/// Single-use, expiring invite link — same shape as PasswordResetToken,
+/// but this one creates a new User + links it to the Beneficiary
+/// (AuthService.acceptBeneficiaryInvite) rather than resetting an existing
+/// one. Only one active (unused, unexpired) invite matters at a time;
+/// ProfileService.inviteBeneficiary invalidates any prior ones when
+/// issuing a new one.
+model BeneficiaryInvite {
+  id            String      @id @default(uuid())
+  beneficiaryId String
+  beneficiary   Beneficiary @relation(fields: [beneficiaryId], references: [id], onDelete: Cascade)
+  tokenHash     String      @unique
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@index([beneficiaryId])
+}
+
+/// Section 12 P2 "corporate accounts" / "family management dashboard" —
+/// groups several Customer records under one shared, read-only umbrella
+/// (a household or a company) without merging their individual case
+/// ownership or access. Deliberately not a billing/consolidation engine
+/// (Section 11.2 rules out a "complex subscription ecosystem") — just
+/// shared visibility over who's-doing-what across the group.
+model Account {
+  id        String      @id @default(uuid())
+  name      String
+  type      AccountType @default(FAMILY)
+  createdAt DateTime    @default(now())
+  customers Customer[]
+}
+
+enum AccountType {
+  FAMILY
+  CORPORATE
+}
+
+/// Section 12 P2 "partner portal" — an external organisation (a diaspora
+/// association, a Nigerian business, an individual agent — Section 1's
+/// "distribution/partnership channels") that refers customers to ASOJU.
+/// Deliberately not the P3 "partner ecosystem" (commissions, contracts,
+/// self-serve signup) — just attribution and a read-only dashboard.
+model Partner {
+  id        String        @id @default(uuid())
+  name      String
+  code      String        @unique
+  type      PartnerType
+  status    PartnerStatus @default(ACTIVE)
+  createdAt DateTime      @default(now())
+
+  contacts          PartnerContact[]
+  referredCustomers Customer[]
+}
+
+enum PartnerType {
+  ASSOCIATION
+  BUSINESS
+  AGENT
+}
+
+enum PartnerStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// Links a PARTNER-role User (provisioned the same non-self-service way as
+/// every other internal role) to the Partner org they log in on behalf of.
+model PartnerContact {
+  id        String   @id @default(uuid())
+  partnerId String
+  partner   Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Properties & generalized assets
+// ---------------------------------------------------------------------------
+
+model Property {
+  id          String   @id @default(uuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  address     String
+  city        String?
+  state       String?
+  description String?
+  createdAt   DateTime @default(now())
+
+  serviceCases ServiceCase[]
+}
+
+/// Generalized: farm, business premises, equipment, vehicle (Section 3).
+model Asset {
+  id          String   @id @default(uuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  assetType   String
+  description String?
+  location    String?
+  createdAt   DateTime @default(now())
+
+  serviceCases ServiceCase[]
+}
+
+// ---------------------------------------------------------------------------
+// Service requests & cases — the central objects (Section 3.1)
+// ---------------------------------------------------------------------------
+
+/// Raw inbound request (pre-case). Created by the AI Concierge or a manual
+/// intake; becomes a ServiceCase once triaged (vertical slice 1).
+model ServiceRequest {
+  id              String         @id @default(uuid())
+  customerId      String
+  customer        Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  serviceType     ServiceType?
+  rawDescription  String
+  location        String?
+  channel         String // whatsapp | web | email
+  leadTag         LeadTag?
+  leadScore       Int?
+  segmentTag      String? // Diaspora | Local HNI | Mass Retail
+  aiInteractionId String?
+  aiInteraction   AiInteraction? @relation(fields: [aiInteractionId], references: [id])
+  convertedCaseId String?        @unique
+  convertedCase   ServiceCase?   @relation("RequestToCase", fields: [convertedCaseId], references: [id])
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+/// THE CENTRAL OBJECT. Every request, regardless of vertical, becomes a
+/// Case, and everything else attaches to it (Section 3).
+model ServiceCase {
+  id            String       @id @default(uuid())
+  seq           Int          @unique @default(autoincrement()) // backs caseNumber generation (ASJ-000184)
+  caseNumber    String       @unique // e.g. ASJ-000184 — derived from `seq` on creation
+  customerId    String
+  customer      Customer     @relation(fields: [customerId], references: [id])
+  beneficiaryId String?
+  beneficiary   Beneficiary? @relation(fields: [beneficiaryId], references: [id])
+  propertyId    String?
+  property      Property?    @relation(fields: [propertyId], references: [id])
+  assetId       String?
+  asset         Asset?       @relation(fields: [assetId], references: [id])
+
+  serviceType ServiceType
+  description String
+  location    String
+  priority    CasePriority @default(STANDARD)
+  riskLevel   Int          @default(1) // 1-4, Section 3.1
+  tier        CaseTier     @default(ESSENTIAL)
+  status      CaseStatus   @default(DRAFT)
+
+  paymentStatus PaymentStatus @default(PENDING)
+
+  /// P0 Tech Platform Requirements §9 "Case Control Requirements" — "Every
+  /// active case must answer: who owns it, who is executing it, what
+  /// happens next, when is it due." CaseCollaborator lets many staff attach
+  /// to a case, but names nobody as *the* accountable owner; ownerUserId is
+  /// that single answer (CasesService.assignOwner). nextAction/
+  /// nextActionDueAt are the same requirement's "what happens next / when"
+  /// (CasesService.setNextAction) — free text plus a due date, not another
+  /// state machine. slaTargetAt is set automatically at case creation from
+  /// CasePriority (casesService.slaHoursForPriority, env-configurable, same
+  /// pattern as QUOTE_VALIDITY_HOURS) so "overdue" is something the Ops
+  /// queue can compute from day one, not a value nobody ever sets.
+  ownerUserId     String?
+  owner           User?     @relation("CaseOwner", fields: [ownerUserId], references: [id])
+  nextAction      String?
+  nextActionDueAt DateTime?
+  slaTargetAt     DateTime?
+
+  /// P0 Tech Platform Requirements §8 "Case Status Model" — ON_HOLD.
+  /// Where to resume when the hold is lifted (CasesService.resumeCase);
+  /// set only while status is ON_HOLD, cleared on resume.
+  heldFromStatus CaseStatus?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  originRequest  ServiceRequest?     @relation("RequestToCase")
+  tasks          CaseTask[]
+  statusHistory  CaseStatusHistory[]
+  riskFlags      CaseRiskFlag[]
+  assignments    Assignment[]
+  collaborators  CaseCollaborator[]
+  documents      Document[]
+  evidence       Evidence[]
+  reports        Report[]
+  quotes         Quote[]
+  invoices       Invoice[]
+  messages       Message[]
+  complaints     Complaint[]
+  incidents      Incident[]
+  auditEvents    AuditEvent[]
+  approvals      Approval[]
+  aiInteractions AiInteraction[]
+  rating         Rating?
+
+  /// Section 12 P1 "recurring services" — set when this case was the one
+  /// a recurring schedule was configured from.
+  recurringSchedule     RecurringSchedule? @relation("ScheduleOrigin")
+  spawnedFromScheduleId String?
+  spawnedFromSchedule   RecurringSchedule? @relation("ScheduleSpawned", fields: [spawnedFromScheduleId], references: [id])
+
+  /// Section 12 P2 "advanced risk engine" — a trail of every deterministic
+  /// risk re-score, distinct from the generic AuditEvent log so
+  /// Compliance/Risk can review just the scoring history and its factors.
+  riskAssessments RiskAssessment[]
+
+  /// SC (Service Credit) ledger entries that debited/reversed against this
+  /// case's quote — see ScLedgerEntry.
+  scLedgerEntries ScLedgerEntry[]
+
+  /// P0 Technical Build Spec Section 14 "Scope Versioning" — see CaseScope.
+  scopes CaseScope[]
+
+  /// P0 Tech Platform §33 "Financial & Analytics Requirements" — see DirectCost.
+  directCosts DirectCost[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([serviceType])
+  @@index([ownerUserId])
+  @@index([slaTargetAt])
+}
+
+model CaseTask {
+  id          String      @id @default(uuid())
+  caseId      String
+  case        ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  label       String
+  isRequired  Boolean     @default(true)
+  isComplete  Boolean     @default(false)
+  completedAt DateTime?
+  sortOrder   Int         @default(0)
+  createdAt   DateTime    @default(now())
+
+  evidence Evidence[]
+}
+
+/// P0 Technical Build Spec Section 14 "Scope Versioning" / P0 Engineering
+/// Backlog EPIC F — "material scope changes create a traceable new version
+/// and cannot silently expand execution." This is what a customer confirms
+/// and what CommerceService.createQuote() gates on (see the comment there)
+/// — separate from CaseTask, which is the field-execution checklist
+/// generated later from the same case's service-type template; wiring the
+/// two together so Job Cards are generated strictly from an approved
+/// scope's task list is a further, not-yet-built increment, not this one.
+model CaseScope {
+  id     String      @id @default(uuid())
+  caseId String
+  case   ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  /// Incrementing per case (1, 2, 3, ...) — never reused, never mutated
+  /// after creation. A revision always inserts a new row.
+  version Int
+
+  objective String
+
+  /// string[] each — deliberately simple JSON arrays rather than child
+  /// tables: order matters, items are short, and nothing here needs its
+  /// own independent lifecycle (no per-task status — that's CaseTask's job).
+  tasks                Json
+  deliverables         Json
+  exclusions           Json
+  evidenceRequirements Json
+
+  createdById String
+  createdBy   User     @relation("ScopeCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  /// Null until the customer confirms this specific version — a new
+  /// version always starts unconfirmed, even if a prior version was
+  /// approved (P0 UX Spec: "Scope changes require explicit confirmation").
+  confirmedById String?
+  confirmedBy   User?     @relation("ScopeConfirmedBy", fields: [confirmedById], references: [id])
+  confirmedAt   DateTime?
+
+  quotes Quote[]
+
+  @@unique([caseId, version])
+  @@index([caseId])
+}
+
+/// Append-only per-case status trail (distinct from the global AuditEvent
+/// log — this one is case-status-specific and drives the timeline UI).
+model CaseStatusHistory {
+  id          String      @id @default(uuid())
+  caseId      String
+  case        ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  fromStatus  CaseStatus?
+  toStatus    CaseStatus
+  changedById String?
+  reason      String?
+  createdAt   DateTime    @default(now())
+
+  @@index([caseId])
+}
+
+model CaseRiskFlag {
+  id         String      @id @default(uuid())
+  caseId     String
+  case       ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  label      String
+  detail     String?
+  raisedById String?
+  resolvedAt DateTime?
+  createdAt  DateTime    @default(now())
+}
+
+/// Section 12 P2 "advanced risk engine" — a deterministic (not AI-driven,
+/// consistent with Non-Negotiable #9's philosophy) re-score computed by
+/// RiskEngineService at key case transitions. `factors` is the plain-code
+/// breakdown so Compliance/Risk can see exactly why a level was assigned,
+/// not just the resulting number.
+model RiskAssessment {
+  id         String      @id @default(uuid())
+  caseId     String
+  case       ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  score      Int
+  level      Int // 1-4, mirrors ServiceCase.riskLevel at the time of assessment
+  factors    Json
+  assessedAt DateTime    @default(now())
+}
+
+/// Case-scoped staff access — an RM/Case Manager/QC/Finance/Compliance user
+/// must be explicitly attached here to see a case; role membership alone
+/// is never sufficient (Section 4, Non-Negotiable #6).
+model CaseCollaborator {
+  id      String           @id @default(uuid())
+  caseId  String
+  case    ServiceCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User             @relation(fields: [userId], references: [id])
+  role    CollaboratorRole
+  addedAt DateTime         @default(now())
+
+  @@unique([caseId, userId, role])
+}
+
+// ---------------------------------------------------------------------------
+// Field agents & professional providers
+// ---------------------------------------------------------------------------
+
+model Agent {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName         String
+  city             String?
+  state            String?
+  isActive         Boolean  @default(true)
+  performanceScore Float? // Section 12 P1 "provider performance scoring", applied to agents too
+  createdAt        DateTime @default(now())
+
+  assignments Assignment[]
+}
+
+model Provider {
+  id               String         @id @default(uuid())
+  userId           String         @unique
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName         String
+  serviceCategory  String // surveyor | lawyer | engineer | valuer | ...
+  city             String?
+  state            String?
+  status           ProviderStatus @default(PENDING)
+  performanceScore Float? // rolling score from jobs completed / on-time rate / rework rate
+  createdAt        DateTime       @default(now())
+
+  credentials ProviderCredential[]
+  assignments Assignment[]
+
+  @@index([status])
+}
+
+model ProviderCredential {
+  id          String    @id @default(uuid())
+  providerId  String
+  provider    Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  type        String // license | certification | reference
+  issuer      String?
+  reference   String?
+  verifiedAt  DateTime?
+  documentUrl String?
+  createdAt   DateTime  @default(now())
+}
+
+/// Links case <-> agent/provider (Section 3).
+model Assignment {
+  id              String           @id @default(uuid())
+  caseId          String
+  case            ServiceCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  role            AssignmentRole
+  agentId         String?
+  agent           Agent?           @relation(fields: [agentId], references: [id])
+  providerId      String?
+  provider        Provider?        @relation(fields: [providerId], references: [id])
+  status          AssignmentStatus @default(OFFERED)
+  scheduledFor    DateTime?
+  acceptedAt      DateTime?
+  /// Section 5.4 Field Agent App workflow: Accept -> Navigate -> Check-in
+  /// (timestamp + location) -> Execute checklist -> ...
+  checkInAt       DateTime?
+  checkInLocation Json?
+  completedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  restrictedDocuments Document[]
+
+  @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// Trust & Evidence Engine (Section 8)
+// ---------------------------------------------------------------------------
+
+model Document {
+  id           String      @id @default(uuid())
+  caseId       String
+  case         ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  label        String
+  storageKey   String // private object storage key — never a predictable public URL
+  uploadedById String?
+  createdAt    DateTime    @default(now())
+
+  /// Security hardening — "field actors should receive only documents
+  /// necessary for the assignment" (independent readiness review, P0-04).
+  /// Customer and staff (collaborators/admin) always see every document on
+  /// their own case regardless of this field; it only narrows what a
+  /// FIELD_AGENT/PROVIDER assignee sees. ALL preserves the original
+  /// behaviour (every assignee sees it) so existing documents are
+  /// unaffected by this migration.
+  visibility               DocumentVisibility @default(ALL)
+  restrictedToAssignmentId String?
+  restrictedToAssignment   Assignment?        @relation(fields: [restrictedToAssignmentId], references: [id], onDelete: SetNull)
+}
+
+enum DocumentVisibility {
+  ALL // every assignee on the case, plus customer and staff (default, backward-compatible)
+  STAFF_ONLY // customer and staff only — no field actor, regardless of assignment
+  ASSIGNEE // customer, staff, and only the specific Assignment named in restrictedToAssignmentId
+}
+
+/// Photos, videos, docs, observations, metadata (Section 8.4).
+/// Chain of custody: Captured -> Uploaded -> Stored -> Reviewed ->
+/// Approved/Rejected -> Included in report -> Delivered to customer.
+/// Original evidence must remain in the audit trail even if later
+/// corrected/replaced — this table is append-only by convention;
+/// corrections create a new row referencing `supersedesId`.
+model Evidence {
+  id               String        @id @default(uuid())
+  caseId           String
+  case             ServiceCase   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  taskId           String?
+  task             CaseTask?     @relation(fields: [taskId], references: [id])
+  uploaderId       String
+  uploader         User          @relation("EvidenceUploader", fields: [uploaderId], references: [id])
+  type             EvidenceType
+  evidenceLevel    EvidenceLevel @default(OBSERVED)
+  trustLabel       TrustLabel    @default(NOT_INDEPENDENTLY_VERIFIED)
+  description      String?
+  locationMetadata Json?
+  storageKey       String // private object storage key
+  integrityHash    String
+  reviewStatus     ReviewStatus  @default(PENDING)
+  supersedesId     String?       @unique
+  supersedes       Evidence?     @relation("EvidenceSupersedes", fields: [supersedesId], references: [id])
+  supersededBy     Evidence?     @relation("EvidenceSupersedes")
+  capturedAt       DateTime?
+  createdAt        DateTime      @default(now()) // server-side timestamp, per Section 8.4
+
+  /// Field Agent App "offline support" hardening — a client-generated key
+  /// so a queued submission replayed after a dropped response (the
+  /// request succeeded, the client never saw it) creates one Evidence
+  /// row, not two. Null for callers that don't send one; Postgres treats
+  /// each NULL as distinct, so unkeyed submissions are never deduped
+  /// against each other.
+  clientRequestId String?
+
+  @@unique([caseId, clientRequestId])
+  @@index([caseId])
+}
+
+/// Customer-facing deliverable.
+model Report {
+  id        String      @id @default(uuid())
+  caseId    String
+  case      ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  summary   String
+  findings  Json // structured findings, leads with results not metadata
+  qcOutcome QcOutcome?
+
+  /// Set only when qcOutcome is PASS_WITH_LIMITATION — the spec's
+  /// "recorded limitation" the customer sees alongside the report,
+  /// required at QC time rather than left implicit in `findings`.
+  limitation String?
+
+  qcReviewedById String?
+  qcReviewedAt   DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Commercial: quotes, invoices, payments, refunds, payouts
+// ---------------------------------------------------------------------------
+
+/// P0 Technical Build Spec Section 16 "Quote Line Categories". DISCOUNT and
+/// SC_CREDIT from the spec's table aren't included here — those are
+/// system-computed *outputs* of a quote (Quote.discountAmount/scAppliedNgn
+/// below), never something staff enter as an input line, unlike the four
+/// categories here.
+enum QuoteLineCategory {
+  /// "Eligible for membership discount/SC according to configured rules" —
+  /// the only category CommerceService.createQuote() sums into the
+  /// discount/SC-eligible base; everything else passes through untouched.
+  ASOJU_SERVICE_FEE
+  /// "Separate customer-authorized cost."
+  EXTERNAL_COST
+  /// "Separate professional fee."
+  THIRD_PARTY_PROFESSIONAL
+  /// "Separate where applicable."
+  TAX_STATUTORY
+}
+
+/// One line on a Quote — replaces the old free-form `breakdown` JSON
+/// (unstructured, unused in any calculation, never rendered anywhere) with
+/// the categorized lines the spec actually calls for. Never mutated after
+/// creation; a revised quote is a new Quote with new lines (see the
+/// scopeId comment below re: quote-versioning being a separate increment).
+model QuoteLine {
+  id       String            @id @default(uuid())
+  quoteId  String
+  quote    Quote             @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  category QuoteLineCategory
+  label    String
+  amount   Decimal           @db.Decimal(12, 2)
+
+  @@index([quoteId])
+}
+
+model Quote {
+  id         String      @id @default(uuid())
+  caseId     String
+  case       ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  amount     Decimal     @db.Decimal(12, 2)
+  currency   String      @default("NGN")
+  lines      QuoteLine[]
+  expiresAt  DateTime?
+  acceptedAt DateTime?
+  createdAt  DateTime    @default(now())
+
+  /// Membership discount/SC application (P0 Technical Build Spec Section
+  /// 17) — nullable-throughout: only populated when the case's customer
+  /// had an eligible active Subscription at quote-creation time. `amount`
+  /// above is always the final payable total either way; these fields
+  /// exist so that total stays explainable rather than opaque.
+  /// `baseAmount` is specifically the sum of this quote's ASOJU_SERVICE_FEE
+  /// lines (what the discount/SC actually apply against, per Section 16 —
+  /// never the whole quote); `nonServiceFeeAmount` is the sum of every
+  /// other line, added back on top untouched by either.
+  subscriptionId      String?
+  subscription        Subscription? @relation(fields: [subscriptionId], references: [id])
+  baseAmount          Decimal?      @db.Decimal(12, 2)
+  nonServiceFeeAmount Decimal?      @db.Decimal(12, 2)
+  discountPercent     Decimal?      @db.Decimal(5, 2)
+  discountAmount      Decimal?      @db.Decimal(12, 2)
+  scAppliedNgn        Decimal?      @db.Decimal(12, 2)
+
+  /// Which confirmed CaseScope version this was quoted against (P0
+  /// Technical Build Spec Section 14) — CommerceService.createQuote()
+  /// requires this to be set; nullable only because a quote can outlive
+  /// the case's scope history in principle (onDelete: SetNull), not
+  /// because a quote is ever meant to exist without one.
+  scopeId String?
+  scope   CaseScope? @relation(fields: [scopeId], references: [id], onDelete: SetNull)
+
+  invoices        Invoice[]
+  scLedgerEntries ScLedgerEntry[]
+}
+
+model Invoice {
+  id        String      @id @default(uuid())
+  caseId    String
+  case      ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  quoteId   String?
+  quote     Quote?      @relation(fields: [quoteId], references: [id])
+  amount    Decimal     @db.Decimal(12, 2)
+  currency  String      @default("NGN")
+  createdAt DateTime    @default(now())
+
+  payments Payment[]
+}
+
+/// Non-Negotiable #4 — no payment status based solely on customer
+/// screenshots; only the payment provider's verified webhook status
+/// drives workflow. `providerWebhookVerifiedAt` is set only by the
+/// payments module's webhook handler, never by a customer-facing endpoint.
+model Payment {
+  id                        String        @id @default(uuid())
+  invoiceId                 String
+  invoice                   Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount                    Decimal       @db.Decimal(12, 2)
+  currency                  String        @default("NGN")
+  provider                  String // e.g. paystack | flutterwave
+  providerReference         String        @unique
+  providerWebhookVerifiedAt DateTime?
+  status                    PaymentStatus @default(PENDING)
+  createdAt                 DateTime      @default(now())
+  updatedAt                 DateTime      @updatedAt
+
+  refunds         Refund[]
+  reconciliations Reconciliation[]
+  refundRequests  RefundRequest[]
+}
+
+/// A Finance-initiated reversal — distinct from ScLedgerEntry's REVERSAL
+/// (that's a Concierge SC credit; this is real money). Always requires an
+/// authorized actor and a reason (CommerceService.refundPayment), same
+/// discipline as ScLedgerService.adjust — never a silent balance edit.
+model Refund {
+  id        String   @id @default(uuid())
+  paymentId String
+  payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  amount    Decimal  @db.Decimal(12, 2)
+  reason    String?
+  actorId   String?
+  createdAt DateTime @default(now())
+}
+
+enum RefundRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// P0 Security, Privacy & Trust Architecture v1.0 §8 "Privileged Action
+/// Matrix" — "Refund | Finance permission + threshold approval where
+/// configured." A refund over REFUND_APPROVAL_THRESHOLD_NGN
+/// (CommerceService.refundApprovalThresholdNgn, env-configurable, same
+/// pattern as QUOTE_VALIDITY_HOURS) creates one of these instead of
+/// executing immediately — a second, different Finance/Admin/SuperAdmin
+/// actor must approve (CommerceService.approveRefundRequest) before the
+/// actual Refund row and Paystack call happen. requestedById and
+/// decidedById are deliberately different users where a decision was
+/// made — maker-checker, not a rubber stamp.
+model RefundRequest {
+  id            String              @id @default(uuid())
+  paymentId     String
+  payment       Payment             @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  amount        Decimal             @db.Decimal(12, 2)
+  reason        String
+  status        RefundRequestStatus @default(PENDING)
+  requestedById String
+  requestedBy   User                @relation("RefundRequestedBy", fields: [requestedById], references: [id])
+  decidedById   String?
+  decidedBy     User?               @relation("RefundDecidedBy", fields: [decidedById], references: [id])
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime            @default(now())
+
+  @@index([paymentId])
+  @@index([status])
+}
+
+/// Finance's resolution of a RECONCILIATION_REQUIRED payment
+/// (CommerceService.resolveReconciliation) — a permanent record of who
+/// decided what and why, separate from the transient Payment.status.
+/// Never updated after creation; a re-review creates a new row.
+model Reconciliation {
+  id           String               @id @default(uuid())
+  paymentId    String
+  payment      Payment              @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  status       ReconciliationStatus
+  notes        String
+  reconciledBy String?
+  reconciledAt DateTime             @default(now())
+
+  @@index([paymentId])
+}
+
+model Payout {
+  id            String         @id @default(uuid())
+  recipientType AssignmentRole
+  agentId       String?
+  providerId    String?
+  amount        Decimal        @db.Decimal(12, 2)
+  currency      String         @default("NGN")
+  status        PaymentStatus  @default(PENDING)
+  createdAt     DateTime       @default(now())
+}
+
+/// P0 Tech Platform Requirements §33 "Financial & Analytics Requirements"
+/// / Tech Arch §30 "Core Metrics" — "Contribution = Revenue - Direct Case
+/// Costs." Nothing in the app recorded what a case actually cost to
+/// deliver: `Payout` (above) has no case linkage and zero call sites.
+/// Finance records each direct cost against the case as it's incurred
+/// (CommerceService.recordDirectCost); AnalyticsService sums these to
+/// compute contribution and contribution margin. Append-only, like Refund
+/// and Reconciliation — a correction is a new row, never an edit.
+enum DirectCostCategory {
+  REPRESENTATIVE
+  TRAVEL
+  THIRD_PARTY
+  OTHER
+}
+
+model DirectCost {
+  id        String             @id @default(uuid())
+  caseId    String
+  case      ServiceCase        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  category  DirectCostCategory
+  amount    Decimal            @db.Decimal(12, 2)
+  currency  String             @default("NGN")
+  note      String?
+  actorId   String?
+  actor     User?              @relation(fields: [actorId], references: [id])
+  createdAt DateTime           @default(now())
+
+  @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// Communication
+// ---------------------------------------------------------------------------
+
+model Message {
+  id        String      @id @default(uuid())
+  caseId    String
+  case      ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  senderId  String?
+  sender    User?       @relation("MessageSender", fields: [senderId], references: [id])
+  channel   String // whatsapp | web | email | internal
+  body      String
+  createdAt DateTime    @default(now())
+
+  @@index([caseId])
+}
+
+enum NotificationDeliveryStatus {
+  SENT
+  FAILED
+}
+
+/// P0 API Specification & Integration Contracts v1.0 §30 "Notification
+/// APIs" — `POST /notifications/{id}/retry`. This table used to be
+/// purely an in-app inbox row (channel/deliveryStatus didn't exist) —
+/// customers picked a preferredChannel (User.preferredChannel) with
+/// nowhere real that fed into. NotificationsService.notify() now actually
+/// attempts a real WhatsApp/email send when that channel's provider is
+/// configured, recording the outcome here; channel/failureReason stay
+/// null and deliveryStatus stays the default SENT whenever no provider is
+/// configured or the customer's channel is in-app-only — never a false
+/// FAILED for something that was never attempted.
+model Notification {
+  id             String                     @id @default(uuid())
+  userId         String
+  user           User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  body           String
+  readAt         DateTime?
+  channel        String? // whatsapp | email | null (in-app only / not attempted)
+  deliveryStatus NotificationDeliveryStatus @default(SENT)
+  failureReason  String?
+  createdAt      DateTime                   @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Complaints, incidents, audit
+// ---------------------------------------------------------------------------
+
+model Complaint {
+  id         String       @id @default(uuid())
+  caseId     String?
+  case       ServiceCase? @relation(fields: [caseId], references: [id])
+  customerId String
+  customer   Customer     @relation(fields: [customerId], references: [id])
+  subject    String
+  detail     String
+  resolvedAt DateTime?
+  createdAt  DateTime     @default(now())
+}
+
+model Incident {
+  id        String           @id @default(uuid())
+  caseId    String?
+  case      ServiceCase?     @relation(fields: [caseId], references: [id])
+  severity  IncidentSeverity
+  status    IncidentStatus   @default(OPEN)
+  summary   String
+  detail    String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+/// Append-only (Non-Negotiable #10). No update/delete path should ever be
+/// exposed for this model at the application layer.
+model AuditEvent {
+  id        String       @id @default(uuid())
+  caseId    String?
+  case      ServiceCase? @relation(fields: [caseId], references: [id])
+  actorId   String?
+  actor     User?        @relation(fields: [actorId], references: [id])
+  actorType String // user | ai | system
+  action    String
+  metadata  Json?
+  createdAt DateTime     @default(now())
+
+  @@index([caseId])
+  @@index([actorId])
+}
+
+// ---------------------------------------------------------------------------
+// Concierge tier
+// ---------------------------------------------------------------------------
+
+/// Priority/Premium membership tiers (independent readiness review follow-up
+/// — P0 Technical Build Spec v1.0 Section 17 "Membership Engine"). Distinct
+/// from CaseTier: `plan` is the commercial membership product (price/SC/
+/// discount), `tier` is still what governs how a linked case is handled.
+enum MembershipPlan {
+  PRIORITY
+  PREMIUM
+}
+
+/// SC (Service Credit) ledger transaction types — P0 Technical Build Spec
+/// Section 18: "SC must be implemented as a transaction ledger, not as a
+/// manually editable balance."
+enum ScTransactionType {
+  GRANT
+  DEBIT
+  REVERSAL
+  ADJUSTMENT
+  EXPIRY
+}
+
+/// P0 UX Spec "Admin Screen — Pricing Configuration" — the runtime source
+/// of truth for plan pricing/benefits, replacing the code-constant
+/// MEMBERSHIP_PLANS this shipped with initially (see membership-plans.ts's
+/// own comment predicting this exact follow-up). One row per MembershipPlan,
+/// seeded by migration with the original constant's values so existing
+/// behaviour is unchanged until an admin edits one. Deliberately NOT
+/// consulted by anything already locked onto a Subscription row —
+/// `Subscription.priceUsd`/`fxRate`/`amount` stay frozen at subscribe time
+/// (billing continuity); only `discountPercent`/`scGrantUsd`/
+/// `eligibleRequestsPerMonth` are read live from here at quote/renewal time.
+model MembershipPlanConfig {
+  id   String         @id @default(uuid())
+  plan MembershipPlan @unique
+
+  priceUsd                 Decimal @db.Decimal(12, 2)
+  scGrantUsd               Decimal @db.Decimal(12, 2)
+  discountPercent          Decimal @db.Decimal(5, 2)
+  eligibleRequestsPerMonth Int
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("PlanConfigUpdatedBy", fields: [updatedById], references: [id])
+}
+
+model Subscription {
+  id          String             @id @default(uuid())
+  customerId  String
+  customer    Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tier        CaseTier           @default(CONCIERGE)
+  plan        MembershipPlan     @default(PRIORITY)
+  status      SubscriptionStatus @default(ACTIVE)
+  startedAt   DateTime           @default(now())
+  renewsAt    DateTime?
+  cancelledAt DateTime?
+
+  /// Locked at subscribe/renewal time from MEMBERSHIP_PLANS config (see
+  /// backend/src/concierge/membership-plans.ts) plus the configured
+  /// USD_TO_NGN_RATE — never recomputed retroactively if plan pricing or
+  /// the rate changes later (P0 Tech Spec Section 19: "a later FX change
+  /// should not silently alter" a locked commercial calculation, applied
+  /// here to the subscription's own price the same way it applies to a
+  /// quote). `amount`/`currency` remain the actual NGN execution charge
+  /// Paystack bills — unchanged in shape from before this migration.
+  priceUsd Decimal @default(99) @db.Decimal(12, 2)
+  fxRate   Decimal @default(1600) @db.Decimal(12, 4)
+  amount   Decimal @default(158400) @db.Decimal(12, 2)
+  currency String  @default("NGN")
+
+  scLedger ScLedgerEntry[]
+  invoices SubscriptionInvoice[]
+  Quote    Quote[]
+}
+
+/// P0 Technical Build Spec Section 18 — append-only. Available SC = sum of
+/// valid ledger credits (GRANT, REVERSAL) minus valid debits/reductions
+/// (DEBIT, EXPIRY), plus signed ADJUSTMENT entries. Never a directly
+/// editable balance column anywhere in this schema.
+model ScLedgerEntry {
+  id             String            @id @default(uuid())
+  subscriptionId String
+  subscription   Subscription      @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  type           ScTransactionType
+
+  /// Magnitude in USD (the ledger's authoritative unit, matching the
+  /// plan's $50/$150 grant). Always positive for GRANT/DEBIT/REVERSAL/
+  /// EXPIRY; ADJUSTMENT may be negative (a direct signed correction).
+  amountUsd Decimal @db.Decimal(12, 2)
+
+  /// Set on a DEBIT — which case/quote consumed it, and the NGN amount
+  /// actually applied plus the rate used, for the same traceability reason
+  /// Subscription locks its own fxRate.
+  caseId        String?
+  case          ServiceCase? @relation(fields: [caseId], references: [id])
+  quoteId       String?
+  quote         Quote?       @relation(fields: [quoteId], references: [id])
+  fxRateApplied Decimal?     @db.Decimal(12, 4)
+  amountNgn     Decimal?     @db.Decimal(12, 2)
+
+  /// Required for ADJUSTMENT/REVERSAL — never a silent balance edit.
+  reason    String?
+  actorId   String?
+  createdAt DateTime @default(now())
+
+  @@index([subscriptionId])
+  @@index([caseId])
+}
+
+/// One billing period's invoice for a Concierge subscription. Deliberately
+/// its own lightweight record rather than reusing case Invoice/Payment —
+/// a subscription period isn't a case, and this keeps the well-tested
+/// case-payment pipeline (Non-Negotiable #4) untouched.
+model SubscriptionInvoice {
+  id             String        @id @default(uuid())
+  subscriptionId String
+  subscription   Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  periodStart    DateTime
+  periodEnd      DateTime
+  amount         Decimal       @db.Decimal(12, 2)
+  currency       String        @default("NGN")
+  status         PaymentStatus @default(PENDING)
+
+  /// Set by PaystackService.initializeTransaction; looked up by the
+  /// verified webhook to mark this PAID (same verified-webhook-only rule
+  /// as case payments — see PaystackWebhookGuard).
+  paystackReference String?   @unique
+  paidAt            DateTime?
+  createdAt         DateTime  @default(now())
+}
+
+/// Section 12 P1 "recurring services" — Section 6 Service 2 (Construction
+/// Supervision) is "the first recurring-revenue product": scheduled site
+/// visits, each producing comparable before/after evidence. Fields are
+/// copied from the origin case at setup time (not a live reference to it)
+/// so the schedule survives the origin case being closed/archived.
+model RecurringSchedule {
+  id           String      @id @default(uuid())
+  originCaseId String      @unique
+  originCase   ServiceCase @relation("ScheduleOrigin", fields: [originCaseId], references: [id])
+  customerId   String
+  customer     Customer    @relation(fields: [customerId], references: [id])
+
+  serviceType   ServiceType
+  description   String
+  location      String
+  beneficiaryId String?
+  propertyId    String?
+  assetId       String?
+
+  cadenceDays Int
+  nextRunAt   DateTime
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  spawnedCases ServiceCase[] @relation("ScheduleSpawned")
+}
+
+// ---------------------------------------------------------------------------
+// AI orchestration (Section 7)
+// ---------------------------------------------------------------------------
+
+/// Structured log of AI conversations/actions — every AI turn is recorded
+/// here, separate from the deterministic scoring result (Non-Negotiable #8:
+/// no AI claim presented as verified fact).
+model AiInteraction {
+  id                   String        @id @default(uuid())
+  caseId               String?
+  case                 ServiceCase?  @relation(fields: [caseId], references: [id])
+  channel              String // whatsapp | web
+  actionLevel          AiActionLevel @default(INFORM)
+  promptSummary        String?
+  dataCollected        Json?
+  engagementSubscore   Int?
+  escalation           AiEscalation  @default(NONE)
+  conversationComplete Boolean       @default(false)
+  createdAt            DateTime      @default(now())
+
+  serviceRequests ServiceRequest[]
+}
+
+/// Section 12 P1 "WhatsApp AI integration" — holds the running transcript
+/// for one phone number so the AI Concierge (Section 7) can carry context
+/// across inbound webhook calls, which arrive statelessly one at a time
+/// (unlike the web chat, where the browser holds history client-side).
+/// NEEDS A REAL PROVIDER TO VERIFY LIVE (see WhatsappModule) — the webhook
+/// receiver and this persistence layer are real and tested standalone,
+/// but nothing here has been exercised against an actual WhatsApp Business
+/// API account.
+model WhatsAppThread {
+  id        String   @id @default(uuid())
+  phone     String   @unique
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  history   Json // ConversationTurnDto[] — mirrors the web chat's client-held history
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+/// Human/customer approval events (Section 3, 5.1 approval actions).
+model Approval {
+  id        String         @id @default(uuid())
+  caseId    String
+  case      ServiceCase    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  byUserId  String
+  byUser    User           @relation(fields: [byUserId], references: [id])
+  action    ApprovalAction
+  note      String?
+  createdAt DateTime       @default(now())
+}
+
+/// Section 12 P1 — "provider performance scoring". One rating per
+/// completed case; rolls up into Agent.performanceScore /
+/// Provider.performanceScore for whoever was assigned to it.
+model Rating {
+  id        String      @id @default(uuid())
+  caseId    String      @unique
+  case      ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  byUserId  String
+  byUser    User        @relation(fields: [byUserId], references: [id])
+  stars     Int // 1-5
+  comment   String?
+  createdAt DateTime    @default(now())
+}

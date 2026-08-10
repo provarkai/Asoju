@@ -1,0 +1,89 @@
+name: CI
+
+# Staging/production separation only means something if a build that
+# hasn't passed this can't reach either environment — this is the gate.
+# The deploy job at the bottom only runs after both test jobs pass, and
+# only on a push to main — Railway's own "deploy on push" should be turned
+# OFF for both services so this workflow is the only path to a deploy.
+# See README.md's "Deploying (Railway)" section for the one-time setup
+# this depends on (repo secrets/variables this file reads, and the manual
+# Railway-dashboard steps I have no access to do for you).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: asoju
+          POSTGRES_PASSWORD: asoju
+          POSTGRES_DB: asoju_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U asoju"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: "postgresql://asoju:asoju@localhost:5432/asoju_test?schema=public"
+      JWT_ACCESS_SECRET: "ci-only-access-secret-never-used-outside-this-workflow"
+      JWT_REFRESH_SECRET: "ci-only-refresh-secret-never-used-outside-this-workflow"
+      AUTH_THROTTLE_LIMIT: "1000"
+      AUTH_THROTTLE_TTL_MS: "60000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run prisma:deploy --workspace=backend
+      - name: Unit tests (AI safety, config validation)
+        run: npm run test --workspace=backend
+      - name: E2E tests (authorization, privileged auth, health) — real Postgres, no mocks
+        run: npm run test:e2e --workspace=backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace=frontend
+
+  deploy:
+    name: Deploy to Railway (production)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+      # Each service's Root Directory is set in the Railway dashboard
+      # (backend -> "backend", frontend -> "frontend") — see README.
+      # `railway up` deploys the linked service using that config; the
+      # token below is a Railway *project* token, so it already knows
+      # which project this is without passing the project ID as a flag.
+      - name: Deploy backend
+        working-directory: backend
+        run: railway up --service "$RAILWAY_BACKEND_SERVICE" --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_BACKEND_SERVICE: ${{ vars.RAILWAY_BACKEND_SERVICE }}
+      - name: Deploy frontend
+        working-directory: frontend
+        run: railway up --service "$RAILWAY_FRONTEND_SERVICE" --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_FRONTEND_SERVICE: ${{ vars.RAILWAY_FRONTEND_SERVICE }}

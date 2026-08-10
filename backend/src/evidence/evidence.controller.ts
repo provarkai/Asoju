@@ -1,0 +1,73 @@
+import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import { Role } from '@prisma/client';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { CaseAccessGuard } from '../common/guards/case-access.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { EvidenceService } from './evidence.service';
+import { CreateEvidenceDto } from './dto/create-evidence.dto';
+import { PerformQcDto } from './dto/perform-qc.dto';
+import { RaiseExceptionDto } from './dto/raise-exception.dto';
+import { RequestUploadUrlDto } from '../storage/dto/request-upload-url.dto';
+
+const FIELD_ROLES = [Role.FIELD_AGENT, Role.PROVIDER];
+const QC_ROLES = [Role.QUALITY_CONTROL, Role.ADMIN, Role.SUPER_ADMIN];
+
+@UseGuards(JwtAuthGuard, RolesGuard, CaseAccessGuard)
+@Controller('cases/:caseId')
+export class EvidenceController {
+  constructor(private readonly evidenceService: EvidenceService) {}
+
+  @Roles(...FIELD_ROLES)
+  @Post('evidence/upload-url')
+  createUploadUrl(@Param('caseId') caseId: string, @Body() dto: RequestUploadUrlDto) {
+    return this.evidenceService.createUploadUrl(caseId, dto);
+  }
+
+  @Roles(...FIELD_ROLES)
+  @Post('evidence')
+  submitEvidence(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Body() dto: CreateEvidenceDto,
+  ) {
+    return this.evidenceService.submitEvidence(user, caseId, dto);
+  }
+
+  @Roles(...FIELD_ROLES)
+  @Post('evidence/complete')
+  completeFieldwork(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string) {
+    return this.evidenceService.completeFieldwork(user, caseId);
+  }
+
+  @Roles(...FIELD_ROLES)
+  @Post('tasks/:taskId/complete')
+  completeTask(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.evidenceService.completeTask(user, caseId, taskId);
+  }
+
+  @Roles(...FIELD_ROLES)
+  @Post('exceptions')
+  raiseException(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Body() dto: RaiseExceptionDto,
+  ) {
+    return this.evidenceService.raiseException(user, caseId, dto.label, dto.detail);
+  }
+
+  @Roles(...QC_ROLES)
+  @Post('qc')
+  performQc(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Body() dto: PerformQcDto,
+  ) {
+    return this.evidenceService.performQc(user, caseId, dto);
+  }
+}
