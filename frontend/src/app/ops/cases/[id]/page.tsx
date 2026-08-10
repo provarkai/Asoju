@@ -28,6 +28,10 @@ interface CaseDetail {
   description: string;
   paymentStatus: string;
   customer: { fullName: string };
+  owner: { id: string; email: string; role: string } | null;
+  nextAction: string | null;
+  nextActionDueAt: string | null;
+  slaTargetAt: string | null;
   statusHistory: { id: string; toStatus: string; reason: string | null; createdAt: string }[];
   riskFlags: { id: string; label: string; detail: string | null }[];
   incidents: { id: string; severity: string; status: string; summary: string }[];
@@ -95,6 +99,9 @@ export default function OpsCaseDetailPage() {
   const [refundReason, setRefundReason] = useState<Record<string, string>>({});
   const [reconcileNotes, setReconcileNotes] = useState<Record<string, string>>({});
   const [reconcileAmount, setReconcileAmount] = useState<Record<string, string>>({});
+  const [ownerUserId, setOwnerUserId] = useState('');
+  const [nextAction, setNextAction] = useState('');
+  const [nextActionDueAt, setNextActionDueAt] = useState('');
   const [assignRole, setAssignRole] = useState<'FIELD_AGENT' | 'PROVIDER'>('FIELD_AGENT');
   const [assignTargetId, setAssignTargetId] = useState('');
   const [qcOutcome, setQcOutcome] = useState('APPROVED');
@@ -188,8 +195,20 @@ export default function OpsCaseDetailPage() {
           {detail.customer.fullName} · {humanServiceType(detail.serviceType)} · {detail.location}
         </p>
         <span className="badge">{humanCaseStatus(detail.status)}</span>{' '}
+        {!['COMPLETED', 'CLOSED'].includes(detail.status) &&
+          detail.slaTargetAt &&
+          new Date(detail.slaTargetAt).getTime() < Date.now() && (
+            <span className="badge badge--error">Overdue</span>
+          )}{' '}
         <span className="muted">
           Priority {detail.priority} · Risk level {detail.riskLevel} · Payment {detail.paymentStatus}
+        </span>
+        <br />
+        <span className="muted">
+          Owner: {detail.owner?.email ?? '— unassigned —'}
+          {detail.nextAction && <> · Next action: {detail.nextAction}</>}
+          {detail.nextActionDueAt && <> (due {new Date(detail.nextActionDueAt).toLocaleString()})</>}
+          {detail.slaTargetAt && <> · SLA target: {new Date(detail.slaTargetAt).toLocaleString()}</>}
         </span>
       </div>
 
@@ -780,6 +799,72 @@ export default function OpsCaseDetailPage() {
           </button>
         </div>
       )}
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Ownership &amp; next action</h2>
+        <p className="muted">
+          Every active case should answer who owns it and what happens next — same discipline as the
+          claim workflow, but for a single accountable owner and the concrete next step.
+        </p>
+        <p>
+          Owner: <strong>{detail.owner?.email ?? '— unassigned —'}</strong>
+        </p>
+        <div className="actions-row">
+          <input
+            placeholder="Owner user ID"
+            value={ownerUserId}
+            onChange={(e) => setOwnerUserId(e.target.value)}
+          />
+          <button
+            className="btn btn--secondary"
+            disabled={!ownerUserId || busy !== null}
+            onClick={() =>
+              run('owner', () =>
+                apiFetch(`/cases/${detail.id}/assign-owner`, {
+                  method: 'POST',
+                  body: JSON.stringify({ ownerUserId }),
+                }),
+              )
+            }
+          >
+            {busy === 'owner' ? 'Assigning…' : 'Assign owner'}
+          </button>
+        </div>
+        <p style={{ marginTop: '1rem' }}>
+          Next action: <strong>{detail.nextAction ?? '— none set —'}</strong>
+          {detail.nextActionDueAt && ` (due ${new Date(detail.nextActionDueAt).toLocaleString()})`}
+        </p>
+        <div className="actions-row">
+          <input
+            placeholder="What happens next"
+            value={nextAction}
+            onChange={(e) => setNextAction(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <input
+            type="datetime-local"
+            value={nextActionDueAt}
+            onChange={(e) => setNextActionDueAt(e.target.value)}
+          />
+          <button
+            className="btn btn--secondary"
+            disabled={!nextAction || busy !== null}
+            onClick={() =>
+              run('next-action', () =>
+                apiFetch(`/cases/${detail.id}/next-action`, {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    nextAction,
+                    dueAt: nextActionDueAt ? new Date(nextActionDueAt).toISOString() : undefined,
+                  }),
+                }),
+              )
+            }
+          >
+            {busy === 'next-action' ? 'Saving…' : 'Set next action'}
+          </button>
+        </div>
+      </div>
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Team on this case</h2>

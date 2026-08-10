@@ -1,6 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { ApprovalAction, AssignmentStatus, CaseStatus, CollaboratorRole, Role, ServiceType } from '@prisma/client';
+import {
+  ApprovalAction,
+  AssignmentStatus,
+  CasePriority,
+  CaseStatus,
+  CollaboratorRole,
+  Role,
+  ServiceType,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -13,6 +21,24 @@ import { redactCustomerName } from '../common/pii-restricted-roles';
 import { StorageService } from '../storage/storage.service';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
+
+// P0 Tech Platform §24 "SLA & Alert Engine" — "P0 operating hypotheses
+// should be configurable, not hard-coded." Defaults are the spec's own
+// hypotheses (standard site visit "within 24-72 hours"; PRIORITY/URGENT
+// tighten from there) — every value is env-overridable per environment,
+// same pattern as QUOTE_VALIDITY_HOURS/PAYMENT_EXPIRY_HOURS.
+const DEFAULT_SLA_HOURS: Record<CasePriority, number> = {
+  [CasePriority.STANDARD]: 72,
+  [CasePriority.PRIORITY]: 48,
+  [CasePriority.URGENT]: 24,
+};
+
+function slaHoursForPriority(priority: CasePriority): number {
+  const envVar = `SLA_HOURS_${priority}`;
+  const configured = process.env[envVar];
+  const parsed = configured ? Number(configured) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SLA_HOURS[priority];
+}
 
 // Staff roles that double as case-scoped collaborator roles (Section 4).
 // ADMIN/SUPER_ADMIN are excluded — they already bypass CaseAccessGuard.
@@ -133,6 +159,7 @@ export class CasesService {
         assetId: dto.assetId,
         status: CaseStatus.DRAFT,
         originRequest: { connect: { id: request.id } },
+        slaTargetAt: new Date(Date.now() + slaHoursForPriority(dto.priority ?? CasePriority.STANDARD) * 60 * 60 * 1000),
       },
     });
 
@@ -204,6 +231,7 @@ export class CasesService {
         assetId: schedule.assetId,
         status: CaseStatus.DRAFT,
         spawnedFromScheduleId: schedule.id,
+        slaTargetAt: new Date(Date.now() + slaHoursForPriority(CasePriority.STANDARD) * 60 * 60 * 1000),
       },
     });
 
@@ -257,6 +285,11 @@ export class CasesService {
         provider: { select: { fullName: true } },
       },
     },
+    // P0 Tech Platform §9 "Case Control Requirements" / UX Spec O01
+    // "Command Center" — owner, next action and SLA target need to be
+    // visible on the queue itself, not just the case detail page, or
+    // "exceptions first" (the O01 design rule) has nothing to sort by.
+    owner: { select: { email: true } },
     _count: { select: { riskFlags: true, incidents: true } },
   };
 
@@ -312,6 +345,7 @@ export class CasesService {
       where: { id: caseId },
       include: {
         customer: { select: { fullName: true, userId: true } },
+        owner: { select: { id: true, email: true, role: true } },
         tasks: { orderBy: { sortOrder: 'asc' } },
         statusHistory: { orderBy: { createdAt: 'asc' } },
         riskFlags: true,
@@ -517,6 +551,78 @@ export class CasesService {
       throw new BadRequestException('This role cannot claim cases');
     }
     return this.addCollaborator(actor, caseId, actor.id, collaboratorRole);
+  }
+
+  /**
+   * P0 Tech Platform §9 "Case Control Requirements" — "who owns the case."
+   * Distinct from CaseCollaborator (many staff can be attached; this is
+   * the one person accountable). The target must be a real operational
+   * staff member — never a customer or a field actor's own case queue.
+   * Also ensures the new owner actually has case access: if their role
+   * maps onto a CollaboratorRole and they aren't already attached, they're
+   * added the same way claimCase does it, so assigning ownership doesn't
+   * silently hand someone a case they then can't open (CaseAccessGuard).
+   */
+  async assignOwner(actor: AuthenticatedUser, caseId: string, ownerUserId: string) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+
+    const owner = await this.prisma.user.findUnique({ where: { id: ownerUserId } });
+    if (!owner || !CasesService.OPS_ROLES.includes(owner.role)) {
+      throw new BadRequestException('Case owner must be an operational staff member');
+    }
+
+    const updated = await this.prisma.serviceCase.update({
+      where: { id: caseId },
+      data: { ownerUserId },
+    });
+
+    const collaboratorRole = COLLABORATOR_ROLE_BY_USER_ROLE[owner.role];
+    if (collaboratorRole) {
+      await this.prisma.caseCollaborator.upsert({
+        where: { caseId_userId_role: { caseId, userId: ownerUserId, role: collaboratorRole } },
+        update: {},
+        create: { caseId, userId: ownerUserId, role: collaboratorRole },
+      });
+    }
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.owner_assigned',
+      metadata: { ownerUserId, previousOwnerUserId: serviceCase.ownerUserId },
+    });
+
+    return updated;
+  }
+
+  /**
+   * P0 Tech Platform §9 "Case Control Requirements" — "what happens next,
+   * when is it due." Plain free-text + an optional due date, not another
+   * state machine; the case status already carries the formal workflow
+   * position, this is the human-readable "what am I actually supposed to
+   * do about this case right now."
+   */
+  async setNextAction(actor: AuthenticatedUser, caseId: string, nextAction: string, dueAt?: string) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+
+    const nextActionDueAt = dueAt ? new Date(dueAt) : null;
+    const updated = await this.prisma.serviceCase.update({
+      where: { id: caseId },
+      data: { nextAction, nextActionDueAt },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.next_action_set',
+      metadata: { nextAction, dueAt: nextActionDueAt },
+    });
+
+    return updated;
   }
 
   private async requireCustomerProfile(userId: string) {

@@ -189,6 +189,11 @@ button {
   color: var(--asoju-green);
 }
 
+.badge--error {
+  background: color-mix(in srgb, var(--asoju-danger) 15%, transparent);
+  color: var(--asoju-danger);
+}
+
 .case-list {
   display: flex;
   flex-direction: column;

@@ -296,6 +296,7 @@ model User {
   scopesCreated       CaseScope[]            @relation("ScopeCreatedBy")
   scopesConfirmed     CaseScope[]            @relation("ScopeConfirmedBy")
   planConfigsUpdated  MembershipPlanConfig[] @relation("PlanConfigUpdatedBy")
+  ownedCases          ServiceCase[]          @relation("CaseOwner")
 
   @@index([role])
 }
@@ -523,6 +524,23 @@ model ServiceCase {
 
   paymentStatus PaymentStatus @default(PENDING)
 
+  /// P0 Tech Platform Requirements §9 "Case Control Requirements" — "Every
+  /// active case must answer: who owns it, who is executing it, what
+  /// happens next, when is it due." CaseCollaborator lets many staff attach
+  /// to a case, but names nobody as *the* accountable owner; ownerUserId is
+  /// that single answer (CasesService.assignOwner). nextAction/
+  /// nextActionDueAt are the same requirement's "what happens next / when"
+  /// (CasesService.setNextAction) — free text plus a due date, not another
+  /// state machine. slaTargetAt is set automatically at case creation from
+  /// CasePriority (casesService.slaHoursForPriority, env-configurable, same
+  /// pattern as QUOTE_VALIDITY_HOURS) so "overdue" is something the Ops
+  /// queue can compute from day one, not a value nobody ever sets.
+  ownerUserId     String?
+  owner           User?     @relation("CaseOwner", fields: [ownerUserId], references: [id])
+  nextAction      String?
+  nextActionDueAt DateTime?
+  slaTargetAt     DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -566,6 +584,8 @@ model ServiceCase {
   @@index([status])
   @@index([customerId])
   @@index([serviceType])
+  @@index([ownerUserId])
+  @@index([slaTargetAt])
 }
 
 model CaseTask {

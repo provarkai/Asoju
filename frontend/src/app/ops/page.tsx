@@ -26,6 +26,16 @@ interface CaseQueueRow {
   assignments: AssignmentSummary[];
   _count: { riskFlags: number; incidents: number };
   updatedAt: string;
+  owner: { email: string } | null;
+  nextAction: string | null;
+  nextActionDueAt: string | null;
+  slaTargetAt: string | null;
+}
+
+const TERMINAL_CASE_STATUSES = ['COMPLETED', 'CLOSED'];
+function isOverdue(c: CaseQueueRow): boolean {
+  if (TERMINAL_CASE_STATUSES.includes(c.status)) return false;
+  return Boolean(c.slaTargetAt && new Date(c.slaTargetAt).getTime() < Date.now());
 }
 
 interface ServiceRequestRow {
@@ -39,6 +49,14 @@ interface ServiceRequestRow {
 
 const FILTERS: { key: string; label: string; match: (c: CaseQueueRow) => boolean }[] = [
   { key: 'all', label: 'All', match: () => true },
+  // P0 UX Spec O01 "Command Center" design rule: "exceptions first" —
+  // overdue and unowned cases lead the filter bar, not buried after status.
+  { key: 'overdue', label: 'Overdue', match: isOverdue },
+  {
+    key: 'unowned',
+    label: 'No owner',
+    match: (c) => !c.owner && !TERMINAL_CASE_STATUSES.includes(c.status),
+  },
   {
     key: 'triage',
     label: 'Needs triage',
@@ -169,14 +187,24 @@ export default function OpsQueuePage() {
                         Assigned to {assignee.agent?.fullName ?? assignee.provider?.fullName} ({assignee.status.toLowerCase()})
                       </span>
                     )}
+                    <span className="muted">
+                      Owner: {c.owner?.email ?? '— unassigned —'}
+                      {c.nextAction && <> · Next: {c.nextAction}</>}
+                    </span>
                     {(c._count.riskFlags > 0 || c._count.incidents > 0) && (
                       <span className="error-text">
                         {c._count.riskFlags} risk flag(s), {c._count.incidents} incident(s)
                       </span>
                     )}
+                    {isOverdue(c) && (
+                      <span className="error-text">
+                        Overdue — SLA target was {new Date(c.slaTargetAt!).toLocaleString()}
+                      </span>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                     <span className="badge">{humanCaseStatus(c.status)}</span>
+                    {isOverdue(c) && <span className="badge badge--error">Overdue</span>}
                     <button
                       className="btn btn--ghost"
                       disabled={claiming !== null}

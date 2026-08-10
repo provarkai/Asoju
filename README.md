@@ -97,6 +97,25 @@ end-to-end against a real Postgres instance:
   that a payment must actually be `RECONCILIATION_REQUIRED` before it can be resolved fails 2 of the 6
   tests (resolving an ineligible payment, and resolving the same payment twice); restoring it passes
   again.
+- **Case ownership, next action & SLA target** (P0 Technology & Platform Requirements Specification
+  v1.0 §9 "Case Control Requirements" — "Every active case must answer: who owns it, who is executing
+  it, what happens next, when is it due.") — `CaseCollaborator` lets many staff attach to a case, but
+  named nobody as *the* accountable owner, and nothing tracked a next action or an SLA target at all
+  (`AnalyticsService`'s own comment used to admit as much: "SLA compliance... need[s] event types this
+  MVP doesn't emit yet"). `ServiceCase` now carries `ownerUserId`, `nextAction`, `nextActionDueAt`, and
+  `slaTargetAt`. `slaTargetAt` is set automatically at case creation from `CasePriority` via
+  `SLA_HOURS_STANDARD`/`SLA_HOURS_PRIORITY`/`SLA_HOURS_URGENT` (env-configurable, default 72/48/24h —
+  same pattern as `QUOTE_VALIDITY_HOURS`). `POST /cases/:caseId/assign-owner` (Ops roles,
+  `CaseAccessGuard`) requires the target be a real operational staff member — never a customer or field
+  actor — and automatically grants them case access the same way `claimCase` does, so assigning
+  ownership never hands someone a case they then can't open. `POST /cases/:caseId/next-action` records
+  free text plus an optional due date — the case status already carries the formal workflow position,
+  this is "what am I actually supposed to do about this right now." The Ops case queue (`/ops`) gained
+  "Overdue" and "No owner" filters (design rule: "exceptions first") plus an owner/next-action/SLA line
+  per row and an overdue badge; the Ops case detail page gained an "Ownership & next action" card.
+  Covered by `backend/test/case-ownership-sla.e2e-spec.ts` (9 tests) — negative-control verified:
+  disabling the "owner must be operational staff" check lets a customer or field agent be assigned as
+  owner and fails the test; restoring it passes again.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same
