@@ -27,6 +27,16 @@ interface EvidenceItem {
   viewUrl?: string;
 }
 
+interface ScopeVersion {
+  id: string;
+  version: number;
+  objective: string;
+  tasks: string[];
+  exclusions: string[];
+  evidenceRequirements: string[];
+  confirmedAt: string | null;
+}
+
 interface JobDetail {
   id: string;
   caseNumber: string;
@@ -38,6 +48,7 @@ interface JobDetail {
   assignments: AssignmentDetail[];
   tasks: TaskItem[];
   evidence: EvidenceItem[];
+  scopes: ScopeVersion[];
 }
 
 const EVIDENCE_TYPES = ['PHOTO', 'VIDEO', 'DOCUMENT', 'VOICE', 'LOCATION', 'NOTE'];
@@ -212,6 +223,11 @@ export default function FieldJobDetailPage() {
 
   const assignment = detail.assignments[0];
   const canWork = detail.status === 'IN_PROGRESS';
+  // The job card is only ever the latest *confirmed* scope version — an
+  // unconfirmed revision (e.g. proposed mid-fieldwork) must never present
+  // to the agent as binding (Section 14 "cannot silently expand
+  // execution"). `scopes` is already ordered newest-first.
+  const confirmedScope = detail.scopes.find((s) => s.confirmedAt);
 
   return (
     <div>
@@ -271,6 +287,46 @@ export default function FieldJobDetailPage() {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {confirmedScope && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Job card</h2>
+          <p className="muted" style={{ fontSize: '0.85rem' }}>
+            What the customer confirmed (version {confirmedScope.version}) — do exactly this, nothing more.
+          </p>
+          <p>{confirmedScope.objective}</p>
+          {confirmedScope.tasks.length > 0 && (
+            <>
+              <strong>Scoped tasks</strong>
+              <ul>
+                {confirmedScope.tasks.map((t, i) => (
+                  <li key={i}>{t}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {confirmedScope.evidenceRequirements.length > 0 && (
+            <>
+              <strong>Evidence required</strong>
+              <ul>
+                {confirmedScope.evidenceRequirements.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {confirmedScope.exclusions.length > 0 && (
+            <>
+              <strong>Out of scope — do not attempt</strong>
+              <ul>
+                {confirmedScope.exclusions.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       )}
 

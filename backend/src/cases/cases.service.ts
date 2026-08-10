@@ -331,6 +331,17 @@ export class CasesService {
         approvals: { orderBy: { createdAt: 'asc' } },
         rating: true,
         recurringSchedule: true,
+        /// P0 Technical Build Spec Section 22 "Job Card Engine" — "Generated
+        /// only from approved scope... Contains exact tasks and
+        /// exclusions... Contains evidence requirements." Full version
+        /// history, same as `quotes`; it's the caller's job to pick the
+        /// latest *confirmed* one as authoritative (an unconfirmed revision
+        /// must never present as binding — Section 14's "cannot silently
+        /// expand execution" applies here too), same as the Ops/customer
+        /// scope cards already do via the dedicated /scope endpoint. This
+        /// is what lets the Field Agent App show a real job card instead of
+        /// having zero visibility into what was actually scoped/confirmed.
+        scopes: { orderBy: { version: 'desc' } },
       },
     });
     if (!serviceCase) throw new NotFoundException('Case not found');

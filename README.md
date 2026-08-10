@@ -45,6 +45,14 @@ end-to-end against a real Postgres instance:
 **Payment → Assignment → Field Execution**
 - Staff assign a verified field agent/provider to a `SCHEDULED` case (→ `ASSIGNED`); the assignee
   accepts (→ `IN_PROGRESS`) or declines (case reopens to `SCHEDULED` for reassignment).
+- **Job card** (P0 Technical Build Spec Section 22 "Job Card Engine") — the Field Agent App now shows a
+  job card built from exactly the case's latest *confirmed* `CaseScope` (objective, scoped tasks,
+  required evidence, exclusions), sourced from the same `GET /cases/:id` response every role already
+  uses (`cases.service.ts` now includes the full `scopes` history). An unconfirmed revision (e.g.
+  proposed mid-fieldwork) never displays as binding — the frontend only ever picks the latest entry with
+  a `confirmedAt`, so "material scope changes cannot silently expand execution" (Section 14) holds for
+  field execution too, not just quoting. Covered by `backend/test/job-card.e2e-spec.ts` —
+  negative-control verified: removing the `scopes` include fails the test; restoring it passes again.
 - The agent/provider submits `Evidence` (photo/video/doc/note, referencing a private object-storage
   key, never a predictable public URL) and marks fieldwork complete (→ `EVIDENCE_SUBMITTED`).
 
