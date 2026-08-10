@@ -1124,14 +1124,32 @@ model Message {
   @@index([caseId])
 }
 
+enum NotificationDeliveryStatus {
+  SENT
+  FAILED
+}
+
+/// P0 API Specification & Integration Contracts v1.0 §30 "Notification
+/// APIs" — `POST /notifications/{id}/retry`. This table used to be
+/// purely an in-app inbox row (channel/deliveryStatus didn't exist) —
+/// customers picked a preferredChannel (User.preferredChannel) with
+/// nowhere real that fed into. NotificationsService.notify() now actually
+/// attempts a real WhatsApp/email send when that channel's provider is
+/// configured, recording the outcome here; channel/failureReason stay
+/// null and deliveryStatus stays the default SENT whenever no provider is
+/// configured or the customer's channel is in-app-only — never a false
+/// FAILED for something that was never attempted.
 model Notification {
-  id        String    @id @default(uuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String
-  body      String
-  readAt    DateTime?
-  createdAt DateTime  @default(now())
+  id             String                     @id @default(uuid())
+  userId         String
+  user           User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  body           String
+  readAt         DateTime?
+  channel        String? // whatsapp | email | null (in-app only / not attempted)
+  deliveryStatus NotificationDeliveryStatus @default(SENT)
+  failureReason  String?
+  createdAt      DateTime                   @default(now())
 }
 
 // ---------------------------------------------------------------------------

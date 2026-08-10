@@ -160,6 +160,22 @@ end-to-end against a real Postgres instance:
   self-approval through and fails the test; restoring it passes again. `refund.e2e-spec.ts`'s existing 4
   tests (all well under the default threshold) continue to pass unchanged, confirming the ordinary refund
   path is untouched.
+- **Real notification channel fan-out + staff retry** (P0 API Specification & Integration Contracts v1.0
+  §30 "Notification APIs" — `POST /notifications/{id}/retry`) — customers have picked a preferred channel
+  (`User.preferredChannel`) since notification preferences shipped, with nowhere real that fed into;
+  `NotificationsService`'s own comment used to admit it: "no email/SMS/WhatsApp fan-out yet." `notify()`
+  now actually attempts a real WhatsApp/email send on the customer's preferred channel whenever that
+  channel's provider is configured (`WhatsappSenderService`/`EmailService` — same dry-run-safe boundary as
+  every other integration in this repo), recording the outcome on the `Notification` row (new `channel`/
+  `deliveryStatus`/`failureReason` fields). When no provider is configured, or the channel is in-app-only,
+  nothing changes from before — `deliveryStatus` stays the default `SENT` and `channel` stays `null`;
+  never a false `FAILED` for a send that was never attempted. `POST /notifications/admin/:id/retry`
+  (Admin/SuperAdmin) re-attempts a genuinely `FAILED` delivery; `GET /notifications/admin/failed` is the
+  triage queue. New `/ops/notifications` page. Covered by `backend/test/notification-retry.e2e-spec.ts`
+  (7 tests) — including triggering a real existing `notify()` call site (scope creation) and confirming
+  it's untouched with no provider configured, exactly the regression-safety guarantee this feature had to
+  hold. Negative-control verified: disabling the "must actually be FAILED to retry" guard lets an already-
+  fine notification be "retried" and fails the test; restoring it passes again.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same

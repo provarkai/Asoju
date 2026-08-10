@@ -45,6 +45,9 @@ export default function OpsLayout({ children }: { children: React.ReactNode }) {
   if (user && ADMIN_ROLES.includes(user.role)) {
     tabs.push({ href: '/ops/audit', label: 'Audit Log' });
   }
+  if (user && ADMIN_ROLES.includes(user.role)) {
+    tabs.push({ href: '/ops/notifications', label: 'Failed Notifications' });
+  }
 
   return (
     <div>

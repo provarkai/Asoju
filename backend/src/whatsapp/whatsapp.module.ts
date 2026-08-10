@@ -8,6 +8,10 @@ import { AiModule } from '../ai/ai.module';
   imports: [AiModule],
   providers: [WhatsappService, WhatsappSenderService],
   controllers: [WhatsappController],
-  exports: [WhatsappService],
+  // WhatsappSenderService is also exported (not just WhatsappService) so
+  // NotificationsModule can send real outbound messages for the channel
+  // fan-out described on WhatsappSenderService/NotificationsService,
+  // without needing the AI-conversation machinery WhatsappService wraps.
+  exports: [WhatsappService, WhatsappSenderService],
 })
 export class WhatsappModule {}
