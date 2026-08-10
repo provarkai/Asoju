@@ -5,10 +5,12 @@ import { PrismaService } from '../prisma/prisma.service';
 /**
  * Section 12 P1 "advanced analytics" — a working subset of Section 13's
  * success metrics (Customer/Operations/Financial/Trust categories). Not
- * exhaustive (SLA compliance and AI escalation-accuracy need event types
- * this MVP doesn't emit yet) but every number here is real, computed from
- * the same tables the rest of the app writes to — nothing pre-aggregated
- * or cached, so it's always current.
+ * exhaustive (AI escalation-accuracy needs an event type this MVP doesn't
+ * emit yet) but every number here is real, computed from the same tables
+ * the rest of the app writes to — nothing pre-aggregated or cached, so
+ * it's always current. overdueCases/unownedActiveCases (P0 Tech Platform
+ * §9) and contribution/contributionMargin (P0 Tech Platform §33) close
+ * what used to be this file's own admitted gap.
  */
 @Injectable()
 export class AnalyticsService {
@@ -26,6 +28,9 @@ export class AnalyticsService {
       incidentsBySeverity,
       qcAuditEvents,
       exceptionCount,
+      overdueCases,
+      unownedActiveCases,
+      directCosts,
     ] = await Promise.all([
       this.prisma.customer.count(),
       this.prisma.serviceCase.groupBy({ by: ['customerId'], _count: { _all: true } }),
@@ -46,6 +51,21 @@ export class AnalyticsService {
         select: { metadata: true },
       }),
       this.prisma.caseRiskFlag.count(),
+      // P0 Tech Platform §9 "Case Control Requirements" — overdue/unowned
+      // is the whole point of tracking slaTargetAt/ownerUserId at all; the
+      // Ops queue computes this per-row too, this is the org-wide count.
+      this.prisma.serviceCase.count({
+        where: {
+          slaTargetAt: { lt: new Date() },
+          status: { notIn: [CaseStatus.COMPLETED, CaseStatus.CLOSED] },
+        },
+      }),
+      this.prisma.serviceCase.count({
+        where: { ownerUserId: null, status: { notIn: [CaseStatus.COMPLETED, CaseStatus.CLOSED] } },
+      }),
+      // P0 Tech Platform §33 "Financial & Analytics Requirements" —
+      // Contribution = Revenue - Direct Case Costs.
+      this.prisma.directCost.findMany({ select: { amount: true, currency: true } }),
     ]);
 
     const customersWithCases = casesByCustomer.length;
@@ -65,6 +85,24 @@ export class AnalyticsService {
       acceptedQuotes.length > 0
         ? acceptedQuotes.reduce((sum, q) => sum + Number(q.amount), 0) / acceptedQuotes.length
         : null;
+
+    // P0 Tech Platform §33 — "Contribution = Revenue - Direct Case Costs;
+    // Contribution Margin % = Contribution / Revenue." Computed per
+    // currency, same bucketing as revenueByCurrency, rather than summing
+    // mismatched currencies together.
+    const directCostsByCurrency: Record<string, number> = {};
+    for (const c of directCosts) {
+      directCostsByCurrency[c.currency] = (directCostsByCurrency[c.currency] ?? 0) + Number(c.amount);
+    }
+    const contributionByCurrency: Record<string, number> = {};
+    const contributionMarginByCurrency: Record<string, number | null> = {};
+    for (const currency of new Set([...Object.keys(revenueByCurrency), ...Object.keys(directCostsByCurrency)])) {
+      const revenue = revenueByCurrency[currency] ?? 0;
+      const directCost = directCostsByCurrency[currency] ?? 0;
+      const contribution = revenue - directCost;
+      contributionByCurrency[currency] = contribution;
+      contributionMarginByCurrency[currency] = revenue > 0 ? contribution / revenue : null;
+    }
 
     const qcOutcomeCounts: Record<string, number> = {};
     for (const event of qcAuditEvents) {
@@ -90,6 +128,9 @@ export class AnalyticsService {
         revenueByCurrency,
         avgCaseValue,
         acceptedQuoteCount: acceptedQuotes.length,
+        directCostsByCurrency,
+        contributionByCurrency,
+        contributionMarginByCurrency,
       },
       trust: {
         avgRating: ratingAgg._avg.stars,
@@ -99,6 +140,8 @@ export class AnalyticsService {
         totalQcReviews,
         qcOutcomeCounts,
         reworkRate,
+        overdueCases,
+        unownedActiveCases,
         exceptionsRaised: exceptionCount,
         incidentsBySeverity: Object.fromEntries(incidentsBySeverity.map((i) => [i.severity, i._count._all])),
       },

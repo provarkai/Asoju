@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, HttpCode, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -12,6 +12,7 @@ import { SubscriptionBillingService, SUBSCRIPTION_INVOICE_REFERENCE_PREFIX } fro
 import { CreateQuoteDto } from './dto/create-quote.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
+import { RecordDirectCostDto } from './dto/record-direct-cost.dto';
 
 const STAFF_QUOTE_ROLES = [Role.CASE_MANAGER, Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
 const FINANCE_ROLES = [Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
@@ -37,6 +38,27 @@ export class CommerceController {
     @Body() dto: CreateQuoteDto,
   ) {
     return this.commerceService.createQuote(user, caseId, dto);
+  }
+
+  /** P0 Tech Platform §33 "Financial & Analytics Requirements" —
+   * Finance-only, case-scoped. Never exposed on the general case-detail
+   * response every viewer (including the customer) hits. */
+  @UseGuards(JwtAuthGuard, RolesGuard, CaseAccessGuard)
+  @Roles(...FINANCE_ROLES)
+  @Post('cases/:caseId/direct-costs')
+  recordDirectCost(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Body() dto: RecordDirectCostDto,
+  ) {
+    return this.commerceService.recordDirectCost(user, caseId, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CaseAccessGuard)
+  @Roles(...FINANCE_ROLES)
+  @Get('cases/:caseId/direct-costs')
+  listDirectCosts(@Param('caseId') caseId: string) {
+    return this.commerceService.listDirectCosts(caseId);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

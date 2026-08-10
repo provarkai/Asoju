@@ -12,6 +12,7 @@ import { ScopeService } from '../scope/scope.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
+import { RecordDirectCostDto } from './dto/record-direct-cost.dto';
 
 /** Prefix distinguishing case-invoice Paystack references from subscription
  * ones so a single webhook endpoint can route both (see PaystackService). */
@@ -594,5 +595,49 @@ export class CommerceService {
     }
 
     return { expired: staleQuotes.length };
+  }
+
+  /**
+   * P0 Tech Platform §33 "Financial & Analytics Requirements" — "Representative
+   * cost. Travel/transport. Third-party costs. Other direct cost." /
+   * AnalyticsService.getSummary()'s contribution/contribution-margin
+   * calculation reads these back. Finance-only, case-scoped, append-only —
+   * same discipline as Refund and Reconciliation: a correction is a new
+   * row, never an edit to a prior one.
+   */
+  async recordDirectCost(actor: AuthenticatedUser, caseId: string, dto: RecordDirectCostDto) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+
+    const directCost = await this.prisma.directCost.create({
+      data: {
+        caseId,
+        category: dto.category,
+        amount: dto.amount,
+        currency: dto.currency ?? 'NGN',
+        note: dto.note,
+        actorId: actor.id,
+      },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.direct_cost_recorded',
+      metadata: { directCostId: directCost.id, category: dto.category, amount: dto.amount, currency: directCost.currency },
+    });
+
+    return directCost;
+  }
+
+  /** Finance-only, case-scoped — deliberately not part of the general
+   * getCaseDetail() response every case-detail viewer (including the
+   * customer) hits (API Spec: "Never return internal pricing/margin
+   * calculations" to unauthorized clients). */
+  async listDirectCosts(caseId: string) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+    return this.prisma.directCost.findMany({ where: { caseId }, orderBy: { createdAt: 'desc' } });
   }
 }

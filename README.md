@@ -116,6 +116,22 @@ end-to-end against a real Postgres instance:
   Covered by `backend/test/case-ownership-sla.e2e-spec.ts` (9 tests) — negative-control verified:
   disabling the "owner must be operational staff" check lets a customer or field agent be assigned as
   owner and fails the test; restoring it passes again.
+- **Direct case cost & contribution margin** (P0 Technology & Platform Requirements Specification v1.0
+  §33 "Financial & Analytics Requirements" — "Contribution = Revenue − Direct Case Costs; Contribution
+  Margin % = Contribution ÷ Revenue.") — the `Payout` model has existed in the schema with no `caseId`
+  and zero call sites anywhere in the app; nothing recorded what a case actually cost to deliver, so
+  contribution was uncomputable. New append-only `DirectCost` model (representative/travel/
+  third-party/other, same categories the spec names) — `POST /cases/:caseId/direct-costs` (Finance-only,
+  `CaseAccessGuard`) records one, `GET /cases/:caseId/direct-costs` lists them; deliberately **not** part
+  of the general case-detail response every viewer (including the customer) hits — API Spec: "Never
+  return internal pricing/margin calculations" to unauthorized clients. `AnalyticsService.getSummary()`
+  now computes `directCostsByCurrency`, `contributionByCurrency` (revenue − direct costs), and
+  `contributionMarginByCurrency` per currency, plus `overdueCases`/`unownedActiveCases` (reading the
+  `slaTargetAt`/`ownerUserId` fields from the case-ownership work above) — closing the gap the file's own
+  comment used to admit. New "Contribution" section on `/ops/analytics`; new "Direct costs" card
+  (Finance-only) on the Ops case detail page. Covered by `backend/test/direct-costs.e2e-spec.ts` (4
+  tests) — negative-control verified: breaking the contribution formula (`revenue` instead of
+  `revenue - directCost`) fails the exact-math test; restoring it passes again.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same

@@ -8,12 +8,21 @@ import { humanCaseStatus } from '@/lib/case-status';
 interface Summary {
   customers: { total: number; withCases: number; repeatCustomers: number; repeatRate: number | null };
   cases: { total: number; byStatus: Record<string, number>; completionRate: number | null };
-  financial: { revenueByCurrency: Record<string, number>; avgCaseValue: number | null; acceptedQuoteCount: number };
+  financial: {
+    revenueByCurrency: Record<string, number>;
+    avgCaseValue: number | null;
+    acceptedQuoteCount: number;
+    directCostsByCurrency: Record<string, number>;
+    contributionByCurrency: Record<string, number>;
+    contributionMarginByCurrency: Record<string, number | null>;
+  };
   trust: { avgRating: number | null; ratingCount: number };
   operations: {
     totalQcReviews: number;
     qcOutcomeCounts: Record<string, number>;
     reworkRate: number | null;
+    overdueCases: number;
+    unownedActiveCases: number;
     exceptionsRaised: number;
     incidentsBySeverity: Record<string, number>;
   };
@@ -80,6 +89,27 @@ export default function OpsAnalyticsPage() {
         />
       </div>
 
+      <h2>Contribution</h2>
+      <p className="muted" style={{ marginTop: '-0.5rem' }}>
+        Contribution = Revenue − direct case costs (representative, travel, third-party, other) recorded
+        by Finance on each case.
+      </p>
+      <div className="actions-row" style={{ flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+        {Object.keys(summary.financial.contributionByCurrency).length === 0 ? (
+          <Stat label="Contribution" value="—" />
+        ) : (
+          Object.entries(summary.financial.contributionByCurrency).map(([currency, amount]) => (
+            <Stat key={currency} label={`Contribution (${currency})`} value={amount.toLocaleString()} />
+          ))
+        )}
+        {Object.entries(summary.financial.directCostsByCurrency).map(([currency, amount]) => (
+          <Stat key={currency} label={`Direct costs (${currency})`} value={amount.toLocaleString()} />
+        ))}
+        {Object.entries(summary.financial.contributionMarginByCurrency).map(([currency, margin]) => (
+          <Stat key={currency} label={`Contribution margin (${currency})`} value={pct(margin)} />
+        ))}
+      </div>
+
       <h2>Trust &amp; Quality</h2>
       <div className="actions-row" style={{ flexWrap: 'wrap', marginBottom: '1.5rem' }}>
         <Stat
@@ -89,6 +119,8 @@ export default function OpsAnalyticsPage() {
         <Stat label="QC reviews" value={String(summary.operations.totalQcReviews)} />
         <Stat label="Rework rate" value={pct(summary.operations.reworkRate)} />
         <Stat label="Exceptions raised" value={String(summary.operations.exceptionsRaised)} />
+        <Stat label="Overdue cases" value={String(summary.operations.overdueCases)} />
+        <Stat label="Unowned active cases" value={String(summary.operations.unownedActiveCases)} />
       </div>
 
       <div className="card">

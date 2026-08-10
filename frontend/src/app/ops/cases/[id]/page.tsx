@@ -78,6 +78,15 @@ interface ScopeDetail {
   createdAt: string;
 }
 
+interface DirectCostEntry {
+  id: string;
+  category: string;
+  amount: string;
+  currency: string;
+  note: string | null;
+  createdAt: string;
+}
+
 export default function OpsCaseDetailPage() {
   const { user, ready } = useOpsGuard();
   const params = useParams<{ id: string }>();
@@ -87,6 +96,7 @@ export default function OpsCaseDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [directCosts, setDirectCosts] = useState<DirectCostEntry[] | null>(null);
 
   // Form state
   const [nextStatus, setNextStatus] = useState('');
@@ -121,6 +131,9 @@ export default function OpsCaseDetailPage() {
   const [scopeFormOpen, setScopeFormOpen] = useState(false);
   const [documentAssignmentId, setDocumentAssignmentId] = useState('');
   const [cadenceDays, setCadenceDays] = useState('30');
+  const [directCostCategory, setDirectCostCategory] = useState('REPRESENTATIVE');
+  const [directCostAmount, setDirectCostAmount] = useState('');
+  const [directCostNote, setDirectCostNote] = useState('');
 
   function load() {
     setError(null);
@@ -135,6 +148,13 @@ export default function OpsCaseDetailPage() {
         }
       });
     apiFetch<ScopeDetail | null>(`/cases/${params.id}/scope`).then(setScope).catch(() => {});
+    // Finance-only endpoint (API Spec: "Never return internal pricing/
+    // margin calculations" to unauthorized clients) — only fetch it for
+    // roles the backend will actually let through, so other roles don't
+    // just get a noisy 403.
+    if (user && FINANCE_ROLES.includes(user.role)) {
+      apiFetch<DirectCostEntry[]>(`/cases/${params.id}/direct-costs`).then(setDirectCosts).catch(() => {});
+    }
   }
 
   useEffect(() => {
@@ -568,6 +588,80 @@ export default function OpsCaseDetailPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {user && FINANCE_ROLES.includes(user.role) && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Direct costs</h2>
+          <p className="muted">
+            What this case actually cost to deliver — feeds Contribution = Revenue − direct costs on the
+            Analytics dashboard. Append-only, like refunds: a correction is a new entry, not an edit.
+          </p>
+          {directCosts === null && <p className="muted">Loading…</p>}
+          {directCosts && directCosts.length === 0 && <p className="muted">No direct costs recorded yet.</p>}
+          {directCosts && directCosts.length > 0 && (
+            <ul>
+              {directCosts.map((c) => (
+                <li key={c.id}>
+                  {c.category.replace(/_/g, ' ').toLowerCase()} — {c.currency} {Number(c.amount).toLocaleString()}
+                  {c.note && ` (${c.note})`} · {new Date(c.createdAt).toLocaleDateString()}
+                </li>
+              ))}
+            </ul>
+          )}
+          {directCosts && directCosts.length > 0 && (
+            <p className="muted">
+              Total: {Object.entries(
+                directCosts.reduce<Record<string, number>>((totals, c) => {
+                  totals[c.currency] = (totals[c.currency] ?? 0) + Number(c.amount);
+                  return totals;
+                }, {}),
+              )
+                .map(([currency, amount]) => `${currency} ${amount.toLocaleString()}`)
+                .join(' · ')}
+            </p>
+          )}
+          <div className="actions-row">
+            <select value={directCostCategory} onChange={(e) => setDirectCostCategory(e.target.value)}>
+              <option value="REPRESENTATIVE">Representative</option>
+              <option value="TRAVEL">Travel</option>
+              <option value="THIRD_PARTY">Third party</option>
+              <option value="OTHER">Other</option>
+            </select>
+            <input
+              type="number"
+              placeholder="Amount"
+              value={directCostAmount}
+              onChange={(e) => setDirectCostAmount(e.target.value)}
+              style={{ maxWidth: '10rem' }}
+            />
+            <input
+              placeholder="Note (optional)"
+              value={directCostNote}
+              onChange={(e) => setDirectCostNote(e.target.value)}
+            />
+            <button
+              className="btn btn--secondary"
+              disabled={!directCostAmount || Number(directCostAmount) <= 0 || busy !== null}
+              onClick={() =>
+                run('direct-cost', async () => {
+                  await apiFetch(`/cases/${detail.id}/direct-costs`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      category: directCostCategory,
+                      amount: Number(directCostAmount),
+                      note: directCostNote || undefined,
+                    }),
+                  });
+                  setDirectCostAmount('');
+                  setDirectCostNote('');
+                })
+              }
+            >
+              {busy === 'direct-cost' ? 'Recording…' : 'Record cost'}
+            </button>
+          </div>
         </div>
       )}
 
