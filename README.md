@@ -229,6 +229,16 @@ now built and verified end-to-end**:
 - **Advanced analytics** — `/ops/analytics` (admin/finance) computes a working subset of Section 13's
   success metrics live from the same tables everything else writes to: completion rate, repeat-customer
   rate, revenue collected, average case value, average rating, QC rework rate, incidents by severity.
+- **Admin Audit Log** (Admin Console & Platform Admin Architecture v1.0 Section 26 "Audit Log", P0 MVP
+  screen A20) — every material action across the app has always been recorded (`AuditService.record()`,
+  called from every state-changing method, per-case trail already visible on the case detail page), but
+  there was no way to actually search any of it. `GET /admin/audit-events` (Admin/SuperAdmin only) now
+  filters by case, actor, action (substring), actor type, and date range, with pagination; `GET
+  /admin/audit-events/:id` retrieves one event's full metadata. Read-only by design — `AuditService`
+  exposes no mutation beyond `record()`, and this endpoint never calls it. New `/ops/audit` page: filter
+  bar, a sortable table, expandable per-row metadata. Covered by `backend/test/audit-log.e2e-spec.ts` (8
+  tests) — negative-control verified: disabling the role gate, and separately disabling the `caseId`
+  filter, each independently fail their test; restoring both passes again.
 - **Notification preferences** — customers pick their preferred channel (WhatsApp/email/SMS) from
   `/profile`; this is the field a real channel fan-out would read from once it exists.
 - **WhatsApp AI integration — outbound verified live, inbound still a stand-in.** Provider is Zavu
