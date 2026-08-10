@@ -359,10 +359,13 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   enrollment; `.../mfa/confirm` activates it; once active, `POST /api/auth/login` returns
   `{ mfaRequired: true, mfaToken }` instead of tokens, and `POST /api/auth/mfa/verify` exchanges the
   code for a real session. `.../mfa/disable` requires the current password. `POST /api/auth/forgot-password`
-  never reveals whether an email exists — outside production it also returns `devToken` directly since
-  there's no email provider wired up yet (Section 11.2: email infra is bought/integrated, not built
-  here); `POST /api/auth/reset-password` consumes it once and revokes every existing refresh token.
-  `POST /api/auth/logout-all` (authenticated) revokes every session on demand. See `/profile` → Security
+  never reveals whether an email exists, and now sends a real reset-link email via Resend (`EmailService`,
+  `RESEND_API_KEY`) — smoke-tested against Resend's live API (a real successful send to their
+  `delivered@resend.dev` test address, and a real 422 confirming their test-mode recipient restriction
+  applies until a sending domain is verified). Outside production it also still returns `devToken`
+  directly for local dev without needing a Resend key configured. `POST /api/auth/reset-password`
+  consumes it once and revokes every existing refresh token. `POST /api/auth/logout-all` (authenticated)
+  revokes every session on demand. See `/profile` → Security
   for the customer-facing UI; there's no equivalent staff settings page yet, so a staff member currently
   needs to call these endpoints directly to enroll in MFA.
 - A staff member needs to be an explicit `CaseCollaborator` on a case to act on it or view full detail

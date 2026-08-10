@@ -6,6 +6,7 @@ import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EmailService } from '../email/email.service';
 import { generateUniqueReferralCode } from '../common/referral-code';
 import { generateTotpSecret, otpAuthUrl, verifyTotpCode } from './totp';
 import { RegisterDto } from './dto/register.dto';
@@ -28,6 +29,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly email: EmailService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -189,19 +191,38 @@ export class AuthService {
         },
       });
       await this.audit.record({ actorId: user.id, actorType: 'user', action: 'user.password_reset_requested' });
+      // In-app copy for anyone already logged in elsewhere — not the
+      // recovery path itself, since the whole point is they're locked out.
       await this.notifications.notify(
         user.id,
         'Password reset requested',
         'Use the link we sent to reset your password. If you did not request this, you can ignore it.',
       );
-      this.logger.warn(
-        `[dry-run] Password reset requested for ${email} — no email provider configured. Token: ${token}`,
+
+      const resetLink = `${this.frontendUrl()}/reset-password?token=${token}`;
+      const sendResult = await this.email.sendEmail(
+        email,
+        'Reset your ASOJU password',
+        `<p>Use the link below to reset your password. It expires in 30 minutes.</p>` +
+          `<p><a href="${resetLink}">${resetLink}</a></p>` +
+          `<p>If you did not request this, you can safely ignore this email.</p>`,
       );
+      if (sendResult.dryRun) {
+        this.logger.warn(`[dry-run] Password reset requested for ${email} — no email provider configured. Token: ${token}`);
+      }
+
       if (process.env.NODE_ENV !== 'production') {
         return { message: 'If that email exists, a reset link has been sent.', devToken: token };
       }
     }
     return { message: 'If that email exists, a reset link has been sent.' };
+  }
+
+  /** Public base URL of the frontend, for building links inside emails —
+   * distinct from CORS_ORIGIN (which can list multiple allowed origins
+   * for the API's own security check, not the one canonical link target). */
+  private frontendUrl(): string {
+    return process.env.FRONTEND_URL || 'http://localhost:3000';
   }
 
   async resetPassword(token: string, newPassword: string) {
