@@ -31,6 +31,13 @@ export class ProfileController {
     return this.profileService.getReferralSummary(user);
   }
 
+  /** Customer portfolio dashboard (strategic-suggestions pass) — one
+   * screen instead of re-deriving the same picture from several endpoints. */
+  @Get('portfolio')
+  getPortfolio(@CurrentUser() user: AuthenticatedUser) {
+    return this.profileService.getPortfolio(user);
+  }
+
   @Get('beneficiaries')
   listBeneficiaries(@CurrentUser() user: AuthenticatedUser) {
     return this.profileService.listBeneficiaries(user);

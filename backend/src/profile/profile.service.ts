@@ -1,15 +1,29 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
-import { Role } from '@prisma/client';
+import { AssignmentStatus, CaseStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { WhatsappSenderService } from '../whatsapp/whatsapp-sender.service';
+import { ScLedgerService } from '../concierge/sc-ledger.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateBeneficiaryDto } from './dto/beneficiary.dto';
 import { CreatePropertyDto } from './dto/property.dto';
 import { CreateAssetDto } from './dto/asset.dto';
 import { UpdatePreferencesDto } from './dto/update-preferences.dto';
 import { isPiiRestricted, REDACTED_CUSTOMER_NAME } from '../common/pii-restricted-roles';
+
+// Terminal statuses don't count toward the "active" breakdown on the
+// portfolio dashboard — mirrors CasesService's own COMPLETED/CLOSED
+// treatment elsewhere (e.g. getCustomerHistory's completedCases count).
+const TERMINAL_CASE_STATUSES: ReadonlySet<CaseStatus> = new Set([CaseStatus.COMPLETED, CaseStatus.CLOSED]);
+
+// Assignment states worth surfacing as "coming up" — not a stale offer
+// that was declined/revoked, not one already done.
+const UPCOMING_ASSIGNMENT_STATUSES: ReadonlySet<AssignmentStatus> = new Set([
+  AssignmentStatus.OFFERED,
+  AssignmentStatus.ACCEPTED,
+  AssignmentStatus.IN_PROGRESS,
+]);
 
 // "Who is a Beneficiary" — a contact record until invited; a real,
 // separately-authenticated portal login after. Same TTL family as
@@ -32,7 +46,125 @@ export class ProfileService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly whatsappSender: WhatsappSenderService,
+    private readonly scLedger: ScLedgerService,
   ) {}
+
+  /**
+   * Customer portfolio dashboard (strategic-suggestions pass, Tier 1
+   * "extend what exists") — everything a returning diaspora customer
+   * would want on one screen instead of re-deriving it from the case
+   * queue: active cases by status, saved properties/assets with their
+   * most recent case, beneficiaries (and whether they've claimed portal
+   * access), total spend, Concierge membership balance, upcoming
+   * scheduled visits, referral stats.
+   *
+   * Deliberately scoped to this Customer alone — no Account-wide rollup
+   * of other members' cases here (a real product decision, resolved:
+   * "every client is independent"). The existing Account roster
+   * (`/me/account`) already shows *that* a member has cases, at a
+   * summary level, as a visibility layer; this dashboard doesn't add to
+   * or change that.
+   */
+  async getPortfolio(user: AuthenticatedUser) {
+    const customer = await this.requireCustomer(user.id);
+
+    const [cases, properties, assets, beneficiaries, subscription, referredCount] = await Promise.all([
+      this.prisma.serviceCase.findMany({
+        where: { customerId: customer.id },
+        select: {
+          id: true,
+          caseNumber: true,
+          serviceType: true,
+          status: true,
+          createdAt: true,
+          propertyId: true,
+          assetId: true,
+          invoices: { select: { payments: { select: { amount: true, currency: true, status: true } } } },
+          assignments: { select: { role: true, status: true, scheduledFor: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.property.findMany({ where: { customerId: customer.id }, orderBy: { createdAt: 'desc' } }),
+      this.prisma.asset.findMany({ where: { customerId: customer.id }, orderBy: { createdAt: 'desc' } }),
+      this.prisma.beneficiary.findMany({ where: { customerId: customer.id }, orderBy: { createdAt: 'desc' } }),
+      this.prisma.subscription.findFirst({ where: { customerId: customer.id }, orderBy: { startedAt: 'desc' } }),
+      this.prisma.customer.count({ where: { referredByCustomerId: customer.id } }),
+    ]);
+
+    const activeCasesByStatus: Record<string, number> = {};
+    let completedCases = 0;
+    for (const c of cases) {
+      if (TERMINAL_CASE_STATUSES.has(c.status)) {
+        completedCases += 1;
+      } else {
+        activeCasesByStatus[c.status] = (activeCasesByStatus[c.status] ?? 0) + 1;
+      }
+    }
+
+    // Same byCurrency bucketing discipline as AnalyticsService — never
+    // silently sum across currencies (Payment.currency isn't hard-pinned
+    // to NGN in the schema even though Paystack settlement always is
+    // today).
+    const totalSpendByCurrency: Record<string, number> = {};
+    for (const c of cases) {
+      for (const invoice of c.invoices) {
+        for (const payment of invoice.payments) {
+          if (payment.status !== 'PAID') continue;
+          totalSpendByCurrency[payment.currency] = (totalSpendByCurrency[payment.currency] ?? 0) + Number(payment.amount);
+        }
+      }
+    }
+
+    // cases is already createdAt-desc, so the first case seen per
+    // property/asset id is genuinely the most recent one.
+    type LastCase = { id: string; caseNumber: string; status: CaseStatus; createdAt: Date };
+    const lastCaseByPropertyId = new Map<string, LastCase>();
+    const lastCaseByAssetId = new Map<string, LastCase>();
+    for (const c of cases) {
+      const summary: LastCase = { id: c.id, caseNumber: c.caseNumber, status: c.status, createdAt: c.createdAt };
+      if (c.propertyId && !lastCaseByPropertyId.has(c.propertyId)) lastCaseByPropertyId.set(c.propertyId, summary);
+      if (c.assetId && !lastCaseByAssetId.has(c.assetId)) lastCaseByAssetId.set(c.assetId, summary);
+    }
+
+    const now = new Date();
+    const upcomingVisits = cases
+      .flatMap((c) =>
+        c.assignments
+          .filter((a) => a.scheduledFor && a.scheduledFor > now && UPCOMING_ASSIGNMENT_STATUSES.has(a.status))
+          .map((a) => ({
+            caseId: c.id,
+            caseNumber: c.caseNumber,
+            serviceType: c.serviceType,
+            role: a.role,
+            scheduledFor: a.scheduledFor,
+          })),
+      )
+      .sort((a, b) => a.scheduledFor!.getTime() - b.scheduledFor!.getTime());
+
+    let membership: { plan: string; status: string; scBalanceUsd: number } | null = null;
+    if (subscription) {
+      const scBalanceUsd = await this.scLedger.getBalanceUsd(subscription.id);
+      membership = { plan: subscription.plan, status: subscription.status, scBalanceUsd };
+    }
+
+    return {
+      totalCases: cases.length,
+      completedCases,
+      activeCasesByStatus,
+      totalSpendByCurrency,
+      properties: properties.map((p) => ({ ...p, lastCase: lastCaseByPropertyId.get(p.id) ?? null })),
+      assets: assets.map((a) => ({ ...a, lastCase: lastCaseByAssetId.get(a.id) ?? null })),
+      beneficiaries: beneficiaries.map((b) => ({
+        id: b.id,
+        fullName: b.fullName,
+        relationship: b.relationship,
+        hasPortalAccess: b.userId !== null,
+      })),
+      upcomingVisits,
+      membership,
+      referral: { code: customer.referralCode, referredCount },
+    };
+  }
 
   // -- Notification preferences (Section 5.1 P1) --------------------------
 

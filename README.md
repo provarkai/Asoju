@@ -216,6 +216,23 @@ end-to-end against a real Postgres instance:
   `SERVICE_TYPE_DEFAULT_PRIORITY` lets an unqualified bereavement case fall back to `STANDARD` and fails
   the test; restoring it passes again. Includes an explicit regression check that an unrelated service
   (`PROPERTY_INSPECTION`) still defaults to `STANDARD` unchanged.
+- **Customer portfolio dashboard** (strategic-suggestions pass, Tier 1 "extend what exists") — one screen
+  instead of re-deriving the same picture from several endpoints. New `GET /me/portfolio` computes active
+  cases bucketed by status (`COMPLETED`/`CLOSED` counted separately, never both), total spend by currency
+  (summed only from `PAID` payments — an initiated-but-unconfirmed checkout never counts, same discipline
+  as the contribution-margin work's exact-math testing), each saved property/asset paired with its most
+  recent case, each beneficiary's portal-access status (from the Beneficiary portal access feature above),
+  upcoming scheduled visits (soonest first, excluding past/declined/completed assignments), Concierge
+  membership plan + SC balance if subscribed, and referral stats. Deliberately scoped to the individual
+  Customer alone — no Account-wide rollup of other members' cases here, a real product decision the
+  scoping flagged explicitly and left unresolved; **resolved: "every client is independent"**, so this
+  dashboard doesn't add to or change the existing Account roster's own visibility layer (`/me/account`).
+  `/dashboard` reworked around this endpoint — stat row (active/completed cases, total spend, membership),
+  upcoming visits, properties/assets with their last case, beneficiaries, referral summary — alongside the
+  existing pending-requests and full case-list sections, unchanged. Covered by
+  `backend/test/portfolio.e2e-spec.ts` (7 tests) — negative-control verified: disabling the `PAID`-only
+  filter on total spend lets an unconfirmed ₦999,000 checkout inflate the total and fails the exact-math
+  test; restoring it passes again.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same
