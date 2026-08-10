@@ -16,6 +16,18 @@ import { RefundPaymentDto } from './dto/refund-payment.dto';
  * ones so a single webhook endpoint can route both (see PaystackService). */
 export const CASE_INVOICE_REFERENCE_PREFIX = 'caseinv_';
 
+const DEFAULT_PAYMENT_EXPIRY_HOURS = 24;
+
+/** P0 Technical Build Spec Section 21 "Payment States" — EXPIRED: "Payment
+ * window expired." How long a checkout stays open before the sweep below
+ * expires it — configurable per environment, same pattern as
+ * USD_TO_NGN_RATE (an operator-set number, not a value baked into code). */
+function paymentExpiryHours(): number {
+  const configured = process.env.PAYMENT_EXPIRY_HOURS;
+  const parsed = configured ? Number(configured) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PAYMENT_EXPIRY_HOURS;
+}
+
 @Injectable()
 export class CommerceService {
   private readonly logger = new Logger(CommerceService.name);
@@ -389,5 +401,43 @@ export class CommerceService {
     );
 
     return { refund, payment: updatedPayment };
+  }
+
+  /**
+   * P0 Technical Build Spec Section 21 "Payment States" — EXPIRED: "Payment
+   * window expired." A checkout started via POST /invoices/:id/pay that
+   * never resolves (customer abandons it, no webhook ever arrives) used to
+   * stay PENDING forever with no distinguishing signal. Run by
+   * PaymentExpirySchedulerService's hourly cron; also admin-triggerable
+   * (POST /admin/payments/run-expiry-sweep) same as the billing/recurring
+   * sweeps, for ops/testing without waiting on the clock. Deliberately
+   * touches only the Payment row, never the case's own paymentStatus — the
+   * customer can always start a fresh payment on the same invoice
+   * (initiatePayment has no restriction against a second attempt), so one
+   * expired attempt is never the case's final word on whether it's paid.
+   */
+  async runPaymentExpirySweep(): Promise<{ expired: number }> {
+    const cutoff = new Date(Date.now() - paymentExpiryHours() * 60 * 60 * 1000);
+    const stale = await this.prisma.payment.findMany({
+      where: { status: PaymentStatus.PENDING, createdAt: { lt: cutoff } },
+      include: { invoice: { include: { case: { include: { customer: true } } } } },
+    });
+
+    for (const payment of stale) {
+      await this.prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.EXPIRED } });
+      await this.audit.record({
+        caseId: payment.invoice.caseId,
+        actorType: 'system',
+        action: 'payment.expired',
+        metadata: { paymentId: payment.id, providerReference: payment.providerReference, createdAt: payment.createdAt },
+      });
+      await this.notifications.notify(
+        payment.invoice.case.customer.userId,
+        'Your payment window expired',
+        `The payment window for ${payment.invoice.case.caseNumber} has expired — you can start a new payment from your case page.`,
+      );
+    }
+
+    return { expired: stale.length };
   }
 }

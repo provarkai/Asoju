@@ -50,11 +50,20 @@ end-to-end against a real Postgres instance:
   whether anything's still owed — never lets a refund exceed what's left. `PaymentStatus` now carries
   all eight of the spec's states; the webhook's amount-mismatch path also now sets
   `RECONCILIATION_REQUIRED` on the payment and case instead of just logging and doing nothing durable
-  (`PROCESSING`/`EXPIRED` are the two states this doesn't yet set anywhere — they'd need a
-  provider-status poll and a payment-window timeout sweep respectively, a separate increment). Covered
-  by `backend/test/refund.e2e-spec.ts` (4 tests) — negative-control verified: disabling the
-  over-refund guard lets a refund exceed the remaining balance and fails the test; restoring it passes
-  again.
+  (`PROCESSING` is the one state this doesn't yet set anywhere — it'd need a provider-status poll, a
+  separate increment). Covered by `backend/test/refund.e2e-spec.ts` (4 tests) — negative-control
+  verified: disabling the over-refund guard lets a refund exceed the remaining balance and fails the
+  test; restoring it passes again.
+- **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
+  webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
+  (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same
+  on-demand-trigger pattern as the subscription billing and recurring-service sweeps) and marks any
+  `PENDING` payment older than `PAYMENT_EXPIRY_HOURS` (default 24h) as `EXPIRED`, notifying the
+  customer. Deliberately touches only the `Payment` row, never the case's own `paymentStatus` — the
+  customer can always start a fresh payment on the same invoice, so one expired attempt is never the
+  case's final word. Covered by `backend/test/payment-expiry.e2e-spec.ts` (3 tests) —
+  negative-control verified: breaking the cutoff comparison leaves stale payments untouched and fails
+  the test; restoring it passes again.
 
 **Payment → Assignment → Field Execution**
 - Staff assign a verified field agent/provider to a `SCHEDULED` case (→ `ASSIGNED`); the assignee

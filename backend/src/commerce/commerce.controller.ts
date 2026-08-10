@@ -71,6 +71,18 @@ export class CommerceController {
     return this.commerceService.refundPayment(user, paymentId, dto);
   }
 
+  /** Same on-demand-sweep pattern as
+   * ConciergeController.runBillingSweep — lets ops/testing trigger the
+   * hourly PaymentExpirySchedulerService cron without waiting on the
+   * clock. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin/payments/run-expiry-sweep')
+  runPaymentExpirySweep() {
+    return this.commerceService.runPaymentExpirySweep();
+  }
+
   /**
    * Single Paystack webhook endpoint for the whole app — real signature
    * verification (PaystackWebhookGuard), not a shared-secret stand-in
