@@ -287,26 +287,28 @@ model User {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  customer            Customer?
-  agentProfile        Agent?
-  providerProfile     Provider?
-  refreshTokens       RefreshToken[]
-  passwordResetTokens PasswordResetToken[]
-  caseCollaborators   CaseCollaborator[]
-  uploadedEvidence    Evidence[]             @relation("EvidenceUploader")
-  auditEvents         AuditEvent[]
-  messagesSent        Message[]              @relation("MessageSender")
-  notifications       Notification[]
-  approvals           Approval[]
-  ratings             Rating[]
-  rmPortfolio         Customer[]             @relation("CustomerRm")
-  whatsAppThread      WhatsAppThread?
-  partnerContact      PartnerContact?
-  scopesCreated       CaseScope[]            @relation("ScopeCreatedBy")
-  scopesConfirmed     CaseScope[]            @relation("ScopeConfirmedBy")
-  planConfigsUpdated  MembershipPlanConfig[] @relation("PlanConfigUpdatedBy")
-  ownedCases          ServiceCase[]          @relation("CaseOwner")
-  directCostsRecorded DirectCost[]
+  customer              Customer?
+  agentProfile          Agent?
+  providerProfile       Provider?
+  refreshTokens         RefreshToken[]
+  passwordResetTokens   PasswordResetToken[]
+  caseCollaborators     CaseCollaborator[]
+  uploadedEvidence      Evidence[]             @relation("EvidenceUploader")
+  auditEvents           AuditEvent[]
+  messagesSent          Message[]              @relation("MessageSender")
+  notifications         Notification[]
+  approvals             Approval[]
+  ratings               Rating[]
+  rmPortfolio           Customer[]             @relation("CustomerRm")
+  whatsAppThread        WhatsAppThread?
+  partnerContact        PartnerContact?
+  scopesCreated         CaseScope[]            @relation("ScopeCreatedBy")
+  scopesConfirmed       CaseScope[]            @relation("ScopeConfirmedBy")
+  planConfigsUpdated    MembershipPlanConfig[] @relation("PlanConfigUpdatedBy")
+  ownedCases            ServiceCase[]          @relation("CaseOwner")
+  directCostsRecorded   DirectCost[]
+  refundRequestsMade    RefundRequest[]        @relation("RefundRequestedBy")
+  refundRequestsDecided RefundRequest[]        @relation("RefundDecidedBy")
 
   @@index([role])
 }
@@ -996,6 +998,7 @@ model Payment {
 
   refunds         Refund[]
   reconciliations Reconciliation[]
+  refundRequests  RefundRequest[]
 }
 
 /// A Finance-initiated reversal — distinct from ScLedgerEntry's REVERSAL
@@ -1010,6 +1013,41 @@ model Refund {
   reason    String?
   actorId   String?
   createdAt DateTime @default(now())
+}
+
+enum RefundRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// P0 Security, Privacy & Trust Architecture v1.0 §8 "Privileged Action
+/// Matrix" — "Refund | Finance permission + threshold approval where
+/// configured." A refund over REFUND_APPROVAL_THRESHOLD_NGN
+/// (CommerceService.refundApprovalThresholdNgn, env-configurable, same
+/// pattern as QUOTE_VALIDITY_HOURS) creates one of these instead of
+/// executing immediately — a second, different Finance/Admin/SuperAdmin
+/// actor must approve (CommerceService.approveRefundRequest) before the
+/// actual Refund row and Paystack call happen. requestedById and
+/// decidedById are deliberately different users where a decision was
+/// made — maker-checker, not a rubber stamp.
+model RefundRequest {
+  id            String              @id @default(uuid())
+  paymentId     String
+  payment       Payment             @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  amount        Decimal             @db.Decimal(12, 2)
+  reason        String
+  status        RefundRequestStatus @default(PENDING)
+  requestedById String
+  requestedBy   User                @relation("RefundRequestedBy", fields: [requestedById], references: [id])
+  decidedById   String?
+  decidedBy     User?               @relation("RefundDecidedBy", fields: [decidedById], references: [id])
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime            @default(now())
+
+  @@index([paymentId])
+  @@index([status])
 }
 
 /// Finance's resolution of a RECONCILIATION_REQUIRED payment

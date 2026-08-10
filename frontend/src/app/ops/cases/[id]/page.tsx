@@ -136,6 +136,7 @@ export default function OpsCaseDetailPage() {
   const [directCostNote, setDirectCostNote] = useState('');
   const [holdReason, setHoldReason] = useState('');
   const [resumeReason, setResumeReason] = useState('');
+  const [refundQueuedMessage, setRefundQueuedMessage] = useState<string | null>(null);
 
   function load() {
     setError(null);
@@ -172,6 +173,35 @@ export default function OpsCaseDetailPage() {
     setError(null);
     try {
       await fn();
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Distinct from run() because the response shape tells us whether the
+  // refund actually executed or only queued for a second Finance approver
+  // (P0 Security spec: "Refund | Finance permission + threshold approval
+  // where configured") — the button needs to say which one happened.
+  async function issueRefund(paymentId: string) {
+    setBusy(`refund-${paymentId}`);
+    setError(null);
+    setRefundQueuedMessage(null);
+    try {
+      const result = await apiFetch<{ refundRequest?: { id: string } }>(`/admin/payments/${paymentId}/refund`, {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: refundAmount[paymentId] ? Number(refundAmount[paymentId]) : undefined,
+          reason: refundReason[paymentId],
+        }),
+      });
+      if (result.refundRequest) {
+        setRefundQueuedMessage(
+          'This refund exceeds the approval threshold — it has been submitted for a second Finance approver and no money has moved yet. See Refund approvals.',
+        );
+      }
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed');
@@ -571,17 +601,7 @@ export default function OpsCaseDetailPage() {
                     <button
                       className="btn btn--secondary"
                       disabled={busy !== null || !refundReason[p.id]}
-                      onClick={() =>
-                        run(`refund-${p.id}`, () =>
-                          apiFetch(`/admin/payments/${p.id}/refund`, {
-                            method: 'POST',
-                            body: JSON.stringify({
-                              amount: refundAmount[p.id] ? Number(refundAmount[p.id]) : undefined,
-                              reason: refundReason[p.id],
-                            }),
-                          }),
-                        )
-                      }
+                      onClick={() => issueRefund(p.id)}
                     >
                       {busy === `refund-${p.id}` ? 'Refunding…' : 'Issue refund'}
                     </button>
@@ -647,6 +667,7 @@ export default function OpsCaseDetailPage() {
               </div>
             );
           })}
+          {refundQueuedMessage && <p className="muted">{refundQueuedMessage}</p>}
         </div>
       )}
 

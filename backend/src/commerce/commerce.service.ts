@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { CaseStatus, CaseTier, PaymentStatus, QuoteLineCategory, ReconciliationStatus } from '@prisma/client';
+import { CaseStatus, CaseTier, PaymentStatus, Prisma, QuoteLineCategory, ReconciliationStatus, RefundRequestStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -42,6 +42,20 @@ function quoteValidityHours(): number {
   const configured = process.env.QUOTE_VALIDITY_HOURS;
   const parsed = configured ? Number(configured) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_QUOTE_VALIDITY_HOURS;
+}
+
+const DEFAULT_REFUND_APPROVAL_THRESHOLD_NGN = 200_000;
+
+/** P0 Security, Privacy & Trust Architecture v1.0 §8 "Privileged Action
+ * Matrix" — "Refund | Finance permission + threshold approval where
+ * configured." Configurable per environment, same pattern as
+ * QUOTE_VALIDITY_HOURS/PAYMENT_EXPIRY_HOURS. A refund at or below this
+ * amount executes immediately as before; above it requires a second,
+ * different Finance/Admin/SuperAdmin actor's approval. */
+function refundApprovalThresholdNgn(): number {
+  const configured = process.env.REFUND_APPROVAL_THRESHOLD_NGN;
+  const parsed = configured ? Number(configured) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_REFUND_APPROVAL_THRESHOLD_NGN;
 }
 
 @Injectable()
@@ -405,6 +419,59 @@ export class CommerceService {
    * one partially refunds it, and the Payment moves to PARTIALLY_REFUNDED
    * rather than REFUNDED until the full amount has been returned.
    */
+  private async remainingRefundable(paymentId: string, paymentAmount: Prisma.Decimal | number): Promise<number> {
+    const alreadyRefunded = await this.prisma.refund.aggregate({ where: { paymentId }, _sum: { amount: true } });
+    const refundedSoFar = Number(alreadyRefunded._sum.amount ?? 0);
+    return Number(paymentAmount) - refundedSoFar;
+  }
+
+  /** The actual refund: Paystack call, Refund row, Payment/case status
+   * update, audit, customer notification. Shared by the immediate
+   * (below-threshold) path and approveRefundRequest (above-threshold,
+   * post-approval) — the two differ only in *when* this runs and who
+   * authorized it, never in what it does. */
+  private async executeRefund(
+    actor: AuthenticatedUser,
+    payment: Prisma.PaymentGetPayload<{ include: { invoice: { include: { case: { include: { customer: true } } } } } }>,
+    requested: number,
+    reason: string | null,
+  ) {
+    const refundedSoFar = Number(payment.amount) - (await this.remainingRefundable(payment.id, payment.amount));
+    const result = await this.paystack.refundTransaction(payment.providerReference, Math.round(requested * 100));
+
+    const refund = await this.prisma.refund.create({
+      data: { paymentId: payment.id, amount: requested, reason: reason ?? undefined, actorId: actor.id },
+    });
+
+    const newStatus = requested + refundedSoFar >= Number(payment.amount) ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED;
+    const updatedPayment = await this.prisma.payment.update({ where: { id: payment.id }, data: { status: newStatus } });
+    await this.prisma.serviceCase.update({ where: { id: payment.invoice.caseId }, data: { paymentStatus: newStatus } });
+
+    await this.audit.record({
+      caseId: payment.invoice.caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'payment.refunded',
+      metadata: { paymentId: payment.id, refundId: refund.id, amount: requested, reason, newStatus, dryRun: result.dryRun },
+    });
+    await this.notifications.notify(
+      payment.invoice.case.customer.userId,
+      'A refund has been issued',
+      `A refund of ${payment.currency} ${requested.toLocaleString()} has been issued for ${payment.invoice.case.caseNumber}.`,
+    );
+
+    return { refund, payment: updatedPayment };
+  }
+
+  /**
+   * P0 Security, Privacy & Trust Architecture v1.0 §8 "Privileged Action
+   * Matrix" — "Refund | Finance permission + threshold approval where
+   * configured." A refund at or below REFUND_APPROVAL_THRESHOLD_NGN
+   * executes immediately, exactly as before; above it, this creates a
+   * pending RefundRequest instead of touching Paystack or the ledger at
+   * all — approveRefundRequest is the only path that actually moves
+   * money once a request exists.
+   */
   async refundPayment(actor: AuthenticatedUser, paymentId: string, dto: RefundPaymentDto) {
     const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
@@ -415,38 +482,117 @@ export class CommerceService {
       throw new BadRequestException(`Cannot refund a payment in status ${payment.status}`);
     }
 
-    const alreadyRefunded = await this.prisma.refund.aggregate({ where: { paymentId }, _sum: { amount: true } });
-    const refundedSoFar = Number(alreadyRefunded._sum.amount ?? 0);
-    const remaining = Number(payment.amount) - refundedSoFar;
+    const remaining = await this.remainingRefundable(paymentId, payment.amount);
     const requested = dto.amount ?? remaining;
     if (requested <= 0 || requested > remaining) {
       throw new BadRequestException(`Refund amount must be between 0 and the remaining refundable amount (${remaining})`);
     }
 
-    const result = await this.paystack.refundTransaction(payment.providerReference, Math.round(requested * 100));
+    const threshold = refundApprovalThresholdNgn();
+    if (requested > threshold) {
+      const refundRequest = await this.prisma.refundRequest.create({
+        data: { paymentId, amount: requested, reason: dto.reason, requestedById: actor.id },
+      });
+      await this.audit.record({
+        caseId: payment.invoice.caseId,
+        actorId: actor.id,
+        actorType: 'user',
+        action: 'payment.refund_requested',
+        metadata: { paymentId, refundRequestId: refundRequest.id, amount: requested, reason: dto.reason, thresholdNgn: threshold },
+      });
+      return { refundRequest };
+    }
 
-    const refund = await this.prisma.refund.create({
-      data: { paymentId, amount: requested, reason: dto.reason, actorId: actor.id },
+    return this.executeRefund(actor, payment, requested, dto.reason);
+  }
+
+  /** Approves a pending RefundRequest and executes the refund. Deliberately
+   * blocks the requester from approving their own request — a maker-checker
+   * control is not a control if the maker can also be the checker. */
+  async approveRefundRequest(actor: AuthenticatedUser, refundRequestId: string, note?: string) {
+    const refundRequest = await this.prisma.refundRequest.findUnique({
+      where: { id: refundRequestId },
+      include: { payment: { include: { invoice: { include: { case: { include: { customer: true } } } } } } },
     });
+    if (!refundRequest) throw new NotFoundException('Refund request not found');
+    if (refundRequest.status !== RefundRequestStatus.PENDING) {
+      throw new BadRequestException(`Refund request is already ${refundRequest.status}`);
+    }
+    if (refundRequest.requestedById === actor.id) {
+      throw new ForbiddenException('The refund cannot be approved by the same person who requested it');
+    }
 
-    const newStatus = requested + refundedSoFar >= Number(payment.amount) ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED;
-    const updatedPayment = await this.prisma.payment.update({ where: { id: paymentId }, data: { status: newStatus } });
-    await this.prisma.serviceCase.update({ where: { id: payment.invoice.caseId }, data: { paymentStatus: newStatus } });
+    const payment = refundRequest.payment;
+    if (payment.status !== PaymentStatus.PAID && payment.status !== PaymentStatus.PARTIALLY_REFUNDED) {
+      throw new BadRequestException(`Cannot refund a payment in status ${payment.status}`);
+    }
+    const requested = Number(refundRequest.amount);
+    const remaining = await this.remainingRefundable(payment.id, payment.amount);
+    if (requested <= 0 || requested > remaining) {
+      throw new BadRequestException(
+        `Refund amount must be between 0 and the remaining refundable amount (${remaining}) — it may have changed since this request was made`,
+      );
+    }
 
+    const result = await this.executeRefund(actor, payment, requested, refundRequest.reason);
+
+    await this.prisma.refundRequest.update({
+      where: { id: refundRequestId },
+      data: { status: RefundRequestStatus.APPROVED, decidedById: actor.id, decidedAt: new Date(), decisionNote: note },
+    });
     await this.audit.record({
       caseId: payment.invoice.caseId,
       actorId: actor.id,
       actorType: 'user',
-      action: 'payment.refunded',
-      metadata: { paymentId, refundId: refund.id, amount: requested, reason: dto.reason, newStatus, dryRun: result.dryRun },
+      action: 'payment.refund_request_approved',
+      metadata: { refundRequestId, paymentId: payment.id, amount: requested, note },
     });
-    await this.notifications.notify(
-      payment.invoice.case.customer.userId,
-      'A refund has been issued',
-      `A refund of ${payment.currency} ${requested.toLocaleString()} has been issued for ${payment.invoice.case.caseNumber}.`,
-    );
 
-    return { refund, payment: updatedPayment };
+    return result;
+  }
+
+  /** Rejects a pending RefundRequest — no money moves, nothing else about
+   * the payment changes. Same maker-checker restriction as approval. */
+  async rejectRefundRequest(actor: AuthenticatedUser, refundRequestId: string, note?: string) {
+    const refundRequest = await this.prisma.refundRequest.findUnique({
+      where: { id: refundRequestId },
+      include: { payment: { include: { invoice: true } } },
+    });
+    if (!refundRequest) throw new NotFoundException('Refund request not found');
+    if (refundRequest.status !== RefundRequestStatus.PENDING) {
+      throw new BadRequestException(`Refund request is already ${refundRequest.status}`);
+    }
+    if (refundRequest.requestedById === actor.id) {
+      throw new ForbiddenException('The refund cannot be rejected by the same person who requested it');
+    }
+
+    const updated = await this.prisma.refundRequest.update({
+      where: { id: refundRequestId },
+      data: { status: RefundRequestStatus.REJECTED, decidedById: actor.id, decidedAt: new Date(), decisionNote: note },
+    });
+    await this.audit.record({
+      caseId: refundRequest.payment.invoice.caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'payment.refund_request_rejected',
+      metadata: { refundRequestId, paymentId: refundRequest.paymentId, note },
+    });
+
+    return updated;
+  }
+
+  /** Finance's queue — defaults to the actionable set (PENDING) but can
+   * list any status for a full audit view. */
+  async listRefundRequests(status?: RefundRequestStatus) {
+    return this.prisma.refundRequest.findMany({
+      where: status ? { status } : undefined,
+      include: {
+        payment: { select: { amount: true, currency: true, providerReference: true } },
+        requestedBy: { select: { email: true } },
+        decidedBy: { select: { email: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   /**

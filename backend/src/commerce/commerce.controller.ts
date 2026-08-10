@@ -1,5 +1,5 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards, Req } from '@nestjs/common';
+import { Role, RefundRequestStatus } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -13,6 +13,7 @@ import { CreateQuoteDto } from './dto/create-quote.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
 import { RecordDirectCostDto } from './dto/record-direct-cost.dto';
+import { DecideRefundRequestDto } from './dto/decide-refund-request.dto';
 
 const STAFF_QUOTE_ROLES = [Role.CASE_MANAGER, Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
 const FINANCE_ROLES = [Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
@@ -92,6 +93,44 @@ export class CommerceController {
     @Body() dto: RefundPaymentDto,
   ) {
     return this.commerceService.refundPayment(user, paymentId, dto);
+  }
+
+  /** P0 Security, Privacy & Trust Architecture v1.0 §8 "Privileged Action
+   * Matrix" — "Refund | Finance permission + threshold approval where
+   * configured." Finance's queue of pending (and, via ?status=, decided)
+   * refund requests created when refundPayment's amount exceeds
+   * REFUND_APPROVAL_THRESHOLD_NGN. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...FINANCE_ROLES)
+  @Get('admin/refund-requests')
+  listRefundRequests(@Query('status') status?: RefundRequestStatus) {
+    return this.commerceService.listRefundRequests(status);
+  }
+
+  /** Maker-checker: the requester (refundPayment's actor) cannot approve
+   * their own request — enforced in the service, not just the UI. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...FINANCE_ROLES)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin/refund-requests/:id/approve')
+  approveRefundRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: DecideRefundRequestDto,
+  ) {
+    return this.commerceService.approveRefundRequest(user, id, dto.note);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...FINANCE_ROLES)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin/refund-requests/:id/reject')
+  rejectRefundRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: DecideRefundRequestDto,
+  ) {
+    return this.commerceService.rejectRefundRequest(user, id, dto.note);
   }
 
   /** Database Schema & ERD Design v1.0 Section 17 "Finance Schema" —

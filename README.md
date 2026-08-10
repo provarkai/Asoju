@@ -145,6 +145,21 @@ end-to-end against a real Postgres instance:
   "On hold" filter on the Ops case queue. Covered by `backend/test/case-hold-resume.e2e-spec.ts` (8
   tests) — negative-control verified: disabling the "already on hold" guard lets a case be held twice
   (corrupting `heldFromStatus`) and fails the test; restoring it passes again.
+- **Refund-amount threshold approval** (P0 Security, Privacy & Trust Architecture v1.0 §8 "Privileged
+  Action Matrix" — "Refund | Finance permission + threshold approval where configured.") — Finance could
+  previously refund any amount, unilaterally, with no second sign-off. A refund at or below
+  `REFUND_APPROVAL_THRESHOLD_NGN` (env-configurable, default ₦200,000 — same pattern as
+  `QUOTE_VALIDITY_HOURS`) still executes immediately, unchanged; above it, `POST
+  /admin/payments/:paymentId/refund` creates a pending `RefundRequest` instead of touching Paystack or
+  the ledger at all — no money moves until a **different** Finance/Admin/SuperAdmin actor approves via
+  `POST /admin/refund-requests/:id/approve` (maker-checker enforced server-side: the requester cannot
+  approve or reject their own request). `POST /admin/refund-requests/:id/reject` declines it with no
+  effect on the payment. New `/ops/refund-approvals` page (Finance/Admin) — a queue with Approve/Reject,
+  showing who requested it and why. Covered by `backend/test/refund-approval.e2e-spec.ts` (8 tests) —
+  negative-control verified: disabling the "requester cannot approve their own request" guard lets
+  self-approval through and fails the test; restoring it passes again. `refund.e2e-spec.ts`'s existing 4
+  tests (all well under the default threshold) continue to pass unchanged, confirming the ordinary refund
+  path is untouched.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same
