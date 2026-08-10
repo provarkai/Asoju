@@ -19,6 +19,14 @@ import { CaseStatus } from '@prisma/client';
  * Review (CommerceService.runQuoteExpirySweep — a quote validity window
  * that's lapsed should let staff re-quote, not leave the case stuck), and
  * any pre-execution state can be cancelled to Closed.
+ *
+ * ON_HOLD is deliberately absent from this map entirely — it never appears
+ * as a `to` for any status, and has no entry of its own as a `from` (so
+ * `TRANSITIONS[ON_HOLD] ?? []` always rejects). Where a held case resumes
+ * *to* is dynamic (wherever it was before, per-case), not a fixed edge a
+ * static map can express, so CasesService.holdCase/resumeCase manage that
+ * status directly via ServiceCase.heldFromStatus rather than through this
+ * generic transition — the only way in or out of ON_HOLD.
  */
 const TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
   [CaseStatus.DRAFT]: [CaseStatus.SUBMITTED, CaseStatus.CLOSED],
@@ -36,6 +44,8 @@ const TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
   [CaseStatus.APPROVED]: [CaseStatus.COMPLETED],
   [CaseStatus.COMPLETED]: [CaseStatus.CLOSED],
   [CaseStatus.CLOSED]: [],
+  // Never reachable via this map — see the ON_HOLD comment above.
+  [CaseStatus.ON_HOLD]: [],
 };
 
 export function assertValidTransition(from: CaseStatus, to: CaseStatus): void {

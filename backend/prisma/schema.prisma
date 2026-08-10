@@ -82,6 +82,15 @@ enum CaseStatus {
   APPROVED
   COMPLETED
   CLOSED
+  /// P0 Tech Platform Requirements §8 "Case Status Model" — "ON HOLD |
+  /// Blocked pending information/decision/condition. | Block removed or
+  /// case cancelled." Deliberately outside the static TRANSITIONS map in
+  /// case-state-machine.ts — where a held case resumes *to* is dynamic
+  /// (whatever it was before), not a fixed edge, so CasesService.holdCase/
+  /// resumeCase manage this status directly rather than going through the
+  /// generic POST /transition, using ServiceCase.heldFromStatus to
+  /// remember the way back.
+  ON_HOLD
 }
 
 /// P0 Technical Build Spec Section 21 "Payment States". PROCESSING and
@@ -541,6 +550,11 @@ model ServiceCase {
   nextAction      String?
   nextActionDueAt DateTime?
   slaTargetAt     DateTime?
+
+  /// P0 Tech Platform Requirements §8 "Case Status Model" — ON_HOLD.
+  /// Where to resume when the hold is lifted (CasesService.resumeCase);
+  /// set only while status is ON_HOLD, cleared on resume.
+  heldFromStatus CaseStatus?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

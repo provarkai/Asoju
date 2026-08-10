@@ -132,6 +132,19 @@ end-to-end against a real Postgres instance:
   (Finance-only) on the Ops case detail page. Covered by `backend/test/direct-costs.e2e-spec.ts` (4
   tests) — negative-control verified: breaking the contribution formula (`revenue` instead of
   `revenue - directCost`) fails the exact-math test; restoring it passes again.
+- **Case ON_HOLD state** (P0 Technology & Platform Requirements Specification v1.0 §8 "Case Status
+  Model" — "ON HOLD | Blocked pending information/decision/condition. | Block removed or case
+  cancelled.") — the case state machine had no way to pause a case at all; every non-terminal status's
+  only "stop" was `CLOSED`, overloaded for both "done" and "cancelled." `CaseStatus.ON_HOLD` is
+  deliberately **outside** the static transition map in `case-state-machine.ts` — where a held case
+  resumes *to* is dynamic (whatever it was before, per case), not a fixed edge a static map can express
+  — so `POST /cases/:caseId/hold` and `POST /cases/:caseId/resume` manage it directly via a new
+  `ServiceCase.heldFromStatus` field, the only way in or out of `ON_HOLD`; the generic
+  `POST /cases/:caseId/transition` can't be used to enter or leave it. `reason` is required to hold
+  (never a silent pause), optional to resume. New "Hold / resume" card on the Ops case detail page; new
+  "On hold" filter on the Ops case queue. Covered by `backend/test/case-hold-resume.e2e-spec.ts` (8
+  tests) — negative-control verified: disabling the "already on hold" guard lets a case be held twice
+  (corrupting `heldFromStatus`) and fails the test; restoring it passes again.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same

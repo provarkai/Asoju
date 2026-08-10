@@ -57,6 +57,7 @@ const FILTERS: { key: string; label: string; match: (c: CaseQueueRow) => boolean
     label: 'No owner',
     match: (c) => !c.owner && !TERMINAL_CASE_STATUSES.includes(c.status),
   },
+  { key: 'onhold', label: 'On hold', match: (c) => c.status === 'ON_HOLD' },
   {
     key: 'triage',
     label: 'Needs triage',

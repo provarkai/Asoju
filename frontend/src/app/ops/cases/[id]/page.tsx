@@ -134,6 +134,8 @@ export default function OpsCaseDetailPage() {
   const [directCostCategory, setDirectCostCategory] = useState('REPRESENTATIVE');
   const [directCostAmount, setDirectCostAmount] = useState('');
   const [directCostNote, setDirectCostNote] = useState('');
+  const [holdReason, setHoldReason] = useState('');
+  const [resumeReason, setResumeReason] = useState('');
 
   function load() {
     setError(null);
@@ -270,6 +272,63 @@ export default function OpsCaseDetailPage() {
             {busy === 'transition' ? 'Applying…' : 'Apply'}
           </button>
         </div>
+      </div>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Hold / resume</h2>
+        <p className="muted">
+          On hold blocks normal transitions until resumed — resuming returns the case to exactly the
+          status it was in before the hold, not a fixed status.
+        </p>
+        {detail.status !== 'ON_HOLD' ? (
+          <div className="actions-row">
+            <input
+              placeholder="Reason (required)"
+              value={holdReason}
+              onChange={(e) => setHoldReason(e.target.value)}
+              style={{ flex: 1, minWidth: '10rem' }}
+            />
+            <button
+              className="btn btn--secondary"
+              disabled={!holdReason || busy !== null}
+              onClick={() =>
+                run('hold', async () => {
+                  await apiFetch(`/cases/${detail.id}/hold`, {
+                    method: 'POST',
+                    body: JSON.stringify({ reason: holdReason }),
+                  });
+                  setHoldReason('');
+                })
+              }
+            >
+              {busy === 'hold' ? 'Holding…' : 'Put on hold'}
+            </button>
+          </div>
+        ) : (
+          <div className="actions-row">
+            <input
+              placeholder="Reason (optional)"
+              value={resumeReason}
+              onChange={(e) => setResumeReason(e.target.value)}
+              style={{ flex: 1, minWidth: '10rem' }}
+            />
+            <button
+              className="btn btn--secondary"
+              disabled={busy !== null}
+              onClick={() =>
+                run('resume', async () => {
+                  await apiFetch(`/cases/${detail.id}/resume`, {
+                    method: 'POST',
+                    body: JSON.stringify({ reason: resumeReason || undefined }),
+                  });
+                  setResumeReason('');
+                })
+              }
+            >
+              {busy === 'resume' ? 'Resuming…' : 'Resume'}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="card">

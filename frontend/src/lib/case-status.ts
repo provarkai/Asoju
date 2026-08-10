@@ -19,6 +19,7 @@ const STATUS_LABELS: Record<string, string> = {
   APPROVED: 'Approved',
   COMPLETED: 'Completed',
   CLOSED: 'Closed',
+  ON_HOLD: 'On hold',
 };
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {

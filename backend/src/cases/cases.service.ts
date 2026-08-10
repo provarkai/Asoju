@@ -625,6 +625,77 @@ export class CasesService {
     return updated;
   }
 
+  /**
+   * P0 Tech Platform §8 "Case Status Model" — ON HOLD: "Blocked pending
+   * information/decision/condition." Deliberately outside the static
+   * TRANSITIONS map (case-state-machine.ts) — where a held case resumes
+   * *to* is dynamic (wherever it was before), not a fixed edge, so this
+   * manages CaseStatus.ON_HOLD directly rather than going through the
+   * generic POST /transition, remembering the way back in
+   * `heldFromStatus`. Reason is always required (HoldCaseDto) — never a
+   * silent pause.
+   */
+  async holdCase(actor: AuthenticatedUser, caseId: string, reason: string) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+    if (serviceCase.status === CaseStatus.ON_HOLD) {
+      throw new BadRequestException('Case is already on hold');
+    }
+    if (serviceCase.status === CaseStatus.COMPLETED || serviceCase.status === CaseStatus.CLOSED) {
+      throw new BadRequestException(`Cannot hold a case in status ${serviceCase.status}`);
+    }
+
+    const updated = await this.prisma.serviceCase.update({
+      where: { id: caseId },
+      data: { status: CaseStatus.ON_HOLD, heldFromStatus: serviceCase.status },
+    });
+
+    await this.prisma.caseStatusHistory.create({
+      data: { caseId, fromStatus: serviceCase.status, toStatus: CaseStatus.ON_HOLD, changedById: actor.id, reason },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.held',
+      metadata: { heldFromStatus: serviceCase.status, reason },
+    });
+
+    return updated;
+  }
+
+  /** Resumes a case from ON_HOLD back to whatever status it was in before
+   * (`heldFromStatus`) — the counterpart to holdCase, same reasoning
+   * about why this bypasses the static transition map. */
+  async resumeCase(actor: AuthenticatedUser, caseId: string, reason?: string) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+    if (serviceCase.status !== CaseStatus.ON_HOLD || !serviceCase.heldFromStatus) {
+      throw new BadRequestException('Case is not on hold');
+    }
+
+    const resumeTo = serviceCase.heldFromStatus;
+    const updated = await this.prisma.serviceCase.update({
+      where: { id: caseId },
+      data: { status: resumeTo, heldFromStatus: null },
+    });
+
+    await this.prisma.caseStatusHistory.create({
+      data: { caseId, fromStatus: CaseStatus.ON_HOLD, toStatus: resumeTo, changedById: actor.id, reason },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.resumed',
+      metadata: { resumedTo: resumeTo, reason },
+    });
+
+    return updated;
+  }
+
   private async requireCustomerProfile(userId: string) {
     const customer = await this.prisma.customer.findUnique({ where: { userId } });
     if (!customer) throw new NotFoundException('No customer profile for this user');

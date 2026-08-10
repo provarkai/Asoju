@@ -13,6 +13,8 @@ import { ApprovalActionDto } from './dto/approval-action.dto';
 import { AddCollaboratorDto } from './dto/add-collaborator.dto';
 import { AssignOwnerDto } from './dto/assign-owner.dto';
 import { SetNextActionDto } from './dto/set-next-action.dto';
+import { HoldCaseDto } from './dto/hold-case.dto';
+import { ResumeCaseDto } from './dto/resume-case.dto';
 
 const STAFF_TRIAGE_ROLES = [Role.CASE_MANAGER, Role.RELATIONSHIP_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
 const STAFF_TRANSITION_ROLES = [Role.CASE_MANAGER, Role.QUALITY_CONTROL, Role.ADMIN, Role.SUPER_ADMIN];
@@ -142,5 +144,22 @@ export class CasesController {
     @Body() dto: SetNextActionDto,
   ) {
     return this.casesService.setNextAction(user, caseId, dto.nextAction, dto.dueAt);
+  }
+
+  /** P0 Tech Platform §8 "Case Status Model" / API Spec `POST
+   * /cases/{case_id}/hold`. Reason required (HoldCaseDto). */
+  @Roles(...OPS_ROLES)
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/hold')
+  holdCase(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Body() dto: HoldCaseDto) {
+    return this.casesService.holdCase(user, caseId, dto.reason);
+  }
+
+  /** Counterpart to holdCase — resumes to wherever the case was before. */
+  @Roles(...OPS_ROLES)
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/resume')
+  resumeCase(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Body() dto: ResumeCaseDto) {
+    return this.casesService.resumeCase(user, caseId, dto.reason);
   }
 }
