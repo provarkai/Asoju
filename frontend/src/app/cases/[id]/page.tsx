@@ -47,6 +47,7 @@ interface QuoteEntry {
   amount: string;
   currency: string;
   acceptedAt: string | null;
+  expiresAt: string | null;
   discountPercent: string | null;
   discountAmount: string | null;
   scAppliedNgn: string | null;
@@ -357,7 +358,13 @@ export default function CaseDetailPage() {
               {q.acceptedAt && (
                 <div className="muted">Accepted {new Date(q.acceptedAt).toLocaleString()}</div>
               )}
-              {!q.acceptedAt && detail.status === 'QUOTED' && (
+              {!q.acceptedAt && q.expiresAt && (
+                <div className="muted">Valid until {new Date(q.expiresAt).toLocaleString()}</div>
+              )}
+              {!q.acceptedAt && detail.status === 'QUOTED' && q.expiresAt && new Date(q.expiresAt) < new Date() && (
+                <p className="error-text">This quote has expired — we&apos;ll follow up with an updated quote shortly.</p>
+              )}
+              {!q.acceptedAt && detail.status === 'QUOTED' && (!q.expiresAt || new Date(q.expiresAt) >= new Date()) && (
                 <button className="btn" disabled={submitting !== null} onClick={() => acceptQuote(q.id)}>
                   {submitting === 'accept-quote' ? 'Accepting…' : 'Accept & proceed to payment'}
                 </button>

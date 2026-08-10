@@ -83,6 +83,15 @@ export class CommerceController {
     return this.commerceService.runPaymentExpirySweep();
   }
 
+  /** Same on-demand-sweep pattern, for QuoteExpirySchedulerService. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin/quotes/run-expiry-sweep')
+  runQuoteExpirySweep() {
+    return this.commerceService.runQuoteExpirySweep();
+  }
+
   /**
    * Single Paystack webhook endpoint for the whole app — real signature
    * verification (PaystackWebhookGuard), not a shared-secret stand-in

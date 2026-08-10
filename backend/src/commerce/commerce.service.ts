@@ -28,6 +28,20 @@ function paymentExpiryHours(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PAYMENT_EXPIRY_HOURS;
 }
 
+const DEFAULT_QUOTE_VALIDITY_HOURS = 24 * 7; // 7 days
+
+/** ASOJU Platform Database Schema & ERD Design v1.0 Section 10 — "Quote
+ * versioning is mandatory... A quote must preserve the exact FX rate
+ * used" — and the API spec's "Expired quotes cannot release execution."
+ * How long a quote stays acceptable before the sweep below reopens the
+ * case for re-quoting — configurable per environment, same pattern as
+ * PAYMENT_EXPIRY_HOURS/USD_TO_NGN_RATE. */
+function quoteValidityHours(): number {
+  const configured = process.env.QUOTE_VALIDITY_HOURS;
+  const parsed = configured ? Number(configured) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_QUOTE_VALIDITY_HOURS;
+}
+
 @Injectable()
 export class CommerceService {
   private readonly logger = new Logger(CommerceService.name);
@@ -104,6 +118,10 @@ export class CommerceService {
         caseId,
         amount,
         currency: dto.currency ?? 'NGN',
+        // ASOJU Platform Database Schema & ERD Design v1.0 Section 10 —
+        // "Quote has validity." Enforced in acceptQuote() below and swept
+        // by runQuoteExpirySweep() — never just decorative.
+        expiresAt: new Date(Date.now() + quoteValidityHours() * 60 * 60 * 1000),
         scopeId: latestScope.id,
         subscriptionId: benefit?.subscriptionId,
         baseAmount: serviceFeeTotal,
@@ -154,6 +172,12 @@ export class CommerceService {
     }
     if (quote.acceptedAt) {
       throw new BadRequestException('Quote already accepted');
+    }
+    // API Specification v1.0 Section 40 "Critical Business Rules" —
+    // "Expired quotes cannot release execution." Never the customer's
+    // browser clock deciding this — always the server's now().
+    if (quote.expiresAt && quote.expiresAt < new Date()) {
+      throw new BadRequestException('This quote has expired — request a new quote for the current terms');
     }
 
     // The point of real commitment — re-validates SC availability against
@@ -459,5 +483,51 @@ export class CommerceService {
     }
 
     return { expired: stale.length };
+  }
+
+  /**
+   * ASOJU Database Schema & ERD Design v1.0 Section 10 / API Specification
+   * Section 40 — "Expired quotes cannot release execution." Rather than
+   * just leaving an expired quote unacceptable (the accept-time check
+   * above), this reopens the case for re-quoting instead of leaving it
+   * stuck QUOTED forever with no path forward — staff get a clear signal
+   * to re-quote, the customer gets told why. Run by
+   * QuoteExpirySchedulerService's hourly cron; also admin-triggerable
+   * (POST /admin/quotes/run-expiry-sweep) for ops/testing.
+   */
+  async runQuoteExpirySweep(): Promise<{ expired: number }> {
+    const now = new Date();
+    const staleQuotes = await this.prisma.quote.findMany({
+      where: {
+        acceptedAt: null,
+        expiresAt: { lt: now },
+        case: { status: CaseStatus.QUOTED },
+      },
+      include: { case: { include: { customer: true } } },
+    });
+
+    for (const quote of staleQuotes) {
+      // A quote is only ever created while the case is UNDER_REVIEW (see
+      // createQuote); re-fetch to guard against two expired quotes on the
+      // same case racing this loop (systemTransitionCase would throw on
+      // the second, which is correct — nothing to revert twice).
+      const current = await this.prisma.serviceCase.findUnique({ where: { id: quote.caseId } });
+      if (!current || current.status !== CaseStatus.QUOTED) continue;
+
+      await this.casesService.systemTransitionCase(quote.caseId, CaseStatus.UNDER_REVIEW, 'Quote expired unaccepted');
+      await this.audit.record({
+        caseId: quote.caseId,
+        actorType: 'system',
+        action: 'quote.expired',
+        metadata: { quoteId: quote.id, expiresAt: quote.expiresAt },
+      });
+      await this.notifications.notify(
+        quote.case.customer.userId,
+        'Your quote has expired',
+        `The quote for ${quote.case.caseNumber} has expired unaccepted — we'll be in touch with an updated quote, or you can reach out if you're ready to proceed.`,
+      );
+    }
+
+    return { expired: staleQuotes.length };
   }
 }

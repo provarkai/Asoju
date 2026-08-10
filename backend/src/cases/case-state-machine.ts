@@ -15,13 +15,16 @@ import { CaseStatus } from '@prisma/client';
  *   Completed -> Closed
  *
  * Plus: QC rework loops back to In Progress, Additional Work loops back to
- * In Progress, and any pre-execution state can be cancelled to Closed.
+ * In Progress, an unaccepted expired quote loops QUOTED back to Under
+ * Review (CommerceService.runQuoteExpirySweep — a quote validity window
+ * that's lapsed should let staff re-quote, not leave the case stuck), and
+ * any pre-execution state can be cancelled to Closed.
  */
 const TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
   [CaseStatus.DRAFT]: [CaseStatus.SUBMITTED, CaseStatus.CLOSED],
   [CaseStatus.SUBMITTED]: [CaseStatus.UNDER_REVIEW, CaseStatus.CLOSED],
   [CaseStatus.UNDER_REVIEW]: [CaseStatus.QUOTED, CaseStatus.CLOSED],
-  [CaseStatus.QUOTED]: [CaseStatus.AWAITING_PAYMENT, CaseStatus.CLOSED],
+  [CaseStatus.QUOTED]: [CaseStatus.AWAITING_PAYMENT, CaseStatus.UNDER_REVIEW, CaseStatus.CLOSED],
   [CaseStatus.AWAITING_PAYMENT]: [CaseStatus.SCHEDULED, CaseStatus.CLOSED],
   [CaseStatus.SCHEDULED]: [CaseStatus.ASSIGNED, CaseStatus.CLOSED],
   [CaseStatus.ASSIGNED]: [CaseStatus.IN_PROGRESS, CaseStatus.SCHEDULED],

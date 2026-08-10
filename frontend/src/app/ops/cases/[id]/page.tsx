@@ -44,6 +44,7 @@ interface CaseDetail {
     amount: string;
     currency: string;
     acceptedAt: string | null;
+    expiresAt: string | null;
     baseAmount: string | null;
     nonServiceFeeAmount: string | null;
     discountPercent: string | null;
@@ -356,16 +357,28 @@ export default function OpsCaseDetailPage() {
               <strong>{q.currency} {Number(q.amount).toLocaleString()}</strong>
             </div>
             <p className="muted" style={{ margin: 0 }}>
-              {q.acceptedAt ? `Accepted ${new Date(q.acceptedAt).toLocaleDateString()}` : 'Awaiting customer acceptance'}
+              {q.acceptedAt
+                ? `Accepted ${new Date(q.acceptedAt).toLocaleDateString()}`
+                : q.expiresAt && new Date(q.expiresAt) < new Date()
+                  ? 'Expired unaccepted'
+                  : 'Awaiting customer acceptance'}
             </p>
+            {!q.acceptedAt && q.expiresAt && (
+              <p className="muted" style={{ margin: 0, fontSize: '0.8rem' }}>
+                Valid until {new Date(q.expiresAt).toLocaleString()}
+              </p>
+            )}
           </div>
         ))}
+        {detail.status === 'UNDER_REVIEW' && detail.quotes.some((q) => q.expiresAt && !q.acceptedAt && new Date(q.expiresAt) < new Date()) && (
+          <p className="muted">The previous quote above expired unaccepted — issue a new one below.</p>
+        )}
         {detail.quotes.length === 0 && detail.status === 'UNDER_REVIEW' && !scope?.confirmedAt && (
           <p className="muted">
             {scope ? 'The customer needs to confirm the scope above before a quote can be issued.' : 'Propose a scope above and have the customer confirm it before issuing a quote.'}
           </p>
         )}
-        {detail.quotes.length === 0 && detail.status === 'UNDER_REVIEW' && scope?.confirmedAt && (
+        {detail.status === 'UNDER_REVIEW' && scope?.confirmedAt && (
           <div>
             {quoteLines.map((line, i) => (
               <div key={i} className="actions-row" style={{ marginBottom: '0.4rem' }}>

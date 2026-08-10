@@ -50,6 +50,18 @@ end-to-end against a real Postgres instance:
   `backend/test/quote-line-categories.e2e-spec.ts` (4 tests) — negative-control verified: computing the
   discount against the whole quote (service fee + external + professional) instead of the service fee
   alone fails the precise-math test; restoring it passes again.
+- **Quote expiry** (ASOJU Database Schema & ERD Design v1.0 Section 10 / API Specification Section 40
+  "Critical Business Rules" — "Quote has validity... Expired quotes cannot release execution") —
+  `Quote.expiresAt` existed in the schema with nothing ever setting or checking it. `createQuote` now
+  sets it to `QUOTE_VALIDITY_HOURS` out (default 7 days); `acceptQuote` rejects an expired quote outright
+  (server clock, never the customer's browser). An hourly `QuoteExpirySchedulerService` sweep (plus
+  `POST /admin/quotes/run-expiry-sweep` for ops/testing, same on-demand pattern as the payment-expiry
+  sweep) reopens a case with an unaccepted, expired quote from `QUOTED` back to `UNDER_REVIEW` so staff
+  can re-quote instead of the case sitting stuck, and notifies the customer. Both the customer and ops
+  quote views show the validity window and an "expired" state. Covered by
+  `backend/test/quote-expiry.e2e-spec.ts` (5 tests) — negative-control verified: disabling the
+  accept-time expiry check, and separately the sweep's cutoff comparison, each independently fail their
+  test; restoring both passes again.
 - Payment status changes **only** via a real Paystack integration (`POST /api/invoices/:id/pay` starts
   hosted checkout; `POST /api/payments/webhook/paystack` verifies Paystack's actual HMAC-SHA512
   signature over the raw request body, not a shared-secret stand-in — Non-Negotiable #4, never a
