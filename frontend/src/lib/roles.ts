@@ -11,6 +11,10 @@ export const OPS_ROLES = [
 
 export const ADMIN_ROLES = ['ADMIN', 'SUPER_ADMIN'];
 
+// Matches backend ConciergeController's FINANCE_ROLES — who can edit
+// membership plan pricing (P0 UX Spec "Admin Screen — Pricing Configuration").
+export const FINANCE_ROLES = ['FINANCE', 'ADMIN', 'SUPER_ADMIN'];
+
 // Section 5.4 — Field Agent App / Provider Portal (shared workflow for MVP).
 export const FIELD_ROLES = ['FIELD_AGENT', 'PROVIDER'];
 

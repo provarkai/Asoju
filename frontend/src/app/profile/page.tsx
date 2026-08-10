@@ -24,6 +24,7 @@ interface AccountCaseSummary { id: string; caseNumber: string; serviceType: stri
 interface AccountMember { id: string; fullName: string; email: string | null; cases: AccountCaseSummary[] }
 interface MyAccount { account: { id: string; name: string; type: string }; members: AccountMember[] }
 interface SubscriptionInvoice { id: string; periodStart: string; periodEnd: string; amount: string; currency: string; status: string }
+interface PlanConfig { plan: 'PRIORITY' | 'PREMIUM'; priceUsd: number; scGrantUsd: number; discountPercent: number; eligibleRequestsPerMonth: number }
 
 // Section 5.1 P1 — "saved properties/assets, multiple beneficiaries".
 export default function ProfilePage() {
@@ -33,6 +34,7 @@ export default function ProfilePage() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [referral, setReferral] = useState<ReferralSummary | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
+  const [planConfigs, setPlanConfigs] = useState<PlanConfig[]>([]);
   const [myAccount, setMyAccount] = useState<MyAccount | null>(null);
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [invoices, setInvoices] = useState<SubscriptionInvoice[]>([]);
@@ -56,6 +58,7 @@ export default function ProfilePage() {
     apiFetch<Asset[]>('/me/assets').then(setAssets).catch((e) => setError(e.message));
     apiFetch<ReferralSummary>('/me/referral').then(setReferral).catch((e) => setError(e.message));
     apiFetch<SubscriptionSummary | null>('/me/subscription').then(setSubscription).catch((e) => setError(e.message));
+    apiFetch<PlanConfig[]>('/membership-plans').then(setPlanConfigs).catch(() => {});
     apiFetch<MyAccount | null>('/me/account').then(setMyAccount).catch((e) => setError(e.message));
     apiFetch<SubscriptionInvoice[]>('/me/subscription/invoices').then(setInvoices).catch(() => {});
     apiFetch<{ mfaEnabled: boolean }>('/auth/me').then((me) => setMfaEnabled(me.mfaEnabled)).catch(() => {});
@@ -205,12 +208,7 @@ export default function ProfilePage() {
               credit, and a discount on eligible fees.
             </p>
             <div className="actions-row" style={{ flexWrap: 'wrap', marginBottom: '1rem' }}>
-              {(
-                [
-                  { plan: 'PRIORITY' as const, price: 99, sc: 50, discount: 10, requests: 2 },
-                  { plan: 'PREMIUM' as const, price: 299, sc: 150, discount: 15, requests: 5 },
-                ]
-              ).map((p) => (
+              {planConfigs.map((p) => (
                 <label
                   key={p.plan}
                   className="card"
@@ -228,9 +226,9 @@ export default function ProfilePage() {
                     style={{ marginRight: '0.5rem' }}
                   />
                   <strong>{p.plan === 'PREMIUM' ? 'Premium' : 'Priority'}</strong>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>${p.price}/mo</div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>${p.priceUsd}/mo</div>
                   <div className="muted" style={{ fontSize: '0.85rem' }}>
-                    ${p.sc} SC · {p.discount}% off eligible fees · up to {p.requests} eligible requests/mo
+                    ${p.scGrantUsd} SC · {p.discountPercent}% off eligible fees · up to {p.eligibleRequestsPerMonth} eligible requests/mo
                   </div>
                 </label>
               ))}

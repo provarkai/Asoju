@@ -1,5 +1,5 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { MembershipPlan, Role } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -7,9 +7,11 @@ import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-use
 import { ConciergeService } from './concierge.service';
 import { SubscriptionBillingService } from './subscription-billing.service';
 import { ScLedgerService } from './sc-ledger.service';
+import { PlanConfigService } from './plan-config.service';
 import { AssignRmDto } from './dto/assign-rm.dto';
 import { SubscribeDto } from './dto/subscribe.dto';
 import { ScAdjustmentDto } from './dto/sc-adjustment.dto';
+import { UpdatePlanConfigDto } from './dto/update-plan-config.dto';
 
 const FINANCE_ROLES = [Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
 
@@ -20,7 +22,31 @@ export class ConciergeController {
     private readonly conciergeService: ConciergeService,
     private readonly billingService: SubscriptionBillingService,
     private readonly scLedgerService: ScLedgerService,
+    private readonly planConfigService: PlanConfigService,
   ) {}
+
+  // -- Plan pricing (P0 UX Spec "Admin Screen — Pricing Configuration") ---
+
+  /** Broadly accessible to any logged-in user — the customer-facing plan
+   * picker needs live pricing too, and there's no commercial reason to
+   * hide current list pricing from someone who's already authenticated. */
+  @Get('membership-plans')
+  listPlanConfigs() {
+    return this.planConfigService.listConfigs();
+  }
+
+  @Roles(...FINANCE_ROLES)
+  @Patch('admin/membership-plans/:plan')
+  updatePlanConfig(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('plan') plan: string,
+    @Body() dto: UpdatePlanConfigDto,
+  ) {
+    if (!Object.values(MembershipPlan).includes(plan as MembershipPlan)) {
+      throw new BadRequestException(`Unknown plan ${plan}`);
+    }
+    return this.planConfigService.updateConfig(user, plan as MembershipPlan, dto);
+  }
 
   // -- Customer self-service --------------------------------------------
 

@@ -115,21 +115,33 @@ now built and verified end-to-end**:
   sees their book from `/ops/portfolio`; a Concierge subscriber's new cases default to that tier.
 - **Membership plans + SC ledger** (ASOJU P0 Technical Build Spec v1.0 Section 17/18, independent
   readiness review follow-up) — subscribing to Concierge now means choosing Priority ($99/mo, $50 SC,
-  10% discount, 2 eligible requests/mo) or Premium ($299/mo, $150 SC, 15%, 5/mo), configured in
-  `backend/src/concierge/membership-plans.ts`. SC is a real append-only ledger
-  (`ScLedgerEntry`/`ScLedgerService`, GRANT/DEBIT/REVERSAL/ADJUSTMENT/EXPIRY) — balance is always
-  computed from the ledger, never a stored column a request can overwrite. `MembershipService` applies
-  the discount/SC as a read-only *preview* when staff quote a CONCIERGE-tier case (`POST
-  /cases/:id/quotes`), and only actually debits the ledger when the customer accepts — re-validated
-  against the live balance at that moment, not the stale preview, and capped so the ledger can never go
-  negative. A manual Finance/Admin adjustment (`POST /admin/subscriptions/:id/sc-adjustment`, UI at
-  `/ops/concierge/:subscriptionId`) always requires a reason and is itself just another ledger row.
-  Membership pricing is USD; the NGN amount actually charged/applied uses a manually configured
-  `USD_TO_NGN_RATE` (not a live FX feed — see the env template), locked onto each subscription at
-  subscribe time so a later rate change never retroactively alters an existing member's price. Covered
-  by `backend/test/membership.e2e-spec.ts` (8 tests, real Postgres) — confirmed to actually enforce the
-  numbers, not just plausible-looking code: verified live that a broken discount calculation fails 3 of
-  the 8 tests, restoring it passes all 8 again.
+  10% discount, 2 eligible requests/mo) or Premium ($299/mo, $150 SC, 15%, 5/mo). SC is a real
+  append-only ledger (`ScLedgerEntry`/`ScLedgerService`, GRANT/DEBIT/REVERSAL/ADJUSTMENT/EXPIRY) —
+  balance is always computed from the ledger, never a stored column a request can overwrite.
+  `MembershipService` applies the discount/SC as a read-only *preview* when staff quote a CONCIERGE-tier
+  case (`POST /cases/:id/quotes`), and only actually debits the ledger when the customer accepts —
+  re-validated against the live balance at that moment, not the stale preview, and capped so the ledger
+  can never go negative. A manual Finance/Admin adjustment (`POST
+  /admin/subscriptions/:id/sc-adjustment`, UI at `/ops/concierge/:subscriptionId`) always requires a
+  reason and is itself just another ledger row. Membership pricing is USD; the NGN amount actually
+  charged/applied uses a manually configured `USD_TO_NGN_RATE` (not a live FX feed — see the env
+  template), locked onto each subscription at subscribe time so a later rate change never retroactively
+  alters an existing member's price. Covered by `backend/test/membership.e2e-spec.ts` (8 tests, real
+  Postgres) — confirmed to actually enforce the numbers, not just plausible-looking code: verified live
+  that a broken discount calculation fails 3 of the 8 tests, restoring it passes all 8 again.
+- **Admin-configurable plan pricing** (P0 UX Spec "Admin Screen — Pricing Configuration") — the four
+  numbers above (price, SC grant, discount%, eligible requests/mo) are no longer a code constant; they
+  live in `MembershipPlanConfig` (one row per plan, seeded by migration with the original values) and
+  are read live by `PlanConfigService.getConfig()` everywhere pricing used to be hardcoded. Finance/Admin
+  edit them from `/ops/concierge` (`PATCH /admin/membership-plans/:plan`, audited with before/after
+  values); anyone logged in can read current pricing (`GET /membership-plans`), which is what the
+  `/profile` plan picker now fetches instead of showing baked-in numbers. The same locked-vs-live split
+  from the SC ledger work carries over deliberately: a price edit only affects *new* subscribers — an
+  already-active `Subscription` keeps the `priceUsd`/`fxRate`/`amount` it locked in at subscribe time —
+  while a discount/SC/allowance edit applies live to every current member's very next quote or renewal.
+  Covered by `backend/test/plan-config.e2e-spec.ts` (7 tests) — verified with the same negative-control
+  discipline: disabling the Finance/Admin role check fails the 403 test, and hardcoding the discount back
+  into `MembershipService.previewBenefit()` fails the live-read test; restoring both passes all 7 again.
 - **Scope, versioned and confirmed before a quote can exist** (P0 Technical Build Spec Section 14 /
   Engineering Backlog EPIC F, same follow-up) — a `CaseScope` (objective, tasks, deliverables,
   exclusions, evidence requirements) is now a real prerequisite for `POST /cases/:id/quotes`, not just a

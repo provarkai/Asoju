@@ -1,25 +1,12 @@
-import { MembershipPlan } from '@prisma/client';
-
 /**
- * P0 Technical Build Spec v1.0 Section 17 "Membership Engine" — pricing is
- * a business rule, not a database row (yet): kept as a code constant here,
- * matching this codebase's existing convention for other business-rule
- * tables (e.g. checklist-templates.ts). Admin-configurable pricing
- * (P0 UX Spec's "Admin Screen — Pricing Configuration") is a separate,
- * larger increment layered on top of this later, not a blocker to having
- * the commercial rules actually enforced now.
+ * P0 Technical Build Spec v1.0 Section 17 "Membership Engine" — plan
+ * pricing/benefits (price, SC grant, discount%, eligible requests/month)
+ * used to live here as a code constant. That's now DB-backed via
+ * MembershipPlanConfig / PlanConfigService (P0 UX Spec's "Admin Screen —
+ * Pricing Configuration"), so Finance/Admin can adjust it without a
+ * deploy — see plan-config.service.ts. This file now only holds the FX
+ * helper, which is unrelated to per-plan pricing.
  */
-export interface MembershipPlanConfig {
-  priceUsd: number;
-  scGrantUsd: number;
-  discountPercent: number;
-  eligibleRequestsPerMonth: number;
-}
-
-export const MEMBERSHIP_PLANS: Record<MembershipPlan, MembershipPlanConfig> = {
-  [MembershipPlan.PRIORITY]: { priceUsd: 99, scGrantUsd: 50, discountPercent: 10, eligibleRequestsPerMonth: 2 },
-  [MembershipPlan.PREMIUM]: { priceUsd: 299, scGrantUsd: 150, discountPercent: 15, eligibleRequestsPerMonth: 5 },
-};
 
 const DEFAULT_USD_TO_NGN_RATE = 1600;
 

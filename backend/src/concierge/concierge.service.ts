@@ -6,7 +6,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ScLedgerService } from './sc-ledger.service';
 import { MembershipService } from './membership.service';
-import { MEMBERSHIP_PLANS, usdToNgnRate } from './membership-plans';
+import { PlanConfigService } from './plan-config.service';
+import { usdToNgnRate } from './membership-plans';
 
 /**
  * Section 12 P1 "Concierge workflow" — the subscription/relationship-
@@ -24,6 +25,7 @@ export class ConciergeService {
     private readonly notifications: NotificationsService,
     private readonly scLedger: ScLedgerService,
     private readonly membership: MembershipService,
+    private readonly planConfig: PlanConfigService,
   ) {}
 
   /** P0 Technical Build Spec Section 17 — Priority ($99/mo, $50 SC, 10%
@@ -40,7 +42,7 @@ export class ConciergeService {
     });
     if (existing) throw new BadRequestException('Already subscribed to Concierge');
 
-    const planConfig = MEMBERSHIP_PLANS[plan];
+    const planConfig = await this.planConfig.getConfig(plan);
     const fxRate = usdToNgnRate();
 
     const subscription = await this.prisma.subscription.create({
@@ -79,7 +81,7 @@ export class ConciergeService {
     });
     if (!subscription) return null;
 
-    const planConfig = MEMBERSHIP_PLANS[subscription.plan];
+    const planConfig = await this.planConfig.getConfig(subscription.plan);
     const [scBalanceUsd, eligibleUsedThisPeriod] = await Promise.all([
       this.scLedger.getBalanceUsd(subscription.id),
       this.membership.getEligibleUsageThisPeriod(subscription),

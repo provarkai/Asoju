@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { CaseTier, Prisma, Subscription, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScLedgerService } from './sc-ledger.service';
-import { MEMBERSHIP_PLANS } from './membership-plans';
+import { PlanConfigService } from './plan-config.service';
 
 const BILLING_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -26,6 +26,7 @@ export class MembershipService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scLedger: ScLedgerService,
+    private readonly planConfig: PlanConfigService,
   ) {}
 
   async getActiveSubscription(customerId: string): Promise<Subscription | null> {
@@ -68,7 +69,7 @@ export class MembershipService {
     const subscription = await this.getActiveSubscription(customerId);
     if (!subscription) return null;
 
-    const plan = MEMBERSHIP_PLANS[subscription.plan];
+    const plan = await this.planConfig.getConfig(subscription.plan);
     const used = await this.getEligibleUsageThisPeriod(subscription);
     if (used >= plan.eligibleRequestsPerMonth) return null;
 

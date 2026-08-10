@@ -6,7 +6,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaystackService } from '../payments/paystack.service';
 import { ScLedgerService } from './sc-ledger.service';
-import { MEMBERSHIP_PLANS } from './membership-plans';
+import { PlanConfigService } from './plan-config.service';
 
 /** Reference prefix distinguishing subscription-billing Paystack references
  * from case-invoice ones (CASE_INVOICE_REFERENCE_PREFIX in commerce.service)
@@ -40,6 +40,7 @@ export class SubscriptionBillingService {
     private readonly notifications: NotificationsService,
     private readonly paystack: PaystackService,
     private readonly scLedger: ScLedgerService,
+    private readonly planConfig: PlanConfigService,
   ) {}
 
   /** Daily sweep (see SubscriptionBillingSchedulerService), also triggerable
@@ -156,7 +157,8 @@ export class SubscriptionBillingService {
     // renewal that never gets paid never hands out free SC that would
     // otherwise need clawing back.
     const plan = invoice.subscription.plan as MembershipPlan;
-    await this.scLedger.grant(invoice.subscriptionId, MEMBERSHIP_PLANS[plan].scGrantUsd);
+    const planConfig = await this.planConfig.getConfig(plan);
+    await this.scLedger.grant(invoice.subscriptionId, planConfig.scGrantUsd);
 
     await this.audit.record({
       actorType: 'system',
