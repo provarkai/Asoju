@@ -10,6 +10,7 @@ import { PaystackService } from '../payments/paystack.service';
 import { MembershipService } from '../concierge/membership.service';
 import { ScopeService } from '../scope/scope.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
+import { RefundPaymentDto } from './dto/refund-payment.dto';
 
 /** Prefix distinguishing case-invoice Paystack references from subscription
  * ones so a single webhook endpoint can route both (see PaystackService). */
@@ -229,10 +230,26 @@ export class CommerceService {
     const expectedKobo = Math.round(Number(payment.amount) * 100);
     if (expectedKobo !== amountKobo) {
       // Signature is valid (Paystack really sent this), but the amount
-      // doesn't match what we initialized — surface loudly rather than
-      // silently trusting a mismatched figure.
+      // doesn't match what we initialized. P0 Technical Build Spec Section
+      // 21 — "RECONCILIATION_REQUIRED: Mismatch requiring Finance review."
+      // Persisted (not just logged, and not silently trusted either) so
+      // Finance actually sees it rather than the payment sitting PENDING
+      // forever with no distinguishing flag that anything went wrong.
       this.logger.error(`Paystack amount mismatch for ${reference}: expected ${expectedKobo}kobo, got ${amountKobo}kobo`);
-      throw new BadRequestException('Payment amount does not match invoice');
+      if (payment.status !== PaymentStatus.PAID) {
+        await this.prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.RECONCILIATION_REQUIRED } });
+        await this.prisma.serviceCase.update({
+          where: { id: payment.invoice.caseId },
+          data: { paymentStatus: PaymentStatus.RECONCILIATION_REQUIRED },
+        });
+        await this.audit.record({
+          caseId: payment.invoice.caseId,
+          actorType: 'system',
+          action: 'payment.reconciliation_required',
+          metadata: { paymentId: payment.id, providerReference: reference, expectedKobo, receivedKobo: amountKobo },
+        });
+      }
+      throw new BadRequestException('Payment amount does not match invoice — flagged for Finance review');
     }
 
     if (payment.status === PaymentStatus.PAID) {
@@ -315,5 +332,62 @@ export class CommerceService {
     );
 
     return updated;
+  }
+
+  /**
+   * P0 Technical Build Spec Section 20/21 "Payment Architecture / Payment
+   * States" — "Support failed, pending, reversed and refunded states."
+   * Finance/Admin only (enforced by the controller's @Roles). Always
+   * requires a reason (RefundPaymentDto), same discipline as
+   * ScLedgerService.adjust — an authorized human action with a recorded
+   * reason is the source of truth here, not a webhook (unlike marking a
+   * payment PAID, this is money leaving on ASOJU's own initiative, not a
+   * customer's claim — Non-Negotiable #4 doesn't apply the same way).
+   * Full or partial: omitting `amount` refunds whatever's left; providing
+   * one partially refunds it, and the Payment moves to PARTIALLY_REFUNDED
+   * rather than REFUNDED until the full amount has been returned.
+   */
+  async refundPayment(actor: AuthenticatedUser, paymentId: string, dto: RefundPaymentDto) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { invoice: { include: { case: { include: { customer: true } } } } },
+    });
+    if (!payment) throw new NotFoundException('Payment not found');
+    if (payment.status !== PaymentStatus.PAID && payment.status !== PaymentStatus.PARTIALLY_REFUNDED) {
+      throw new BadRequestException(`Cannot refund a payment in status ${payment.status}`);
+    }
+
+    const alreadyRefunded = await this.prisma.refund.aggregate({ where: { paymentId }, _sum: { amount: true } });
+    const refundedSoFar = Number(alreadyRefunded._sum.amount ?? 0);
+    const remaining = Number(payment.amount) - refundedSoFar;
+    const requested = dto.amount ?? remaining;
+    if (requested <= 0 || requested > remaining) {
+      throw new BadRequestException(`Refund amount must be between 0 and the remaining refundable amount (${remaining})`);
+    }
+
+    const result = await this.paystack.refundTransaction(payment.providerReference, Math.round(requested * 100));
+
+    const refund = await this.prisma.refund.create({
+      data: { paymentId, amount: requested, reason: dto.reason, actorId: actor.id },
+    });
+
+    const newStatus = requested + refundedSoFar >= Number(payment.amount) ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED;
+    const updatedPayment = await this.prisma.payment.update({ where: { id: paymentId }, data: { status: newStatus } });
+    await this.prisma.serviceCase.update({ where: { id: payment.invoice.caseId }, data: { paymentStatus: newStatus } });
+
+    await this.audit.record({
+      caseId: payment.invoice.caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'payment.refunded',
+      metadata: { paymentId, refundId: refund.id, amount: requested, reason: dto.reason, newStatus, dryRun: result.dryRun },
+    });
+    await this.notifications.notify(
+      payment.invoice.case.customer.userId,
+      'A refund has been issued',
+      `A refund of ${payment.currency} ${requested.toLocaleString()} has been issued for ${payment.invoice.case.caseNumber}.`,
+    );
+
+    return { refund, payment: updatedPayment };
   }
 }

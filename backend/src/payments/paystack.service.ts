@@ -17,6 +17,10 @@ export interface InitializeTransactionResult {
   dryRun: boolean;
 }
 
+export interface RefundTransactionResult {
+  dryRun: boolean;
+}
+
 /**
  * Section 12 "real payment-provider integration" — replaces
  * WebhookSecretGuard's shared-secret stand-in with Paystack's actual
@@ -80,6 +84,40 @@ export class PaystackService {
       reference: body.data.reference,
       dryRun: false,
     };
+  }
+
+  /**
+   * P0 Technical Build Spec Section 20/21 "Payment Architecture" — "Support
+   * failed, pending, reversed and refunded states." Same dry-run pattern as
+   * initializeTransaction: without PAYSTACK_SECRET_KEY this logs and
+   * returns without calling out, so CommerceService.refundPayment can
+   * record the refund locally (the authorized-actor + reason + audit trail
+   * is the actual source of truth here, same as ScLedgerService.adjust)
+   * even in an environment with no live payment provider configured.
+   */
+  async refundTransaction(providerReference: string, amountKobo: number): Promise<RefundTransactionResult> {
+    if (!this.secretKey) {
+      this.logger.warn(
+        `[dry-run] Paystack refund skipped (PAYSTACK_SECRET_KEY not set) — reference=${providerReference} amountKobo=${amountKobo}`,
+      );
+      return { dryRun: true };
+    }
+
+    const res = await fetch('https://api.paystack.co/refund', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.secretKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ transaction: providerReference, amount: amountKobo }),
+    });
+
+    const body = (await res.json().catch(() => ({}))) as { status?: boolean; message?: string };
+    if (!res.ok || !body.status) {
+      throw new Error(`Paystack refund failed: ${body.message ?? res.statusText}`);
+    }
+
+    return { dryRun: false };
   }
 
   /** HMAC-SHA512 over the raw request body — Paystack's `x-paystack-signature` scheme. */

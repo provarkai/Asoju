@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { apiFetch, ApiError } from '@/lib/api';
 import { uploadFile } from '@/lib/upload';
 import { useOpsGuard } from '@/lib/useOpsGuard';
-import { ADMIN_ROLES } from '@/lib/roles';
+import { ADMIN_ROLES, FINANCE_ROLES } from '@/lib/roles';
 import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
 
 const CASE_STATUSES = [
@@ -40,6 +40,12 @@ interface CaseDetail {
   documents: { id: string; label: string; createdAt: string; visibility: string; restrictedToAssignmentId: string | null; viewUrl: string }[];
   reports: { id: string; summary: string; limitation: string | null; createdAt: string }[];
   quotes: { id: string; amount: string; currency: string; acceptedAt: string | null }[];
+  invoices: {
+    id: string;
+    amount: string;
+    currency: string;
+    payments: { id: string; status: string; amount: string; currency: string; providerReference: string }[];
+  }[];
   approvals: { id: string; action: string; note: string | null; createdAt: string }[];
   recurringSchedule: { id: string; cadenceDays: number; nextRunAt: string; active: boolean } | null;
 }
@@ -70,6 +76,8 @@ export default function OpsCaseDetailPage() {
   const [nextStatus, setNextStatus] = useState('');
   const [transitionReason, setTransitionReason] = useState('');
   const [quoteAmount, setQuoteAmount] = useState('');
+  const [refundAmount, setRefundAmount] = useState<Record<string, string>>({});
+  const [refundReason, setRefundReason] = useState<Record<string, string>>({});
   const [assignRole, setAssignRole] = useState<'FIELD_AGENT' | 'PROVIDER'>('FIELD_AGENT');
   const [assignTargetId, setAssignTargetId] = useState('');
   const [qcOutcome, setQcOutcome] = useState('APPROVED');
@@ -340,6 +348,58 @@ export default function OpsCaseDetailPage() {
           <p className="muted">A quote can only be issued while the case is under review.</p>
         )}
       </div>
+
+      {user && FINANCE_ROLES.includes(user.role) && detail.invoices.some((inv) => inv.payments.length > 0) && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Payments</h2>
+          {detail.invoices.flatMap((inv) => inv.payments).map((p) => {
+            const refundable = p.status === 'PAID' || p.status === 'PARTIALLY_REFUNDED';
+            return (
+              <div key={p.id} className="case-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.4rem' }}>
+                <div className="actions-row" style={{ justifyContent: 'space-between' }}>
+                  <span>{p.currency} {Number(p.amount).toLocaleString()} · {p.providerReference}</span>
+                  <span className={p.status === 'PAID' ? 'badge' : p.status === 'RECONCILIATION_REQUIRED' ? 'error-text' : 'muted'}>
+                    {p.status.replace(/_/g, ' ').toLowerCase()}
+                  </span>
+                </div>
+                {refundable && (
+                  <div className="actions-row">
+                    <input
+                      type="number"
+                      placeholder="Amount (blank = full remaining)"
+                      value={refundAmount[p.id] ?? ''}
+                      onChange={(e) => setRefundAmount((r) => ({ ...r, [p.id]: e.target.value }))}
+                      style={{ maxWidth: '12rem' }}
+                    />
+                    <input
+                      placeholder="Reason (required)"
+                      value={refundReason[p.id] ?? ''}
+                      onChange={(e) => setRefundReason((r) => ({ ...r, [p.id]: e.target.value }))}
+                    />
+                    <button
+                      className="btn btn--secondary"
+                      disabled={busy !== null || !refundReason[p.id]}
+                      onClick={() =>
+                        run(`refund-${p.id}`, () =>
+                          apiFetch(`/admin/payments/${p.id}/refund`, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                              amount: refundAmount[p.id] ? Number(refundAmount[p.id]) : undefined,
+                              reason: refundReason[p.id],
+                            }),
+                          }),
+                        )
+                      }
+                    >
+                      {busy === `refund-${p.id}` ? 'Refunding…' : 'Issue refund'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Assignment</h2>

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, HttpCode, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -10,8 +10,10 @@ import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-use
 import { CommerceService, CASE_INVOICE_REFERENCE_PREFIX } from './commerce.service';
 import { SubscriptionBillingService, SUBSCRIPTION_INVOICE_REFERENCE_PREFIX } from '../concierge/subscription-billing.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
+import { RefundPaymentDto } from './dto/refund-payment.dto';
 
 const STAFF_QUOTE_ROLES = [Role.CASE_MANAGER, Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
+const FINANCE_ROLES = [Role.FINANCE, Role.ADMIN, Role.SUPER_ADMIN];
 
 interface PaystackChargeEvent {
   event: string;
@@ -51,6 +53,22 @@ export class CommerceController {
   @Post('invoices/:invoiceId/pay')
   initiatePayment(@CurrentUser() user: AuthenticatedUser, @Param('invoiceId') invoiceId: string) {
     return this.commerceService.initiatePayment(user, invoiceId);
+  }
+
+  /** P0 Technical Build Spec Section 20/21 "Payment Architecture" —
+   * Finance/Admin-only full or partial refund. `amount` in the body is
+   * optional (omit for a full refund of whatever's left); `reason` is
+   * always required. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...FINANCE_ROLES)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin/payments/:paymentId/refund')
+  refundPayment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: RefundPaymentDto,
+  ) {
+    return this.commerceService.refundPayment(user, paymentId, dto);
   }
 
   /**

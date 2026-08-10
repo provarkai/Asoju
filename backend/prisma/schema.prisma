@@ -84,11 +84,21 @@ enum CaseStatus {
   CLOSED
 }
 
+/// P0 Technical Build Spec Section 21 "Payment States". PROCESSING and
+/// EXPIRED are the two states this doesn't yet set anywhere (they'd need,
+/// respectively, a provider-status poll and a payment-window timeout
+/// sweep — real, but a separate increment, not this one); PARTIALLY_REFUNDED
+/// and RECONCILIATION_REQUIRED are wired into real behavior in
+/// CommerceService (refundPayment / the amount-mismatch path).
 enum PaymentStatus {
   PENDING
+  PROCESSING
   PAID
   FAILED
+  EXPIRED
   REFUNDED
+  PARTIALLY_REFUNDED
+  RECONCILIATION_REQUIRED
 }
 
 /// Section 8.3 — Evidence levels. Never conflate these.
@@ -899,12 +909,17 @@ model Payment {
   refunds Refund[]
 }
 
+/// A Finance-initiated reversal — distinct from ScLedgerEntry's REVERSAL
+/// (that's a Concierge SC credit; this is real money). Always requires an
+/// authorized actor and a reason (CommerceService.refundPayment), same
+/// discipline as ScLedgerService.adjust — never a silent balance edit.
 model Refund {
   id        String   @id @default(uuid())
   paymentId String
   payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   amount    Decimal  @db.Decimal(12, 2)
   reason    String?
+  actorId   String?
   createdAt DateTime @default(now())
 }
 

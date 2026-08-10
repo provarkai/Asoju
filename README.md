@@ -41,6 +41,20 @@ end-to-end against a real Postgres instance:
   signature over the raw request body, not a shared-secret stand-in — Non-Negotiable #4, never a
   customer-facing screenshot) → `SCHEDULED`, and the case-status-history correctly attributes that
   transition to `system`, not a fake user. See "Payments" in Notes below for what "verified" means here.
+- **Refunds** (P0 Technical Build Spec Section 20/21 "Payment Architecture / Payment States") — a
+  `Refund` model existed in the schema with zero call sites; `POST /admin/payments/:paymentId/refund`
+  (Finance/Admin/SuperAdmin only, UI on the Ops case page) is now the real thing: full or partial,
+  always requires a reason (same discipline as the SC ledger's manual adjustment), calls
+  `PaystackService.refundTransaction` (dry-run-friendly like every other Paystack call without
+  `PAYSTACK_SECRET_KEY`), and moves the Payment to `PARTIALLY_REFUNDED` or `REFUNDED` depending on
+  whether anything's still owed — never lets a refund exceed what's left. `PaymentStatus` now carries
+  all eight of the spec's states; the webhook's amount-mismatch path also now sets
+  `RECONCILIATION_REQUIRED` on the payment and case instead of just logging and doing nothing durable
+  (`PROCESSING`/`EXPIRED` are the two states this doesn't yet set anywhere — they'd need a
+  provider-status poll and a payment-window timeout sweep respectively, a separate increment). Covered
+  by `backend/test/refund.e2e-spec.ts` (4 tests) — negative-control verified: disabling the
+  over-refund guard lets a refund exceed the remaining balance and fails the test; restoring it passes
+  again.
 
 **Payment → Assignment → Field Execution**
 - Staff assign a verified field agent/provider to a `SCHEDULED` case (→ `ASSIGNED`); the assignee
