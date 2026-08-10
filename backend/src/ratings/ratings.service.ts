@@ -18,7 +18,7 @@ export class RatingsService {
     private readonly audit: AuditService,
   ) {}
 
-  async rateCase(actor: AuthenticatedUser, caseId: string, stars: number, comment?: string) {
+  async rateCase(actor: AuthenticatedUser, caseId: string, stars: number, comment?: string, publicConsent?: boolean) {
     const serviceCase = await this.prisma.serviceCase.findUnique({
       where: { id: caseId },
       include: { assignments: true, rating: true },
@@ -34,7 +34,7 @@ export class RatingsService {
     }
 
     const rating = await this.prisma.rating.create({
-      data: { caseId, byUserId: actor.id, stars, comment },
+      data: { caseId, byUserId: actor.id, stars, comment, publicConsent: publicConsent ?? false },
     });
 
     await this.audit.record({

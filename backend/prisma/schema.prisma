@@ -1461,4 +1461,11 @@ model Rating {
   stars     Int // 1-5
   comment   String?
   createdAt DateTime    @default(now())
+
+  /// Public trust page (strategic-suggestions pass, Tier 3 "cheapest,
+  /// safest quick win") — opt-in, off by default. Only a Rating with this
+  /// set true is ever eligible for TrustService's aggregate stats or
+  /// testimonials; no name, case number, or other identifying field is
+  /// ever included even then (see TrustService.getPublicStats).
+  publicConsent Boolean @default(false)
 }

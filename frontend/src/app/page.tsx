@@ -47,6 +47,9 @@ export default function HomePage() {
           Sign in
         </Link>
       </div>
+      <p className="muted" style={{ marginTop: '1rem' }}>
+        <Link href="/trust">See what other diaspora families are saying →</Link>
+      </p>
 
       <div className="card" style={{ marginTop: '2.5rem' }}>
         <h2 style={{ marginTop: 0 }}>What we handle today</h2>

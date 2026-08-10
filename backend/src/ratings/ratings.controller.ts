@@ -20,6 +20,6 @@ export class RatingsController {
     @Param('caseId') caseId: string,
     @Body() dto: CreateRatingDto,
   ) {
-    return this.ratingsService.rateCase(user, caseId, dto.stars, dto.comment);
+    return this.ratingsService.rateCase(user, caseId, dto.stars, dto.comment, dto.publicConsent);
   }
 }

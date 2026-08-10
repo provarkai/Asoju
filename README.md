@@ -233,6 +233,19 @@ end-to-end against a real Postgres instance:
   `backend/test/portfolio.e2e-spec.ts` (7 tests) — negative-control verified: disabling the `PAID`-only
   filter on total spend lets an unconfirmed ₦999,000 checkout inflate the total and fails the exact-math
   test; restoring it passes again.
+- **Public trust/social-proof page** (strategic-suggestions pass, Tier 3 "cheapest, safest quick win on
+  this whole list") — new `Rating.publicConsent` (opt-in, off by default) on the existing rating flow, a
+  checkbox on `/cases/:id`'s "Rate this service" card ("Share this rating publicly (anonymized) on our
+  trust page"). New unauthenticated `GET /trust` — deliberately no `JwtAuthGuard`, the one endpoint in the
+  app meant for someone who isn't a customer yet — computes an average rating and up to 20 anonymized
+  testimonials (stars, comment, service type, date — never a name or case number) sourced *only* from
+  `publicConsent: true` ratings; a customer who never checked the box contributes nothing to this page,
+  not even anonymized. `casesCompleted` is the one deliberate exception — a platform-wide count with no
+  link to any individual customer's rating or consent, safe to show unconditionally. New public `/trust`
+  frontend page, linked from the logged-out home page and header nav. Covered by
+  `backend/test/trust.e2e-spec.ts` (5 tests) — negative-control verified: disabling the `publicConsent`
+  filter lets a rating whose customer explicitly declined ("This should never be public.") leak into the
+  testimonials list and fails the test; restoring it passes again.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same

@@ -123,6 +123,7 @@ export default function CaseDetailPage() {
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [ratingStars, setRatingStars] = useState(5);
   const [ratingComment, setRatingComment] = useState('');
+  const [ratingPublicConsent, setRatingPublicConsent] = useState(false);
   const [documentLabel, setDocumentLabel] = useState('');
   const [documentRef, setDocumentRef] = useState('');
   const [scope, setScope] = useState<ScopeEntry | null>(null);
@@ -189,7 +190,7 @@ export default function CaseDetailPage() {
     try {
       await apiFetch(`/cases/${params.id}/rating`, {
         method: 'POST',
-        body: JSON.stringify({ stars: ratingStars, comment: ratingComment || undefined }),
+        body: JSON.stringify({ stars: ratingStars, comment: ratingComment || undefined, publicConsent: ratingPublicConsent }),
       });
       load();
     } catch (err) {
@@ -523,6 +524,18 @@ export default function CaseDetailPage() {
                 value={ratingComment}
                 onChange={(e) => setRatingComment(e.target.value)}
               />
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 400 }}>
+                <input
+                  type="checkbox"
+                  checked={ratingPublicConsent}
+                  onChange={(e) => setRatingPublicConsent(e.target.checked)}
+                  style={{ width: 'auto' }}
+                />
+                <span className="muted">
+                  Share this rating publicly (anonymized) on our{' '}
+                  <a href="/trust" target="_blank" rel="noreferrer">trust page</a>
+                </span>
+              </label>
               <button
                 className="btn"
                 style={{ alignSelf: 'flex-start' }}
