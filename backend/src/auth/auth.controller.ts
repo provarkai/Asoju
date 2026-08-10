@@ -8,6 +8,7 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { ConfirmMfaDto, ConfirmMfaEnrollmentDto, DisableMfaDto, StartMfaEnrollmentDto, VerifyMfaDto } from './dto/mfa.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
+import { AcceptBeneficiaryInviteDto } from './dto/accept-beneficiary-invite.dto';
 
 // Security hardening (independent readiness review, P0-06) — a tighter,
 // per-route limit than the app-wide default (100 req/60s, app.module.ts)
@@ -111,6 +112,18 @@ export class AuthController {
   @Post('refresh')
   refresh(@Body() dto: RefreshDto) {
     return this.authService.refresh(dto.refreshToken);
+  }
+
+  /** "Who is a Beneficiary" (portal access) — claims a
+   * ProfileService.inviteBeneficiary link, creating the Beneficiary's own
+   * account and logging them straight in. No JwtAuthGuard: there is no
+   * session yet — the invite token itself, verified inside the service,
+   * is what authorizes this. */
+  @Throttle(BRUTE_FORCE_THROTTLE)
+  @HttpCode(HttpStatus.OK)
+  @Post('beneficiary-invite/accept')
+  acceptBeneficiaryInvite(@Body() dto: AcceptBeneficiaryInviteDto) {
+    return this.authService.acceptBeneficiaryInvite(dto.token, dto.email, dto.password);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)

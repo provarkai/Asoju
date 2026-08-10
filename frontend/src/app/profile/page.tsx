@@ -6,7 +6,7 @@ import { useAuthGuard } from '@/lib/useAuthGuard';
 import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
 import { SecuritySettings } from '@/components/SecuritySettings';
 
-interface Beneficiary { id: string; fullName: string; relationship: string | null; phone: string | null }
+interface Beneficiary { id: string; fullName: string; relationship: string | null; phone: string | null; userId: string | null }
 interface Property { id: string; address: string; city: string | null; state: string | null }
 interface Asset { id: string; assetType: string; description: string | null; location: string | null }
 interface ReferralSummary { code: string; referredCount: number }
@@ -47,6 +47,8 @@ export default function ProfilePage() {
 
   const [beneficiaryName, setBeneficiaryName] = useState('');
   const [beneficiaryRelationship, setBeneficiaryRelationship] = useState('');
+  const [invitingId, setInvitingId] = useState<string | null>(null);
+  const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
   const [propertyAddress, setPropertyAddress] = useState('');
   const [propertyCity, setPropertyCity] = useState('');
   const [assetType, setAssetType] = useState('');
@@ -153,6 +155,27 @@ export default function ProfilePage() {
   async function remove(kind: 'beneficiaries' | 'properties' | 'assets', id: string) {
     await apiFetch(`/me/${kind}/${id}`, { method: 'DELETE' });
     load();
+  }
+
+  // "Who is a Beneficiary" (portal access) — sends the beneficiary their
+  // own read-only sign-in link. devInviteLink only comes back outside
+  // production (ProfileService.inviteBeneficiary), surfaced here the same
+  // way other dev-only flows in this portal expose test links.
+  async function inviteBeneficiary(id: string) {
+    setInvitingId(id);
+    setError(null);
+    try {
+      const result = await apiFetch<{ message: string; devInviteLink?: string }>(`/me/beneficiaries/${id}/invite`, {
+        method: 'POST',
+      });
+      if (result.devInviteLink) {
+        setInviteLinks((links) => ({ ...links, [id]: result.devInviteLink! }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send invite');
+    } finally {
+      setInvitingId(null);
+    }
   }
 
   if (!ready) return null;
@@ -314,9 +337,30 @@ export default function ProfilePage() {
         <h2 style={{ marginTop: 0 }}>Beneficiaries</h2>
         <p className="muted">Family or others you&apos;re handling things for.</p>
         {beneficiaries.map((b) => (
-          <div key={b.id} className="case-row">
-            <span>{b.fullName}{b.relationship ? ` (${b.relationship})` : ''}</span>
-            <button className="btn btn--ghost" onClick={() => remove('beneficiaries', b.id)}>Remove</button>
+          <div key={b.id}>
+            <div className="case-row">
+              <span>{b.fullName}{b.relationship ? ` (${b.relationship})` : ''}</span>
+              <div className="actions-row" style={{ gap: '0.5rem' }}>
+                {b.userId ? (
+                  <span className="badge">Has portal access</span>
+                ) : (
+                  <button
+                    className="btn btn--secondary"
+                    disabled={invitingId === b.id}
+                    onClick={() => inviteBeneficiary(b.id)}
+                  >
+                    {invitingId === b.id ? 'Sending…' : 'Invite to portal'}
+                  </button>
+                )}
+                <button className="btn btn--ghost" onClick={() => remove('beneficiaries', b.id)}>Remove</button>
+              </div>
+            </div>
+            {inviteLinks[b.id] && (
+              <p className="muted" style={{ marginTop: '-0.5rem' }}>
+                Test mode — no WhatsApp provider configured. Invite link:{' '}
+                <a href={inviteLinks[b.id]}>{inviteLinks[b.id]}</a>
+              </p>
+            )}
           </div>
         ))}
         <form onSubmit={addBeneficiary} style={{ marginTop: '1rem' }}>

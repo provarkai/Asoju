@@ -46,6 +46,14 @@ export class ProfileController {
     return this.profileService.deleteBeneficiary(user, id);
   }
 
+  /** "Who is a Beneficiary" (portal access) — gives the named person their
+   * own limited, read-only login instead of being a contact record only
+   * the Customer can see. */
+  @Post('beneficiaries/:id/invite')
+  inviteBeneficiary(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.profileService.inviteBeneficiary(user, id);
+  }
+
   @Get('properties')
   listProperties(@CurrentUser() user: AuthenticatedUser) {
     return this.profileService.listProperties(user);

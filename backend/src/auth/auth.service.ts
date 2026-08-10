@@ -318,6 +318,54 @@ export class AuthService {
     await this.audit.record({ actorId: stored.userId, actorType: 'user', action: 'user.password_reset_completed' });
   }
 
+  /**
+   * "Who is a Beneficiary" (portal access) — the other half of
+   * ProfileService.inviteBeneficiary. Same hashed-token/expiry validation
+   * as resetPassword, but this creates a brand-new User (Role.BENEFICIARY)
+   * and links it to the Beneficiary record rather than updating an
+   * existing one — mirrors register()'s email-uniqueness check and
+   * auto-login (issueTokens), since claiming an invite *is* this person's
+   * account creation.
+   */
+  async acceptBeneficiaryInvite(token: string, email: string, password: string) {
+    const tokenHash = this.hashToken(token);
+    const invite = await this.prisma.beneficiaryInvite.findUnique({ where: { tokenHash } });
+    if (!invite || invite.usedAt || invite.expiresAt < new Date()) {
+      throw new UnauthorizedException('Invalid or expired invite link');
+    }
+
+    const beneficiary = await this.prisma.beneficiary.findUnique({ where: { id: invite.beneficiaryId } });
+    if (!beneficiary) throw new UnauthorizedException('Invalid or expired invite link');
+    if (beneficiary.userId) throw new BadRequestException('This beneficiary already has a portal account');
+
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) throw new ConflictException('An account with this email already exists');
+
+    const passwordHash = await argon2.hash(password);
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        phone: beneficiary.phone,
+        passwordHash,
+        role: Role.BENEFICIARY,
+      },
+    });
+    await this.prisma.$transaction([
+      this.prisma.beneficiary.update({ where: { id: beneficiary.id }, data: { userId: user.id } }),
+      this.prisma.beneficiaryInvite.update({ where: { id: invite.id }, data: { usedAt: new Date() } }),
+    ]);
+
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'user',
+      action: 'beneficiary.account_created',
+      metadata: { beneficiaryId: beneficiary.id },
+    });
+
+    const tokens = await this.issueTokens(user.id, user.role);
+    return { user: this.toPublicUser(user), ...tokens };
+  }
+
   async getMe(userId: string) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },

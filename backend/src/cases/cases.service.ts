@@ -19,6 +19,7 @@ import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { filterDocumentsForFieldActor } from '../documents/document-visibility';
 import { redactCustomerName } from '../common/pii-restricted-roles';
 import { StorageService } from '../storage/storage.service';
+import { BENEFICIARY_CASE_SELECT, toBeneficiaryCaseDetail } from './beneficiary-case-view';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
 
@@ -302,6 +303,19 @@ export class CasesService {
       });
     }
 
+    if (user.role === Role.BENEFICIARY) {
+      // "Who is a Beneficiary" (portal access) — read-only, own-cases-only
+      // summary list; getCaseDetail's BENEFICIARY branch is where the
+      // curated per-case view actually lives.
+      const beneficiary = await this.prisma.beneficiary.findUnique({ where: { userId: user.id } });
+      if (!beneficiary) return [];
+      return this.prisma.serviceCase.findMany({
+        where: { beneficiaryId: beneficiary.id },
+        select: { id: true, caseNumber: true, serviceType: true, status: true, location: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
     if (user.role === Role.FIELD_AGENT || user.role === Role.PROVIDER) {
       // Section 5.4 Field Agent App "job list" — include just this
       // person's own assignment(s) on each case so the UI has the
@@ -341,6 +355,21 @@ export class CasesService {
   }
 
   async getCaseDetail(actor: AuthenticatedUser, caseId: string) {
+    // "Who is a Beneficiary" (portal access) — CaseAccessGuard already
+    // proved this beneficiary is named on this exact case; this is the
+    // *separate* question of what they're allowed to see once in. A
+    // dedicated, tighter query (BENEFICIARY_CASE_SELECT), never the full
+    // include below — defense in depth, not just response-shape
+    // filtering (Section 11.2 / API Spec: never trust redaction alone).
+    if (actor.role === Role.BENEFICIARY) {
+      const beneficiaryCase = await this.prisma.serviceCase.findUnique({
+        where: { id: caseId },
+        select: BENEFICIARY_CASE_SELECT,
+      });
+      if (!beneficiaryCase) throw new NotFoundException('Case not found');
+      return toBeneficiaryCaseDetail(beneficiaryCase, (key) => this.storage.getViewUrl(key));
+    }
+
     const serviceCase = await this.prisma.serviceCase.findUnique({
       where: { id: caseId },
       include: {

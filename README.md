@@ -176,6 +176,30 @@ end-to-end against a real Postgres instance:
   it's untouched with no provider configured, exactly the regression-safety guarantee this feature had to
   hold. Negative-control verified: disabling the "must actually be FAILED to retry" guard lets an already-
   fine notification be "retried" and fails the test; restoring it passes again.
+- **Beneficiary portal access** — a `Beneficiary` (the person a diaspora Customer names on a case — who
+  the service is for, or who's on the ground dealing with it, distinct from the Customer who always owns
+  the account and pays) was previously just a contact record with zero login or visibility of their own;
+  `Role.BENEFICIARY` existed unused in the schema's `Role` enum. `POST /me/beneficiaries/:id/invite`
+  (Customer-only) sends a hashed, expiring (7-day), single-use invite link over WhatsApp — same
+  dry-run-safe boundary as every other integration in this repo, falling back to surfacing the link
+  directly (`devInviteLink`) outside production when no provider is configured, same as every other
+  dev-only flow in this portal. `POST /auth/beneficiary-invite/accept` claims it: creates a real
+  `Role.BENEFICIARY` account (their own email/password, since login is strictly email-based here) and
+  logs them straight in, mirroring `register()`'s email-uniqueness check and auto-login. What they can
+  see once in is an explicit **allowlist projection at the query level** (`beneficiary-case-view.ts`'s
+  `BENEFICIARY_CASE_SELECT`), not a denylist redaction of a fuller fetch — stricter than the existing
+  PII-redaction pattern because this is the first genuinely external, non-staff, non-paying role with
+  case access at all: status, schedule, evidence, and reports on cases naming them, with quotes,
+  invoices, payments, collaborators, risk flags, incidents, approvals, and owner/customer fields never
+  even reaching the database round-trip, let alone the response — and only `DocumentVisibility.ALL`
+  documents, a stricter default than what the Customer themselves sees. `CaseAccessGuard` gained a
+  `BENEFICIARY` branch alongside the existing per-role rules (Non-Negotiable #6). New `/beneficiary` case
+  list, `/beneficiary/cases/[id]` curated detail view, and public `/beneficiary/accept-invite` page; an
+  "Invite to portal" button appears next to each beneficiary on `/profile` once they have no portal
+  account yet. Covered by `backend/test/beneficiary-portal.e2e-spec.ts` (7 tests) — negative-control
+  verified: disabling `CaseAccessGuard`'s `BENEFICIARY` branch fails the legitimate-access test (falls
+  through to the staff-collaborator fallback and 403s a beneficiary who should see their own named case);
+  restoring it passes again.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same

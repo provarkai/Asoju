@@ -11,6 +11,10 @@ import { PrismaService } from '../../prisma/prisma.service';
  *   - CUSTOMER        -> must own the case
  *   - FIELD_AGENT     -> must hold an Assignment on the case
  *   - PROVIDER        -> must hold an Assignment on the case
+ *   - BENEFICIARY     -> case's beneficiaryId must be their own Beneficiary
+ *                     record (portal access — read-only, see
+ *                     CasesService.getCaseDetail's BENEFICIARY branch for
+ *                     what they're actually shown once past this gate)
  *   - RM/CASE_MANAGER/QUALITY_CONTROL/FINANCE/COMPLIANCE_RISK
  *                     -> must be an explicit CaseCollaborator on the case
  *   - ADMIN/SUPER_ADMIN -> full access (Section 4)
@@ -35,12 +39,21 @@ export class CaseAccessGuard implements CanActivate {
 
     const serviceCase = await this.prisma.serviceCase.findUnique({
       where: { id: caseId },
-      select: { id: true, customer: { select: { userId: true } } },
+      select: { id: true, beneficiaryId: true, customer: { select: { userId: true } } },
     });
     if (!serviceCase) throw new NotFoundException('Case not found');
 
     if (user.role === Role.CUSTOMER) {
       if (serviceCase.customer.userId === user.id) return true;
+      throw new ForbiddenException('Not authorised for this case');
+    }
+
+    if (user.role === Role.BENEFICIARY) {
+      const beneficiary = await this.prisma.beneficiary.findUnique({
+        where: { userId: user.id },
+        select: { id: true },
+      });
+      if (beneficiary && serviceCase.beneficiaryId === beneficiary.id) return true;
       throw new ForbiddenException('Not authorised for this case');
     }
 

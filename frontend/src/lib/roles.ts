@@ -21,9 +21,14 @@ export const FIELD_ROLES = ['FIELD_AGENT', 'PROVIDER'];
 // Section 12 P2 — Partner portal.
 export const PARTNER_ROLES = ['PARTNER'];
 
+// "Who is a Beneficiary" (portal access) — the person a Customer names on
+// a case, given their own limited, read-only login.
+export const BENEFICIARY_ROLES = ['BENEFICIARY'];
+
 export function landingPathForRole(role: string): string {
   if (OPS_ROLES.includes(role)) return '/ops';
   if (FIELD_ROLES.includes(role)) return '/field';
   if (PARTNER_ROLES.includes(role)) return '/partner';
+  if (BENEFICIARY_ROLES.includes(role)) return '/beneficiary';
   return '/dashboard';
 }

@@ -309,6 +309,7 @@ model User {
   directCostsRecorded   DirectCost[]
   refundRequestsMade    RefundRequest[]        @relation("RefundRequestedBy")
   refundRequestsDecided RefundRequest[]        @relation("RefundDecidedBy")
+  beneficiaryProfile    Beneficiary?           @relation("BeneficiaryUser")
 
   @@index([role])
 }
@@ -385,6 +386,14 @@ model Customer {
 }
 
 /// e.g. customer's parents/family being helped.
+/// "Who is a Beneficiary" — the person in Nigeria a diaspora Customer names
+/// as connected to a case (who the service is for, or who's on the ground
+/// dealing with it), distinct from the Customer (always the account holder/
+/// payer) and from Agent/Provider (paid field executors). userId is
+/// optional and starts null — a Beneficiary is just a contact record until
+/// the Customer invites them (ProfileService.inviteBeneficiary /
+/// BeneficiaryInvite below), at which point they get their own limited,
+/// read-only login (Role.BENEFICIARY) scoped to cases naming them.
 model Beneficiary {
   id           String   @id @default(uuid())
   customerId   String
@@ -395,7 +404,29 @@ model Beneficiary {
   notes        String?
   createdAt    DateTime @default(now())
 
+  userId String? @unique
+  user   User?   @relation("BeneficiaryUser", fields: [userId], references: [id])
+
   serviceCases ServiceCase[]
+  invites      BeneficiaryInvite[]
+}
+
+/// Single-use, expiring invite link — same shape as PasswordResetToken,
+/// but this one creates a new User + links it to the Beneficiary
+/// (AuthService.acceptBeneficiaryInvite) rather than resetting an existing
+/// one. Only one active (unused, unexpired) invite matters at a time;
+/// ProfileService.inviteBeneficiary invalidates any prior ones when
+/// issuing a new one.
+model BeneficiaryInvite {
+  id            String      @id @default(uuid())
+  beneficiaryId String
+  beneficiary   Beneficiary @relation(fields: [beneficiaryId], references: [id], onDelete: Cascade)
+  tokenHash     String      @unique
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@index([beneficiaryId])
 }
 
 /// Section 12 P2 "corporate accounts" / "family management dashboard" —
