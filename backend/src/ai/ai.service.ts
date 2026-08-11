@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
 import { AiEscalation, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -35,53 +34,117 @@ const ESCALATION_MAP: Record<ConciergeTurnResult['escalate'], AiEscalation> = {
 // "Every service must have a standard specification ... pricing method").
 const DEFAULT_SERVICE_PRICE_BAND_NGN = 150_000;
 
-const SUBMIT_TURN_TOOL: Anthropic.Tool = {
-  name: 'submit_turn',
-  description:
-    'Submit this conversational turn: the visible reply plus structured data for CRM logging. Always respond by calling this tool — never write raw JSON into the reply text.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      reply_text: { type: 'string', description: 'The message to show the customer.' },
-      data_collected: {
-        type: 'object',
-        properties: {
-          service_type: { type: ['string', 'null'] },
-          location: { type: ['string', 'null'] },
-          scope_detail: { type: ['string', 'null'] },
-          timeline: { type: ['string', 'null'], enum: ['immediate', 'near_term', 'exploring', null] },
-          payment_method: {
-            type: ['string', 'null'],
-            enum: ['cash_ready', 'diaspora_plan', 'financing', null],
+// -- OpenRouter transport ------------------------------------------------
+// The model provider is OpenRouter (openrouter.ai) — a single OpenAI-
+// compatible endpoint in front of many underlying models, chosen over a
+// direct Anthropic SDK dependency. Same raw-fetch integration shape as
+// every other external provider in this repo (Paystack, Resend, Zavu) —
+// no vendor SDK, one small typed wrapper around the HTTP contract.
+const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+interface ChatCompletionResponse {
+  choices?: {
+    message?: {
+      content?: string | null;
+      tool_calls?: { function: { name: string; arguments: string } }[];
+    };
+  }[];
+}
+
+// OpenAI/OpenRouter tool-calling shape for the same structured turn
+// contract the Concierge has always used — only the transport changed,
+// not what's being asked for or how the response is validated below.
+const SUBMIT_TURN_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'submit_turn',
+    description:
+      'Submit this conversational turn: the visible reply plus structured data for CRM logging. Always respond by calling this tool — never write raw JSON into the reply text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        reply_text: { type: 'string', description: 'The message to show the customer.' },
+        data_collected: {
+          type: 'object',
+          properties: {
+            service_type: { type: ['string', 'null'] },
+            location: { type: ['string', 'null'] },
+            scope_detail: { type: ['string', 'null'] },
+            timeline: { type: ['string', 'null'], enum: ['immediate', 'near_term', 'exploring', null] },
+            payment_method: {
+              type: ['string', 'null'],
+              enum: ['cash_ready', 'diaspora_plan', 'financing', null],
+            },
           },
+          required: ['service_type', 'location', 'scope_detail', 'timeline', 'payment_method'],
         },
-        required: ['service_type', 'location', 'scope_detail', 'timeline', 'payment_method'],
+        escalate: {
+          type: 'string',
+          enum: ['none', 'human_requested', 'vip', 'frustration', 'legal_question'],
+        },
+        conversation_complete: { type: 'boolean' },
+        engagement_subscore: { type: 'integer', minimum: 0, maximum: 15 },
       },
-      escalate: {
-        type: 'string',
-        enum: ['none', 'human_requested', 'vip', 'frustration', 'legal_question'],
-      },
-      conversation_complete: { type: 'boolean' },
-      engagement_subscore: { type: 'integer', minimum: 0, maximum: 15 },
+      required: ['reply_text', 'data_collected', 'escalate', 'conversation_complete', 'engagement_subscore'],
     },
-    required: ['reply_text', 'data_collected', 'escalate', 'conversation_complete', 'engagement_subscore'],
   },
 };
 
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-  private readonly client: Anthropic | null;
+  private readonly configured: boolean;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
   ) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    this.client = apiKey ? new Anthropic({ apiKey }) : null;
-    if (!this.client) {
-      this.logger.warn('ANTHROPIC_API_KEY not set — AI Concierge endpoint will return an error until configured.');
+    this.configured = Boolean(process.env.OPENROUTER_API_KEY);
+    if (!this.configured) {
+      this.logger.warn('OPENROUTER_API_KEY not set — AI Concierge endpoint will return an error until configured.');
     }
+  }
+
+  private async chatCompletion(params: {
+    messages: ChatMessage[];
+    tools?: ToolDefinition[];
+    toolChoice?: { type: 'function'; function: { name: string } };
+  }): Promise<ChatCompletionResponse> {
+    const res = await fetch(OPENROUTER_CHAT_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: process.env.AI_CONCIERGE_MODEL ?? 'anthropic/claude-sonnet-5',
+        max_tokens: 1024,
+        messages: params.messages,
+        ...(params.tools ? { tools: params.tools } : {}),
+        ...(params.toolChoice ? { tool_choice: params.toolChoice } : {}),
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`OpenRouter request failed (${res.status}): ${body}`);
+    }
+
+    return res.json() as Promise<ChatCompletionResponse>;
   }
 
   /**
@@ -92,34 +155,33 @@ export class AiService {
    * code, never as another LLM call.
    */
   async converse(user: AuthenticatedUser, dto: ConciergeMessageDto) {
-    if (!this.client) {
-      throw new Error('AI Concierge is not configured (missing ANTHROPIC_API_KEY).');
+    if (!this.configured) {
+      throw new Error('AI Concierge is not configured (missing OPENROUTER_API_KEY).');
     }
     if (user.role !== Role.CUSTOMER) {
       throw new Error('AI Concierge is customer-facing only.');
     }
 
-    const messages: Anthropic.MessageParam[] = [
-      ...(dto.history ?? []).map((turn) => ({ role: turn.role, content: turn.content }) as Anthropic.MessageParam),
+    const messages: ChatMessage[] = [
+      { role: 'system', content: CONCIERGE_SYSTEM_PROMPT },
+      ...(dto.history ?? []).map((turn) => ({ role: turn.role, content: turn.content }) as ChatMessage),
       { role: 'user', content: dto.message },
     ];
 
-    const response = await this.client.messages.create({
-      model: process.env.AI_CONCIERGE_MODEL ?? 'claude-sonnet-5',
-      max_tokens: 1024,
-      system: CONCIERGE_SYSTEM_PROMPT,
+    const response = await this.chatCompletion({
       messages,
       tools: [SUBMIT_TURN_TOOL],
-      tool_choice: { type: 'tool', name: 'submit_turn' },
+      toolChoice: { type: 'function', function: { name: 'submit_turn' } },
     });
 
-    const toolUse = response.content.find(
-      (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
-    );
-    if (!toolUse) {
+    const toolCall = response.choices?.[0]?.message?.tool_calls?.[0];
+    let turn: ConciergeTurnResult;
+    try {
+      if (!toolCall) throw new Error('no tool call');
+      turn = JSON.parse(toolCall.function.arguments) as ConciergeTurnResult;
+    } catch {
       throw new Error('AI Concierge did not return a structured turn.');
     }
-    const turn = toolUse.input as ConciergeTurnResult;
 
     const escalation = ESCALATION_MAP[turn.escalate] ?? AiEscalation.NONE;
 
@@ -210,8 +272,8 @@ export class AiService {
    * Fails closed exactly like the intake Concierge without a configured key.
    */
   async assistantReply(user: AuthenticatedUser, dto: ConciergeMessageDto) {
-    if (!this.client) {
-      throw new Error('AI Assistant is not configured (missing ANTHROPIC_API_KEY).');
+    if (!this.configured) {
+      throw new Error('AI Assistant is not configured (missing OPENROUTER_API_KEY).');
     }
     if (user.role !== Role.CUSTOMER) {
       throw new Error('AI Assistant is customer-facing only.');
@@ -249,22 +311,17 @@ export class AiService {
       assets: customer.assets,
     };
 
-    const messages: Anthropic.MessageParam[] = [
+    const messages: ChatMessage[] = [
+      { role: 'system', content: PERSONAL_ASSISTANT_SYSTEM_PROMPT },
       { role: 'user', content: `CONTEXT (this customer's own account — nothing outside this exists):\n${JSON.stringify(context)}` },
       { role: 'assistant', content: "Understood — I'll answer only from that context." },
-      ...(dto.history ?? []).map((turn) => ({ role: turn.role, content: turn.content }) as Anthropic.MessageParam),
+      ...(dto.history ?? []).map((turn) => ({ role: turn.role, content: turn.content }) as ChatMessage),
       { role: 'user', content: dto.message },
     ];
 
-    const response = await this.client.messages.create({
-      model: process.env.AI_CONCIERGE_MODEL ?? 'claude-sonnet-5',
-      max_tokens: 1024,
-      system: PERSONAL_ASSISTANT_SYSTEM_PROMPT,
-      messages,
-    });
+    const response = await this.chatCompletion({ messages });
 
-    const textBlock = response.content.find((block): block is Anthropic.TextBlock => block.type === 'text');
-    const reply = textBlock?.text ?? "Sorry, I couldn't put together a reply — please try again.";
+    const reply = response.choices?.[0]?.message?.content ?? "Sorry, I couldn't put together a reply — please try again.";
 
     await this.audit.record({
       actorId: user.id,

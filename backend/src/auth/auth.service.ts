@@ -444,7 +444,7 @@ export class AuthService {
    *
    * Uses `||`, not `??`, on purpose: this app's convention for an unset
    * optional secret is `SOME_KEY=""` (see PAYSTACK_SECRET_KEY,
-   * ANTHROPIC_API_KEY), and `??` only falls back on null/undefined — an
+   * OPENROUTER_API_KEY), and `??` only falls back on null/undefined — an
    * explicit empty string would sail through as "configured". That
    * mattered here more than it would elsewhere: @nestjs/jwt's own
    * `JwtService.getSecretKey` falls back with `||` too, so passing it an

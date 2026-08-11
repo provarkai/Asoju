@@ -246,6 +246,23 @@ end-to-end against a real Postgres instance:
   `backend/test/trust.e2e-spec.ts` (5 tests) — negative-control verified: disabling the `publicConsent`
   filter lets a rating whose customer explicitly declined ("This should never be public.") leak into the
   testimonials list and fails the test; restoring it passes again.
+- **AI Concierge moved to OpenRouter** — `AiService` no longer depends on `@anthropic-ai/sdk` directly;
+  the model provider is now OpenRouter (openrouter.ai), a single OpenAI-compatible endpoint in front of
+  many underlying models, reached the same raw-`fetch` way as every other external integration in this
+  repo (Paystack, Resend, Zavu) rather than a vendor SDK. The forced-structured-output contract Section
+  7.6 depends on ("the LLM never writes to the database directly") is unchanged — the intake Concierge
+  still forces a `submit_turn` tool call (OpenAI/OpenRouter's `tools`/`tool_choice` function-calling
+  shape now, not Anthropic's native tool-use shape) and still throws rather than falling back to freeform
+  parsing if the model doesn't return one; the personal assistant's plain-text, no-tool-use path is
+  unchanged too. `OPENROUTER_API_KEY` replaces `ANTHROPIC_API_KEY`; `AI_CONCIERGE_MODEL` now takes an
+  OpenRouter model slug (default `anthropic/claude-sonnet-5`, confirmed live against OpenRouter's actual
+  model catalog and chat-completions response shape rather than assumed). Live-verified end-to-end with a
+  real OpenRouter key: a real forced tool call returned and parsed correctly. `src/ai/ai.service.spec.ts`
+  (11 tests, same P0-09 AI-safety coverage as before — model-set `customerId` rejected, out-of-range
+  `engagement_subscore` clamped, a refused/malformed tool response throws instead of freeform-parsing,
+  every completed intake audited as AI-attributed) now mocks the OpenRouter HTTP call instead of the
+  Anthropic SDK. Negative-control verified: temporarily reintroducing a freeform-text fallback when no
+  tool call is present fails exactly the one test guarding against it; restoring it passes all 11 again.
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same
@@ -474,7 +491,7 @@ not the "full marketplace" versions Section 11.2 explicitly rules out ("full fam
   *existing* customer's questions about their own cases, subscription, and saved beneficiaries/
   properties/assets, grounded only in a context block of that customer's real data — no tool-use, no
   mutation, nothing invented. Surfaced as "Ask ASOJU" on `/dashboard`. Fails closed without
-  `ANTHROPIC_API_KEY`, exactly like the intake Concierge.
+  `OPENROUTER_API_KEY`, exactly like the intake Concierge.
 - **Bounded subscription billing engine** — Section 11.2 explicitly rules out a "complex subscription
   ecosystem", so this is the real, minimal slice: `SubscriptionBillingService` bills each Concierge
   subscription's flat recurring amount every 30 days through the same Paystack integration as case
@@ -626,7 +643,7 @@ cp .env.example backend/.env
 ```
 
 Fill in `backend/.env` — at minimum `DATABASE_URL` (defaults match `docker-compose.yml`) and, to use the
-AI Concierge, `ANTHROPIC_API_KEY`.
+AI Concierge, `OPENROUTER_API_KEY`.
 
 ### 2. Install & migrate
 
@@ -651,8 +668,10 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   login, or a `PartnerContact` link directly via Prisma/psql until the Admin Console (Section 5.7)
   exists.
 - The AI Concierge endpoint (`POST /api/ai/concierge/message`) and the personal assistant
-  (`POST /api/ai/assistant/message`) both require `ANTHROPIC_API_KEY` to be set; without it, they fail
-  closed rather than silently degrading.
+  (`POST /api/ai/assistant/message`) both require `OPENROUTER_API_KEY` to be set; without it, they fail
+  closed rather than silently degrading. Provider is OpenRouter (openrouter.ai), an OpenAI-compatible
+  endpoint in front of many underlying models — `AI_CONCIERGE_MODEL` takes an OpenRouter model slug
+  (default `anthropic/claude-sonnet-5`), not a bare Anthropic model name.
 - **Payments (Paystack)**: set `PAYSTACK_SECRET_KEY` to enable real hosted-checkout initialization
   (`POST /api/invoices/:id/pay`, `POST /api/admin/subscriptions/run-billing`) and real webhook signature
   verification (`POST /api/payments/webhook/paystack`, see `PaystackWebhookGuard`) — the guard verifies

@@ -24,6 +24,21 @@ so re-running the suite against a non-empty `asoju_test` never collides —
 there's no teardown step required, though wiping the database between runs
 keeps it small.
 
+**If `backend/.env` has real provider credentials configured** (for local
+live-preview/manual testing against Paystack/Resend/OpenRouter/Zavu/S3),
+override them empty for the test run — several specs assert on dry-run
+behavior (`dryRun: true`, no real send attempted) and will get real
+API responses instead, which can fail in surprising ways (e.g. Paystack's
+live API rejects the suite's `*.test`/`*.e2e.test` fixture email domains
+outright). `DATABASE_URL` also needs to point at `asoju_test`, not
+whatever dev database `.env` is currently pointed at:
+
+```bash
+DATABASE_URL="postgresql://asoju:asoju@localhost:5432/asoju_test?schema=public" \
+PAYSTACK_SECRET_KEY="" RESEND_API_KEY="" OPENROUTER_API_KEY="" ZAVU_API_KEY="" S3_BUCKET="" \
+  npm run test:e2e
+```
+
 ## What's covered
 
 - `authorization.e2e-spec.ts` — Non-Negotiable #6 (case-scoped access) and
@@ -65,12 +80,13 @@ keeps it small.
 ## AI safety tests (unit, not e2e)
 
 `src/ai/ai.service.spec.ts` (run via `npm test`, not `test:e2e`) — P0-09.
-This sandbox has no real `ANTHROPIC_API_KEY`, so these can't test whether
-Claude itself resists a prompt-injection attempt (Anthropic's job, and
-nondeterministic besides). What they test is what's actually in this
-codebase's control: `@anthropic-ai/sdk` is mocked to return
-attacker-shaped tool output (extra fields, out-of-range scores, a refused
-tool-use), and the tests confirm the service still enforces every trust
+This sandbox has no funded `OPENROUTER_API_KEY`, so these can't test
+whether the underlying model itself resists a prompt-injection attempt
+(the model provider's job, and nondeterministic besides). What they test
+is what's actually in this codebase's control: the OpenRouter HTTP call
+(global `fetch`) is mocked to return attacker-shaped tool output (extra
+fields, out-of-range scores, a refused tool-use), and the tests confirm
+the service still enforces every trust
 boundary — the model can never set `customerId` (always resolved from the
 session), an out-of-range `engagement_subscore` gets clamped rather than
 trusted (Non-Negotiable #8's deterministic scoring), a refused structured
