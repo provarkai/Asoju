@@ -87,7 +87,14 @@ export function VaultSection() {
           },
         );
         if (!uploadUrl.startsWith('dry-run://')) {
-          const res = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': docFile.type }, body: docFile });
+          // 'x-amz-server-side-encryption' must match what the backend
+          // signed into the presigned URL (storage.service.ts#getUploadUrl)
+          // or S3 rejects the signature.
+          const res = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': docFile.type, 'x-amz-server-side-encryption': 'AES256' },
+            body: docFile,
+          });
           if (!res.ok) throw new Error('Upload to storage failed — please try again.');
         }
         storageKey = key;

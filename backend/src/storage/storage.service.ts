@@ -63,13 +63,22 @@ export class StorageService {
     return `${prefix}/${randomUUID()}${ext}`;
   }
 
+  /** Security checklist ("Encrypt All Sensitive Customer Data") — every
+   * object this app writes requests SSE-S3 explicitly rather than relying
+   * solely on the bucket's own default-encryption setting; a bucket
+   * misconfigured to skip default encryption would otherwise silently
+   * store evidence/documents in the clear. Signing ServerSideEncryption
+   * into the presigned command means the client's actual PUT must send
+   * the matching `x-amz-server-side-encryption: AES256` header or S3
+   * rejects the signature — see upload.ts/VaultSection.tsx on the
+   * frontend, which set it. */
   async getUploadUrl(key: string, contentType: string): Promise<{ url: string; expiresInSeconds: number }> {
     if (!this.client || !this.bucket) {
       return { url: `${DRY_RUN_PREFIX}${key}`, expiresInSeconds: UPLOAD_URL_TTL_SECONDS };
     }
     const url = await getSignedUrl(
       this.client,
-      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType }),
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType, ServerSideEncryption: 'AES256' }),
       { expiresIn: UPLOAD_URL_TTL_SECONDS },
     );
     return { url, expiresInSeconds: UPLOAD_URL_TTL_SECONDS };
@@ -86,7 +95,9 @@ export class StorageService {
       this.logger.warn(`Object storage not configured (dry run) — would have stored ${body.length} bytes at ${key}`);
       return;
     }
-    await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType }));
+    await this.client.send(
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ServerSideEncryption: 'AES256' }),
+    );
   }
 
   /** The one server-side *read* path (#42 — voice evidence transcription

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { AuthService } from './auth.service';
@@ -154,5 +154,33 @@ export class AuthController {
   @Post('admin/staff')
   createStaffAccount(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateStaffAccountDto) {
     return this.authService.adminProvisionAccount(user, dto.email, dto.role);
+  }
+
+  /** Security checklist — "Admin Access Audit": every privileged account,
+   * at a glance, without raw Prisma/psql. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @Get('admin/staff')
+  listStaffAccounts() {
+    return this.authService.listStaffAccounts();
+  }
+
+  /** Security checklist — "Employee Offboarding": disable the account and
+   * kill every active session immediately, not just at next token
+   * expiry. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin/staff/:id/deactivate')
+  deactivateStaffAccount(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.authService.deactivateStaffAccount(user, id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin/staff/:id/reactivate')
+  reactivateStaffAccount(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.authService.reactivateStaffAccount(user, id);
   }
 }

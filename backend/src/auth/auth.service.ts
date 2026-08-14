@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'crypto';
@@ -12,6 +12,7 @@ import { generateTotpSecret, otpAuthUrl, verifyTotpCode } from './totp';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { PROVISIONABLE_STAFF_ROLES } from './dto/admin-provision-account.dto';
 
 export interface TokenPair {
   accessToken: string;
@@ -366,6 +367,79 @@ export class AuthService {
 
     const publicUser = this.toPublicUser(user);
     return process.env.NODE_ENV !== 'production' ? { user: publicUser, devToken: token } : { user: publicUser };
+  }
+
+  /** Security checklist gap ("Admin Access Audit") — adminProvisionAccount
+   * could create staff accounts but there was no way to see who actually
+   * holds one. Lists every account in PROVISIONABLE_STAFF_ROLES with
+   * exactly the fields an access review needs (role, active/MFA state,
+   * last login) — never the password hash or MFA secret. */
+  async listStaffAccounts() {
+    return this.prisma.user.findMany({
+      where: { role: { in: [...PROVISIONABLE_STAFF_ROLES] } },
+      select: { id: true, email: true, role: true, isActive: true, mfaEnabled: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /** Security checklist gap ("Employee Offboarding") — disabling isActive
+   * alone (already enforced at login/refresh/MFA-verify, see above) still
+   * leaves any *existing* session usable until its short-lived access
+   * token expires. This is the other half: an already-compromised or
+   * departing staff member's sessions need to die immediately, not in up
+   * to 15 minutes — same "something may be compromised, revoke
+   * everything" treatment as resetPassword(). Deliberately a separate,
+   * explicit admin action, never implicit — deactivating one account must
+   * never be reachable from a route that only *looks* like it targets
+   * that account. */
+  async deactivateStaffAccount(actor: AuthenticatedUser, userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Account not found');
+    if (!PROVISIONABLE_STAFF_ROLES.includes(user.role as (typeof PROVISIONABLE_STAFF_ROLES)[number])) {
+      throw new BadRequestException('This endpoint only manages staff accounts');
+    }
+    if (user.id === actor.id) {
+      throw new BadRequestException('Cannot deactivate your own account');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { isActive: false } }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    await this.audit.record({
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'user.staff_deactivated',
+      metadata: { userId, email: user.email, role: user.role },
+    });
+
+    return { deactivated: true };
+  }
+
+  /** Counterpart to deactivateStaffAccount — returning staff after a
+   * false-positive offboarding or a leave of absence. Does not restore
+   * sessions (correct: they re-authenticate, same as any first login). */
+  async reactivateStaffAccount(actor: AuthenticatedUser, userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Account not found');
+    if (!PROVISIONABLE_STAFF_ROLES.includes(user.role as (typeof PROVISIONABLE_STAFF_ROLES)[number])) {
+      throw new BadRequestException('This endpoint only manages staff accounts');
+    }
+
+    await this.prisma.user.update({ where: { id: userId }, data: { isActive: true } });
+
+    await this.audit.record({
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'user.staff_reactivated',
+      metadata: { userId, email: user.email, role: user.role },
+    });
+
+    return { reactivated: true };
   }
 
   /**

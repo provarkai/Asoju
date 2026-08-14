@@ -155,4 +155,130 @@ describe('Admin Console — account provisioning', () => {
     expect(events).toHaveLength(1);
     expect((events[0].metadata as { userId?: string }).userId).toBe(created.body.user.id);
   });
+
+  /**
+   * Security checklist ("Admin Access Audit" / "Employee Offboarding") —
+   * list every staff account and disable one, killing its sessions.
+   */
+  describe('staff account listing and deactivation', () => {
+    it('lists staff accounts without ever leaking the password hash or MFA secret', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/auth/admin/staff')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const listedIds = res.body.map((u: { id: string }) => u.id);
+      expect(listedIds).toContain(admin.user.id);
+      expect(listedIds).toContain(caseManager.user.id);
+      // Never includes CUSTOMER accounts — this endpoint is staff-only.
+      expect(listedIds).not.toContain(customer.user.id);
+
+      const entry = res.body.find((u: { id: string }) => u.id === caseManager.user.id);
+      expect(entry.passwordHash).toBeUndefined();
+      expect(entry.mfaSecret).toBeUndefined();
+      expect(entry.isActive).toBe(true);
+    });
+
+    it('blocks non-admin roles from the staff listing', async () => {
+      await request(app.getHttpServer())
+        .get('/api/auth/admin/staff')
+        .set('Authorization', `Bearer ${caseManagerToken}`)
+        .expect(403);
+      await request(app.getHttpServer())
+        .get('/api/auth/admin/staff')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .expect(403);
+    });
+
+    it('deactivates a staff account, revoking its active session — a subsequent request with the old token is rejected', async () => {
+      const target = await createStaff('offboard-target', Role.CASE_MANAGER);
+      const targetToken = await login(app, target.email);
+
+      // Prove the token works before deactivation.
+      await request(app.getHttpServer()).get('/api/auth/me').set('Authorization', `Bearer ${targetToken}`).expect(200);
+
+      await request(app.getHttpServer())
+        .post(`/api/auth/admin/staff/${target.user.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const dbUser = await prisma.user.findUniqueOrThrow({ where: { id: target.user.id } });
+      expect(dbUser.isActive).toBe(false);
+
+      // Login must now fail outright (isActive gate).
+      await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: target.email, password: DEFAULT_PASSWORD })
+        .expect(401);
+
+      const revoked = await prisma.refreshToken.findMany({ where: { userId: target.user.id, revokedAt: null } });
+      expect(revoked).toHaveLength(0);
+    });
+
+    it('rejects deactivating your own account', async () => {
+      await request(app.getHttpServer())
+        .post(`/api/auth/admin/staff/${admin.user.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(400);
+    });
+
+    it('rejects deactivating a non-staff account (e.g. a customer) through this endpoint', async () => {
+      await request(app.getHttpServer())
+        .post(`/api/auth/admin/staff/${customer.user.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(400);
+    });
+
+    it('blocks non-admin roles from deactivating staff', async () => {
+      const target = await createStaff('offboard-blocked', Role.CASE_MANAGER);
+      await request(app.getHttpServer())
+        .post(`/api/auth/admin/staff/${target.user.id}/deactivate`)
+        .set('Authorization', `Bearer ${caseManagerToken}`)
+        .expect(403);
+    });
+
+    it('reactivates a deactivated staff account, which can then log in again', async () => {
+      const target = await createStaff('offboard-reactivate', Role.CASE_MANAGER);
+
+      await request(app.getHttpServer())
+        .post(`/api/auth/admin/staff/${target.user.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: target.email, password: DEFAULT_PASSWORD })
+        .expect(401);
+
+      await request(app.getHttpServer())
+        .post(`/api/auth/admin/staff/${target.user.id}/reactivate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const dbUser = await prisma.user.findUniqueOrThrow({ where: { id: target.user.id } });
+      expect(dbUser.isActive).toBe(true);
+      await login(app, target.email); // succeeds — throws via .expect(200) internally otherwise
+    });
+
+    it('records user.staff_deactivated and user.staff_reactivated audit events', async () => {
+      const target = await createStaff('offboard-audit', Role.CASE_MANAGER);
+
+      await request(app.getHttpServer())
+        .post(`/api/auth/admin/staff/${target.user.id}/deactivate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/auth/admin/staff/${target.user.id}/reactivate`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const deactivated = await prisma.auditEvent.findMany({
+        where: { action: 'user.staff_deactivated', actorId: admin.user.id },
+      });
+      const reactivated = await prisma.auditEvent.findMany({
+        where: { action: 'user.staff_reactivated', actorId: admin.user.id },
+      });
+      expect(deactivated.some((e) => (e.metadata as { userId?: string }).userId === target.user.id)).toBe(true);
+      expect(reactivated.some((e) => (e.metadata as { userId?: string }).userId === target.user.id)).toBe(true);
+    });
+  });
 });

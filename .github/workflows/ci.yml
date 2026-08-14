@@ -57,6 +57,14 @@ jobs:
         run: npm run test --workspace=backend
       - name: E2E tests (authorization, privileged auth, health) — real Postgres, no mocks
         run: npm run test:e2e --workspace=backend
+      # Security checklist — "Integrate Automated Vulnerability Scanning".
+      # Gated at critical only (0 today, confirmed via `npm audit`) so this
+      # is a real, zero-disruption gate rather than one that starts red on
+      # day one — Dependabot (.github/dependabot.yml) handles the existing
+      # moderate/high findings gradually via its own PRs. Raise the
+      # threshold once those are cleared.
+      - name: Dependency vulnerability scan (fails only on critical)
+        run: npm audit --workspace=backend --audit-level=critical
 
   frontend:
     runs-on: ubuntu-latest
@@ -68,6 +76,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build --workspace=frontend
+      - name: Dependency vulnerability scan (fails only on critical)
+        run: npm audit --workspace=frontend --audit-level=critical
 
   deploy:
     name: Deploy to Railway (production)
