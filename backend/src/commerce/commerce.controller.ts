@@ -41,6 +41,16 @@ export class CommerceController {
     return this.commerceService.createQuote(user, caseId, dto);
   }
 
+  /** Platform Expansion PRD §2.2/§2.3 — what the regional matrix
+   * suggests for this case's service fee, and whether SC will be
+   * offered, before staff build the actual quote lines. */
+  @UseGuards(JwtAuthGuard, RolesGuard, CaseAccessGuard)
+  @Roles(...STAFF_QUOTE_ROLES)
+  @Get('cases/:caseId/regional-pricing-hint')
+  getRegionalPricingHint(@Param('caseId') caseId: string) {
+    return this.commerceService.getRegionalPricingHint(caseId);
+  }
+
   /** P0 Tech Platform §33 "Financial & Analytics Requirements" —
    * Finance-only, case-scoped. Never exposed on the general case-detail
    * response every viewer (including the customer) hits. */

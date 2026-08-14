@@ -83,6 +83,17 @@ enum CasePriority {
   URGENT
 }
 
+/// Platform Expansion PRD §2.2 "Variable Quoting Engine (Region-Based
+/// Pricing)" — CaseScope.zone's domain. See backend/src/scope/
+/// pricing-zone.ts (classification) and backend/src/commerce/
+/// regional-pricing.ts (base rates + urgency multiplier + the §2.3 SC
+/// Exclusion Rule this zone ultimately gates).
+enum PricingZone {
+  LAGOS
+  SOUTH_WEST
+  OTHER
+}
+
 /// Section 5.2 — Case state machine. Backend-enforced; AI may recommend
 /// but never force a transition (Non-Negotiable #9).
 enum CaseStatus {
@@ -701,6 +712,16 @@ model CaseScope {
   /// Incrementing per case (1, 2, 3, ...) — never reused, never mutated
   /// after creation. A revision always inserts a new row.
   version Int
+
+  /// Platform Expansion PRD §2.2/§2.3 — the regional pricing zone this
+  /// scope was priced against. ScopeService.createOrRevise defaults this
+  /// from the case's location (pricing-zone.ts's classifyZone) but staff
+  /// can set it explicitly at scoping time, matching §2.2's "Other
+  /// Locations: TBD by Case Manager at scoping." Defaults to OTHER (the
+  /// conservative, non-SC-eligible choice) for any row that somehow
+  /// bypasses the classifier rather than silently defaulting to a
+  /// discounted zone.
+  zone PricingZone @default(OTHER)
 
   objective String
 

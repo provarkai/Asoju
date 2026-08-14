@@ -13,6 +13,8 @@ import { CreateQuoteDto } from './dto/create-quote.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
 import { RecordDirectCostDto } from './dto/record-direct-cost.dto';
+import { suggestRegionalServiceFee } from './regional-pricing';
+import { usdToNgnRate } from '../concierge/membership-plans';
 
 /** Prefix distinguishing case-invoice Paystack references from subscription
  * ones so a single webhook endpoint can route both (see PaystackService). */
@@ -123,7 +125,7 @@ export class CommerceService {
     // never counts against the monthly allowance either.
     const benefit =
       serviceCase.tier === CaseTier.CONCIERGE && serviceFeeTotal > 0
-        ? await this.membership.previewBenefit(serviceCase.customerId, serviceCase.tier, serviceFeeTotal)
+        ? await this.membership.previewBenefit(serviceCase.customerId, serviceCase.tier, serviceFeeTotal, latestScope.zone)
         : null;
 
     const finalServiceFee = benefit ? benefit.finalAmount : serviceFeeTotal;
@@ -169,6 +171,35 @@ export class CommerceService {
     );
 
     return quote;
+  }
+
+  /**
+   * Platform Expansion PRD §2.2/§2.3 — staff-facing preview of what the
+   * regional matrix says this case's ASOJU_SERVICE_FEE line(s) should be,
+   * and whether SC will even be offered, *before* they build the actual
+   * quote lines by hand (createQuote's dto.lines stays authoritative —
+   * this is guidance, not an auto-applied price). Requires a confirmed
+   * scope, same precondition as createQuote itself, since the zone lives
+   * on CaseScope.
+   */
+  async getRegionalPricingHint(caseId: string) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+
+    const latestScope = await this.scope.getLatest(caseId);
+    if (!latestScope) {
+      throw new BadRequestException('This case has no scope yet — create one before requesting a pricing hint');
+    }
+
+    const suggestion = suggestRegionalServiceFee(latestScope.zone, serviceCase.priority);
+    const fxRate = usdToNgnRate();
+
+    return {
+      ...suggestion,
+      fxRate,
+      suggestedServiceFeeNgn:
+        suggestion.suggestedServiceFeeUsd === null ? null : Math.round(suggestion.suggestedServiceFeeUsd * fxRate),
+    };
   }
 
   /**
