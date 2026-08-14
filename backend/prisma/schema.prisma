@@ -1117,6 +1117,13 @@ model Report {
   deliveredAt    DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  /// #41 — set the first time this report's PDF is rendered
+  /// (CaseReportPdfService), never on creation. Cached rather than
+  /// re-rendered on every request; storage key, not a URL, so access
+  /// still goes through StorageService.getViewUrl's short-lived signing
+  /// (Section 11.2 — never a predictable public URL).
+  pdfStorageKey String?
 }
 
 /// Platform Expansion PRD §5.1 — one row per QC decision (every outcome,

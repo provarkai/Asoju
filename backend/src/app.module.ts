@@ -38,6 +38,7 @@ import { AgentTrustScoreModule } from './agent-trust-score/agent-trust-score.mod
 import { AgentWalletModule } from './agent-wallet/agent-wallet.module';
 import { AgentFinancialPlanningModule } from './agent-financial-planning/agent-financial-planning.module';
 import { AgentSosModule } from './agent-sos/agent-sos.module';
+import { CaseReportPdfModule } from './case-report-pdf/case-report-pdf.module';
 
 @Module({
   imports: [
@@ -79,6 +80,7 @@ import { AgentSosModule } from './agent-sos/agent-sos.module';
     AgentWalletModule,
     AgentFinancialPlanningModule,
     AgentSosModule,
+    CaseReportPdfModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

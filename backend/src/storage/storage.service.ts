@@ -75,6 +75,20 @@ export class StorageService {
     return { url, expiresInSeconds: UPLOAD_URL_TTL_SECONDS };
   }
 
+  /** The one write path that's server-generated rather than client-
+   * uploaded (#41 — case report PDFs, rendered from data this app already
+   * has, never from anything a caller supplies): every other write above
+   * hands out a presigned PUT URL for the *client* to upload to. Same
+   * dry-run shape as everywhere else — with no bucket configured this
+   * logs and returns without touching a network. */
+  async putBuffer(key: string, body: Buffer, contentType: string): Promise<void> {
+    if (!this.client || !this.bucket) {
+      this.logger.warn(`Object storage not configured (dry run) — would have stored ${body.length} bytes at ${key}`);
+      return;
+    }
+    await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType }));
+  }
+
   /** Never a predictable public URL (Section 11.2) — always short-lived and
    * signed, even in dry-run mode (where it's a non-functional sentinel). */
   async getViewUrl(key: string): Promise<string> {
