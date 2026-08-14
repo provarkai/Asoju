@@ -1,0 +1,50 @@
+# Built from the monorepo root (build context = repo root) so npm
+# workspaces resolves correctly — see fly.backend.toml's `dockerfile` and
+# `flyctl deploy .` invocation.
+FROM node:20-alpine AS build
+WORKDIR /repo
+
+# Alpine ships without a system OpenSSL runtime; Prisma's engine binaries
+# need it to detect the right musl/openssl target, and silently fall back
+# to a mismatched one without it (surfaces later as a schema-engine crash).
+RUN apk add --no-cache openssl
+
+# Optional CA bundle for builders behind a TLS-intercepting proxy (e.g. a
+# sandboxed CI runner). Absent in a normal checkout — the bracket-glob
+# COPY silently matches zero files then, and NODE_EXTRA_CA_CERTS points at
+# a path that never gets created, which Node treats as "unset". HTTP(S)_PROXY
+# itself needs no ARG: BuildKit auto-forwards it as a build-arg when set on
+# the host, and is a no-op otherwise.
+COPY package.json package-lock.json optional-ca.cr[t] ./
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
+# backend's postinstall runs `prisma generate`, which needs the schema on
+# disk before `npm ci` runs it — so the prisma/ dir has to land ahead of ci.
+COPY backend/prisma backend/prisma
+RUN if [ -f optional-ca.crt ]; then export NODE_EXTRA_CA_CERTS=/repo/optional-ca.crt; fi; npm ci
+
+COPY backend backend
+RUN npm run build --workspace=backend
+
+FROM node:20-alpine
+WORKDIR /repo
+ENV NODE_ENV=production
+# Same reason as the build stage — `prisma migrate deploy` runs here at
+# boot and needs the schema engine to find a real OpenSSL.
+RUN apk add --no-cache openssl
+
+# npm workspaces hoists everything into the root node_modules (confirmed
+# locally — no nested backend/node_modules exists); copying it whole
+# (including devDependencies) is what lets `prisma migrate deploy` run at
+# boot below, since the `prisma` CLI itself is a devDependency.
+COPY --from=build /repo/node_modules node_modules
+COPY --from=build /repo/backend/dist backend/dist
+COPY --from=build /repo/backend/prisma backend/prisma
+COPY --from=build /repo/backend/package.json backend/package.json
+COPY package.json package.json
+
+EXPOSE 3001
+# Same startCommand shape as railway.json — migrate on every boot, then
+# start. `prisma migrate deploy` takes its own advisory lock, so this
+# stays safe even if this ever scales past one machine.
+CMD ["sh", "-c", "npm run prisma:deploy --workspace=backend && npm run start:prod --workspace=backend"]

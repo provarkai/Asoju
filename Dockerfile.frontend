@@ -1,0 +1,47 @@
+# Built from the monorepo root (build context = repo root) — see
+# fly.frontend.toml and the `flyctl deploy .` invocation.
+FROM node:20-alpine AS build
+WORKDIR /repo
+
+# Alpine ships without a system OpenSSL runtime; the workspace install runs
+# the backend's `prisma generate` postinstall, which needs it to pick the
+# right musl/openssl engine target.
+RUN apk add --no-cache openssl
+
+# Optional CA bundle for builders behind a TLS-intercepting proxy (e.g. a
+# sandboxed CI runner). Absent in a normal checkout — the bracket-glob COPY
+# silently matches zero files then, and the `if` below leaves npm ci alone.
+# HTTP(S)_PROXY itself needs no ARG: BuildKit auto-forwards it as a build-arg
+# when set on the host, and is a no-op otherwise.
+COPY package.json package-lock.json optional-ca.cr[t] ./
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
+# The workspace install runs the backend's postinstall (`prisma generate`)
+# too, which needs the schema on disk before `npm ci` gets to it.
+COPY backend/prisma backend/prisma
+RUN if [ -f optional-ca.crt ]; then export NODE_EXTRA_CA_CERTS=/repo/optional-ca.crt; fi; npm ci
+
+COPY frontend frontend
+
+# NEXT_PUBLIC_* vars are inlined into the client bundle at build time, not
+# read at runtime — has to be a build arg, not a Fly runtime secret/var.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+RUN npm run build --workspace=frontend
+
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+
+# next.config.mjs sets output: 'standalone' — traces the minimal deps this
+# app actually needs into .next/standalone rather than shipping the full
+# node_modules tree. In this monorepo the trace nests one level under
+# frontend/ (workspace-root detection); static assets and public/ aren't
+# included in the trace and have to be copied in separately per Next's own
+# standalone-output docs.
+COPY --from=build /repo/frontend/.next/standalone ./
+COPY --from=build /repo/frontend/.next/static ./frontend/.next/static
+COPY --from=build /repo/frontend/public ./frontend/public
+
+EXPOSE 3000
+CMD ["node", "frontend/server.js"]

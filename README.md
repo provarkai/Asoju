@@ -633,6 +633,48 @@ a current `@railway/cli` expects, that run's log will show you exactly what to a
 Once all five are in place, a merge to `main` runs the test suites and, only if they pass, deploys both
 services via `railway up`.
 
+## Deploying (Fly.io)
+
+Fly.io is the platform actually provisioned and deploy-tested for this project — Railway's project
+tokens didn't authenticate, so the target moved. Unlike the Railway section above, this one **is**
+verified against a real deploy attempt, not just written from docs: `Dockerfile.backend` and
+`Dockerfile.frontend` (repo root, multi-stage, npm-workspaces-aware) both build and boot cleanly, and
+`prisma migrate deploy` runs successfully against the live `asoju-db` Postgres cluster.
+
+**What's already provisioned, live, on Fly:**
+- Apps `asoju-backend` and `asoju-frontend` (region `iad`), each configured via `fly.backend.toml` /
+  `fly.frontend.toml` — scale-to-zero (`min_machines_running = 0`), backend has an HTTP health check on
+  `/api/health/ready`.
+- Postgres cluster `asoju-db`, attached to `asoju-backend` (`DATABASE_URL` auto-wired as a secret).
+- Every backend runtime secret staged (`JWT_*`, `CORS_ORIGIN`, `FRONTEND_URL`, `OPENROUTER_API_KEY`,
+  `PAYSTACK_SECRET_KEY`, `RESEND_API_KEY`, `WHATSAPP_WEBHOOK_SECRET`, etc.) via `flyctl secrets set`.
+- Both Docker images build successfully and push to `registry.fly.io/asoju-{backend,frontend}:latest`.
+
+**What's blocking a live URL right now:** the Fly account is on the free trial tier, which force-stops
+every machine after 5 minutes of runtime ("Trial machine stopping... add a credit card by visiting
+https://fly.io/trial") — this hit the `asoju-db` machine mid-boot and would hit `asoju-backend` the same
+way. It's a billing gate, not a config or code problem; nothing in this repo can work around it.
+
+**To finish standing it up:** add a payment method at https://fly.io/trial (Fly's free/hobby allowance
+still applies afterwards — this only lifts the 5-minute cap), then from the repo root:
+
+```bash
+flyctl auth docker
+docker build --build-arg NEXT_PUBLIC_API_URL=https://asoju-backend.fly.dev \
+  -f Dockerfile.frontend -t registry.fly.io/asoju-frontend:latest .
+docker build -f Dockerfile.backend -t registry.fly.io/asoju-backend:latest .
+docker push registry.fly.io/asoju-backend:latest
+docker push registry.fly.io/asoju-frontend:latest
+flyctl deploy --image registry.fly.io/asoju-backend:latest  -a asoju-backend  -c fly.backend.toml
+flyctl deploy --image registry.fly.io/asoju-frontend:latest -a asoju-frontend -c fly.frontend.toml
+```
+
+Both Dockerfiles pin `apk add openssl` in every stage that touches Prisma — Alpine ships without a
+system OpenSSL runtime, and without it the Prisma schema engine silently downloads a mismatched engine
+binary and crashes on first real use (`prisma migrate deploy` at container boot), even though `prisma
+generate` earlier in the build appears to succeed. This was caught by an actual deploy attempt, not
+code review — worth knowing if this ever needs debugging again.
+
 ## Running locally
 
 ### 1. Infrastructure

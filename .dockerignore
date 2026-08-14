@@ -1,0 +1,16 @@
+# Fly.io builds (Dockerfile.backend / Dockerfile.frontend) send the whole
+# repo as build context — never let real secrets or local state leak into
+# that context or an image layer.
+.env
+**/.env
+**/.env.local
+**/.env.*.local
+.git
+**/node_modules
+backend/dist
+backend/test
+frontend/.next
+frontend/out
+docs
+.github
+*.log
