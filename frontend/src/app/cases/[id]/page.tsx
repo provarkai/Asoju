@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { useAuthGuard } from '@/lib/useAuthGuard';
 import { humanApprovalAction, humanCaseStatus, humanServiceType } from '@/lib/case-status';
 import { ArrivalProfileForm } from '@/components/ArrivalProfileForm';
+import { MilestoneProgress } from '@/components/MilestoneProgress';
 
 interface StatusHistoryEntry {
   id: string;
@@ -93,6 +94,12 @@ interface DocumentEntry {
   createdAt: string;
 }
 
+interface CaseTaskEntry {
+  label: string;
+  isComplete: boolean;
+  milestoneGroup: string | null;
+}
+
 interface CaseDetail {
   id: string;
   caseNumber: string;
@@ -110,6 +117,7 @@ interface CaseDetail {
   quotes: QuoteEntry[];
   invoices: InvoiceEntry[];
   rating: RatingEntry | null;
+  tasks: CaseTaskEntry[];
 }
 
 const APPROVAL_ACTIONS: { action: string; label: string; variant: 'btn' | 'btn--secondary' }[] = [
@@ -259,6 +267,7 @@ export default function CaseDetailPage() {
       </div>
 
       {detail.serviceType === 'ARRIVAL_SUPPORT' && <ArrivalProfileForm caseId={detail.id} />}
+      {detail.serviceType === 'CONSTRUCTION_SUPERVISION' && <MilestoneProgress tasks={detail.tasks} />}
 
       {scope && (
         <div className="card">

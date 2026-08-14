@@ -105,6 +105,17 @@ enum PricingZone {
   OTHER
 }
 
+/// Platform Expansion PRD §3.3 — CaseTask.milestoneGroup's domain, the
+/// standard Nigerian residential-build phase sequence the PRD's own
+/// examples (Foundation, DPC, Roofing) are drawn from.
+enum MilestoneGroup {
+  FOUNDATION
+  DPC
+  SUPERSTRUCTURE
+  ROOFING
+  FINISHING
+}
+
 /// Section 5.2 — Case state machine. Backend-enforced; AI may recommend
 /// but never force a transition (Non-Negotiable #9).
 enum CaseStatus {
@@ -706,6 +717,16 @@ model CaseTask {
   completedAt DateTime?
   sortOrder   Int         @default(0)
   createdAt   DateTime    @default(now())
+
+  /// Platform Expansion PRD §3.3 "Construction Milestone & % Completion
+  /// Tracker" — "transforms the flat checklist into a milestone-based
+  /// tracker (Foundation, DPC, Roofing)." Only ever set on
+  /// CONSTRUCTION_SUPERVISION's checklist (checklist-templates.ts); every
+  /// other service's tasks stay null, same flat checklist as before. Per
+  /// the PRD's own architectural note, the % complete visualization is
+  /// computed client-side from these tags — no separate aggregation
+  /// endpoint, this field is the only new surface.
+  milestoneGroup MilestoneGroup?
 
   evidence Evidence[]
 }

@@ -196,7 +196,12 @@ export class CasesService {
     // Field Agent App always has one to execute against.
     const checklist = CHECKLIST_TEMPLATES[dto.serviceType];
     await this.prisma.caseTask.createMany({
-      data: checklist.map((label, index) => ({ caseId: serviceCase.id, label, sortOrder: index })),
+      data: checklist.map((item, index) => ({
+        caseId: serviceCase.id,
+        label: item.label,
+        milestoneGroup: item.milestoneGroup,
+        sortOrder: index,
+      })),
     });
 
     await this.prisma.caseStatusHistory.create({
@@ -265,7 +270,12 @@ export class CasesService {
 
     const checklist = CHECKLIST_TEMPLATES[schedule.serviceType];
     await this.prisma.caseTask.createMany({
-      data: checklist.map((label, index) => ({ caseId: serviceCase.id, label, sortOrder: index })),
+      data: checklist.map((item, index) => ({
+        caseId: serviceCase.id,
+        label: item.label,
+        milestoneGroup: item.milestoneGroup,
+        sortOrder: index,
+      })),
     });
 
     await this.prisma.caseStatusHistory.create({
