@@ -275,6 +275,14 @@ enum AssignmentRole {
   PROVIDER
 }
 
+/// Platform Expansion PRD §5.1 — deterministic tier ladder, same
+/// "Bronze/Silver/Gold" wording as the doc. See Agent.tier.
+enum AgentTier {
+  BRONZE
+  SILVER
+  GOLD
+}
+
 enum AssignmentStatus {
   OFFERED
   ACCEPTED
@@ -678,6 +686,7 @@ model ServiceCase {
   disputes                 Dispute[]
   arrivalProfile           ArrivalProfile?
   beneficiaryRelayMessages BeneficiaryRelayMessage[]
+  qcReviews                QcReview[]
 
   /// Section 12 P1 "recurring services" — set when this case was the one
   /// a recurring schedule was configured from.
@@ -856,6 +865,14 @@ model Agent {
   performanceScore Float? // Section 12 P1 "provider performance scoring", applied to agents too
   createdAt        DateTime @default(now())
 
+  /// Platform Expansion PRD §5.1 "Field Agent Tiering & Auto-Assignment" —
+  /// deterministic tier from performanceScore (ratings.service.ts) + QC
+  /// pass rate (AgentTieringService, from QcReview history). Recomputed by
+  /// AgentTieringSchedulerService's nightly cron and on every QC decision;
+  /// never set directly by staff or inferred by a model.
+  tier       AgentTier @default(BRONZE)
+  qcPassRate Float? // fraction of QcReview outcomes that passed QC, null until this agent has any
+
   assignments Assignment[]
 }
 
@@ -1005,6 +1022,23 @@ model Report {
   deliveredAt    DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+/// Platform Expansion PRD §5.1 — one row per QC decision (every outcome,
+/// not just the ones that produce a Report). Report only gets created for
+/// APPROVED/PASS_WITH_LIMITATION (see EvidenceService.performQc), so it
+/// can't answer "what fraction of this agent's QC reviews passed" —
+/// REWORK/REVISIT_REQUIRED/ESCALATE/INCIDENT never reach it. This is the
+/// AgentTieringService's QC-pass-rate data source.
+model QcReview {
+  id           String      @id @default(uuid())
+  caseId       String
+  case         ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  outcome      QcOutcome
+  reviewedById String
+  reviewedAt   DateTime    @default(now())
+
+  @@index([caseId])
 }
 
 // ---------------------------------------------------------------------------

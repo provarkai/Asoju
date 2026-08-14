@@ -3,6 +3,7 @@ import { AssignmentRole, CaseStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { AgentTieringService } from '../agent-tiering/agent-tiering.service';
 
 /**
  * Section 12 P1 — "provider performance scoring". A customer rates a
@@ -16,6 +17,7 @@ export class RatingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly agentTiering: AgentTieringService,
   ) {}
 
   async rateCase(actor: AuthenticatedUser, caseId: string, stars: number, comment?: string) {
@@ -67,6 +69,10 @@ export class RatingsService {
       where: { id: agentId },
       data: { performanceScore: result._avg.stars },
     });
+    // Platform Expansion PRD §5.1 — tier is a function of performanceScore
+    // (just written) and QC pass rate, so a new rating can move it too;
+    // recompute now rather than waiting on the nightly cron sweep.
+    await this.agentTiering.recomputeAgentTier(agentId);
   }
 
   private async recomputeProviderScore(providerId: string) {

@@ -7,6 +7,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CasesService } from '../cases/cases.service';
 import { RiskEngineService } from '../risk/risk-engine.service';
 import { StorageService } from '../storage/storage.service';
+import { AgentTieringService } from '../agent-tiering/agent-tiering.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateEvidenceDto } from './dto/create-evidence.dto';
 import { PerformQcDto } from './dto/perform-qc.dto';
@@ -28,6 +29,7 @@ export class EvidenceService {
     private readonly casesService: CasesService,
     private readonly riskEngine: RiskEngineService,
     private readonly storage: StorageService,
+    private readonly agentTiering: AgentTieringService,
   ) {}
 
   /** Step one of a real upload: mints a case-scoped key and a short-lived
@@ -212,6 +214,15 @@ export class EvidenceService {
       action: 'case.qc_performed',
       metadata: { outcome: dto.outcome, note: dto.note },
     });
+
+    // Platform Expansion PRD §5.1 — logged unconditionally (every outcome,
+    // not just the ones that produce a Report) so AgentTieringService has
+    // a real QC-pass-rate signal, then recomputed immediately for whoever
+    // worked the case rather than waiting on the nightly cron sweep.
+    await this.prisma.qcReview.create({
+      data: { caseId, outcome: dto.outcome, reviewedById: actor.id },
+    });
+    await this.agentTiering.recomputeAgentsForCase(caseId);
 
     if (dto.outcome === QcOutcome.APPROVED || dto.outcome === QcOutcome.PASS_WITH_LIMITATION) {
       if (!dto.summary) throw new BadRequestException('summary is required to approve and issue a report');

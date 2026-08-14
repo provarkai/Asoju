@@ -31,6 +31,7 @@ import { PartnersModule } from './partners/partners.module';
 import { VaultModule } from './vault/vault.module';
 import { ArrivalModule } from './arrival/arrival.module';
 import { BeneficiaryRelayModule } from './beneficiary-relay/beneficiary-relay.module';
+import { AgentTieringModule } from './agent-tiering/agent-tiering.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { BeneficiaryRelayModule } from './beneficiary-relay/beneficiary-relay.mo
     VaultModule,
     ArrivalModule,
     BeneficiaryRelayModule,
+    AgentTieringModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
