@@ -42,6 +42,20 @@ describe('Legal/Document and Healthcare service verticals', () => {
       createStaff('service-verticals-admin', Role.ADMIN),
     ]);
     [customerToken, adminToken] = await Promise.all([login(app, customer.email), login(app, admin.email)]);
+
+    // Platform Expansion PRD §4.2 — LEGAL_DOCUMENT_SERVICES now requires a
+    // verified PoA on file (poa-guard.e2e-spec.ts covers the guard itself
+    // in detail). One verified asset here covers every case this file
+    // creates, same "never re-consumed" semantics as production.
+    const submitted = await request(app.getHttpServer())
+      .post('/api/me/verified-assets')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ type: 'POWER_OF_ATTORNEY', name: 'Service verticals test PoA' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .patch(`/api/admin/verified-assets/${submitted.body.id}/verify`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
   });
 
   afterAll(async () => {

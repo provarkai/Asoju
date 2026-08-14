@@ -10,6 +10,7 @@ import {
   DisputeStatus,
   Role,
   ServiceType,
+  VaultCategory,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -47,6 +48,15 @@ const DEFAULT_SLA_HOURS: Record<CasePriority, number> = {
 const SERVICE_TYPE_DEFAULT_PRIORITY: Partial<Record<ServiceType, CasePriority>> = {
   [ServiceType.BEREAVEMENT_SUPPORT]: CasePriority.URGENT,
 };
+
+/** Platform Expansion PRD §4.2 "Power of Attorney (PoA) Repository &
+ * Verification" — "Introduces a VERIFIED_POA_REQUIRED guard on specific
+ * service types." Scoped to the one service on the current catalogue
+ * that's actually about acting on the customer's behalf at a government
+ * registry (§6.2's Legal/Document Services vertical) — every other
+ * service stays ungated rather than guessing PoA relevance for services
+ * where it isn't the PRD's own stated use case. */
+const VERIFIED_POA_REQUIRED_SERVICE_TYPES: ServiceType[] = [ServiceType.LEGAL_DOCUMENT_SERVICES];
 
 function slaHoursForPriority(priority: CasePriority): number {
   const envVar = `SLA_HOURS_${priority}`;
@@ -145,6 +155,22 @@ export class CasesService {
       const asset = await this.prisma.asset.findUnique({ where: { id: dto.assetId } });
       if (!asset || asset.customerId !== request.customerId) {
         throw new BadRequestException('assetId does not belong to this customer');
+      }
+    }
+
+    // Platform Expansion PRD §4.2 — VERIFIED_POA_REQUIRED guard. A
+    // reusable, once-verified PoA (VaultModule's verifiedAsset.verify) is
+    // the point — this only checks one already exists on file, it never
+    // re-verifies or consumes it, so the same PoA covers every future
+    // case of this type.
+    if (VERIFIED_POA_REQUIRED_SERVICE_TYPES.includes(dto.serviceType)) {
+      const verifiedPoa = await this.prisma.verifiedAsset.findFirst({
+        where: { customerId: request.customerId, type: VaultCategory.POWER_OF_ATTORNEY, verified: true },
+      });
+      if (!verifiedPoa) {
+        throw new BadRequestException(
+          'This service requires a verified Power of Attorney on file — the customer must submit one to their vault and have staff verify it before this case can be created',
+        );
       }
     }
 
