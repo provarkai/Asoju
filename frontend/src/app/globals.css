@@ -277,3 +277,76 @@ button {
   gap: 0.6rem;
   flex-wrap: wrap;
 }
+
+/* ---------------------------------------------------------------------
+ * Tailwind v4 + shadcn/ui — added for the asoju-app-main-derived pages
+ * (Landing, Auth, Dashboard, Cases, Profile, Team, Vault, Billing).
+ *
+ * Deliberately importing theme.css + utilities.css directly instead of
+ * the bundled `@import "tailwindcss"` (which also pulls in Preflight,
+ * Tailwind's base reset). Preflight zeroes out browser-default heading
+ * sizes/margins and form-element styling — everything above this comment
+ * (the ops/field/partner/beneficiary pages, SiteHeader, NotificationBell,
+ * every page not part of this conversion) relies on those browser
+ * defaults for raw <h1>/<h2>/<form> elements with no Tailwind classes.
+ * Skipping Preflight keeps all of that pixel-identical; Tailwind utility
+ * classes still work fine on the new pages regardless (their specificity
+ * already beats the plain element selectors above).
+ * --------------------------------------------------------------------- */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--shadcn-background);
+  --color-foreground: var(--shadcn-foreground);
+  --color-card: var(--shadcn-card);
+  --color-card-foreground: var(--shadcn-card-foreground);
+  --color-popover: var(--shadcn-popover);
+  --color-popover-foreground: var(--shadcn-popover-foreground);
+  --color-primary: var(--shadcn-primary);
+  --color-primary-foreground: var(--shadcn-primary-foreground);
+  --color-secondary: var(--shadcn-secondary);
+  --color-secondary-foreground: var(--shadcn-secondary-foreground);
+  --color-muted: var(--shadcn-muted);
+  --color-muted-foreground: var(--shadcn-muted-foreground);
+  --color-accent: var(--shadcn-accent);
+  --color-accent-foreground: var(--shadcn-accent-foreground);
+  --color-destructive: var(--shadcn-destructive);
+  --color-border: var(--shadcn-border);
+  --color-input: var(--shadcn-input);
+  --color-ring: var(--shadcn-ring);
+  --radius-sm: calc(var(--shadcn-radius) - 4px);
+  --radius-md: calc(var(--shadcn-radius) - 2px);
+  --radius-lg: var(--shadcn-radius);
+  --radius-xl: calc(var(--shadcn-radius) + 4px);
+}
+
+/* Namespaced --shadcn-* (not bare --background/--border/etc.) so nothing
+ * here collides with the --asoju-* variables above — --radius already
+ * exists above at 10px for the old pages' .card/.case-row/etc.; shadcn
+ * components read --shadcn-radius instead, kept close to the ASOJU brand
+ * green rather than shadcn's stock near-black neutral palette. */
+:root {
+  --shadcn-radius: 0.625rem;
+  --shadcn-background: #ffffff;
+  --shadcn-foreground: var(--asoju-ink);
+  --shadcn-card: var(--asoju-card);
+  --shadcn-card-foreground: var(--asoju-ink);
+  --shadcn-popover: #ffffff;
+  --shadcn-popover-foreground: var(--asoju-ink);
+  --shadcn-primary: var(--asoju-green);
+  --shadcn-primary-foreground: #ffffff;
+  --shadcn-secondary: var(--asoju-green-light);
+  --shadcn-secondary-foreground: var(--asoju-green);
+  --shadcn-muted: #f4f3ef;
+  --shadcn-muted-foreground: var(--asoju-muted);
+  --shadcn-accent: var(--asoju-green-light);
+  --shadcn-accent-foreground: var(--asoju-green);
+  --shadcn-destructive: var(--asoju-danger);
+  --shadcn-border: var(--asoju-border);
+  --shadcn-input: var(--asoju-border);
+  --shadcn-ring: var(--asoju-green);
+}
