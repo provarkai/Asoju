@@ -5,12 +5,18 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { WhatsappSenderService } from '../whatsapp/whatsapp-sender.service';
 import { ScLedgerService } from '../concierge/sc-ledger.service';
+import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateBeneficiaryDto } from './dto/beneficiary.dto';
 import { CreatePropertyDto } from './dto/property.dto';
 import { CreateAssetDto } from './dto/asset.dto';
 import { UpdatePreferencesDto } from './dto/update-preferences.dto';
+import { CreateVaultDocumentDto } from './dto/vault-document.dto';
+import { CreateConciergeFeedbackDto } from './dto/concierge-feedback.dto';
+import { RequestUploadUrlDto } from '../storage/dto/request-upload-url.dto';
 import { isPiiRestricted, REDACTED_CUSTOMER_NAME } from '../common/pii-restricted-roles';
+
+const VAULT_KEY_PREFIX = 'vault';
 
 // Terminal statuses don't count toward the "active" breakdown on the
 // portfolio dashboard — mirrors CasesService's own COMPLETED/CLOSED
@@ -47,6 +53,7 @@ export class ProfileService {
     private readonly audit: AuditService,
     private readonly whatsappSender: WhatsappSenderService,
     private readonly scLedger: ScLedgerService,
+    private readonly storage: StorageService,
   ) {}
 
   /**
@@ -342,6 +349,102 @@ export class ProfileService {
 
     await this.prisma.asset.delete({ where: { id } });
     await this.audit.record({ actorId: user.id, actorType: 'user', action: 'asset.deleted', metadata: { assetId: id } });
+  }
+
+  // -- Vault (customer-level, not case-scoped — see VaultDocument) -------
+
+  async createVaultUploadUrl(user: AuthenticatedUser, dto: RequestUploadUrlDto) {
+    const customer = await this.requireCustomer(user.id);
+    const key = this.storage.createKey(`${VAULT_KEY_PREFIX}/${customer.id}`, dto.fileName);
+    const { url, expiresInSeconds } = await this.storage.getUploadUrl(key, dto.contentType);
+    return { storageKey: key, uploadUrl: url, method: 'PUT', expiresInSeconds };
+  }
+
+  async getVault(user: AuthenticatedUser) {
+    const customer = await this.requireCustomer(user.id);
+    const documents = await this.prisma.vaultDocument.findMany({
+      where: { customerId: customer.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    return Promise.all(documents.map(async (doc) => ({ ...doc, viewUrl: await this.storage.getViewUrl(doc.storageKey) })));
+  }
+
+  async addVaultDocument(user: AuthenticatedUser, dto: CreateVaultDocumentDto) {
+    const customer = await this.requireCustomer(user.id);
+
+    // Same discipline as Documents/Evidence: storageKey must have come
+    // from createVaultUploadUrl() above, never a client-supplied path.
+    if (!dto.storageKey.startsWith(`${VAULT_KEY_PREFIX}/${customer.id}/`)) {
+      throw new BadRequestException('storageKey was not issued for this vault — request a new upload URL');
+    }
+    if (!(await this.storage.objectExists(dto.storageKey))) {
+      throw new BadRequestException('Uploaded file not found — the upload may not have completed. Request a new upload URL and try again.');
+    }
+
+    const document = await this.prisma.vaultDocument.create({
+      data: {
+        customerId: customer.id,
+        label: dto.label,
+        category: dto.category,
+        storageKey: dto.storageKey,
+        uploadedById: user.id,
+      },
+    });
+
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'user',
+      action: 'vault_document.added',
+      metadata: { vaultDocumentId: document.id, label: dto.label },
+    });
+
+    return document;
+  }
+
+  async deleteVaultDocument(user: AuthenticatedUser, id: string) {
+    const customer = await this.requireCustomer(user.id);
+    const document = await this.prisma.vaultDocument.findUnique({ where: { id } });
+    if (!document) throw new NotFoundException('Vault document not found');
+    if (document.customerId !== customer.id) throw new ForbiddenException('Not your vault document');
+
+    await this.prisma.vaultDocument.delete({ where: { id } });
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'user',
+      action: 'vault_document.deleted',
+      metadata: { vaultDocumentId: id },
+    });
+  }
+
+  // -- AI Concierge feedback ----------------------------------------------
+
+  async recordConciergeFeedback(user: AuthenticatedUser, dto: CreateConciergeFeedbackDto) {
+    const customer = await this.requireCustomer(user.id);
+    const feedback = await this.prisma.conciergeFeedback.create({
+      data: {
+        customerId: customer.id,
+        interactionId: dto.interactionId,
+        rating: dto.rating,
+        comment: dto.comment,
+      },
+    });
+
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'user',
+      action: 'concierge_feedback.recorded',
+      metadata: { feedbackId: feedback.id, rating: dto.rating },
+    });
+
+    return feedback;
+  }
+
+  async listConciergeFeedback(user: AuthenticatedUser) {
+    const customer = await this.requireCustomer(user.id);
+    return this.prisma.conciergeFeedback.findMany({
+      where: { customerId: customer.id },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   private async requireCustomer(userId: string) {

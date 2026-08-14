@@ -384,6 +384,8 @@ model Customer {
   assignedRm       User?   @relation("CustomerRm", fields: [assignedRmUserId], references: [id])
 
   beneficiaries      Beneficiary[]
+  vaultDocuments     VaultDocument[]
+  conciergeFeedback  ConciergeFeedback[]
   properties         Property[]
   assets             Asset[]
   serviceRequests    ServiceRequest[]
@@ -864,6 +866,41 @@ enum DocumentVisibility {
   ALL // every assignee on the case, plus customer and staff (default, backward-compatible)
   STAFF_ONLY // customer and staff only — no field actor, regardless of assignment
   ASSIGNEE // customer, staff, and only the specific Assignment named in restrictedToAssignmentId
+}
+
+/// Customer-level secure document store — deliberately separate from
+/// Document (which is always case-scoped). A passport, deed, or ID a
+/// customer wants ASOJU to hold onto isn't necessarily tied to any one
+/// case; it may predate every case, or outlive several. Same
+/// private-object-storage discipline as Document (storageKey, never a
+/// predictable public URL) and the same upload-url/complete flow via
+/// StorageService.
+model VaultDocument {
+  id           String   @id @default(uuid())
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label        String
+  category     String? // e.g. "identity", "property-deed", "financial" — free text, no enum yet
+  storageKey   String
+  uploadedById String?
+  createdAt    DateTime @default(now())
+}
+
+/// Rating on one AI Concierge interaction (Section 7) — distinct from
+/// Rating (case/provider quality) and from AiInteraction.engagementSubscore
+/// (a lead-scoring signal computed by the service, not customer feedback).
+/// Optionally tied back to the AiInteraction it's about, but the customer
+/// only ever names — not required to — since a web chat session may span
+/// several AiInteraction rows.
+model ConciergeFeedback {
+  id            String         @id @default(uuid())
+  customerId    String
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  interactionId String?
+  interaction   AiInteraction? @relation(fields: [interactionId], references: [id], onDelete: SetNull)
+  rating        Int // 1-5, validated at the DTO layer
+  comment       String?
+  createdAt     DateTime       @default(now())
 }
 
 /// Photos, videos, docs, observations, metadata (Section 8.4).
@@ -1416,7 +1453,8 @@ model AiInteraction {
   conversationComplete Boolean       @default(false)
   createdAt            DateTime      @default(now())
 
-  serviceRequests ServiceRequest[]
+  serviceRequests   ServiceRequest[]
+  conciergeFeedback ConciergeFeedback[]
 }
 
 /// Section 12 P1 "WhatsApp AI integration" — holds the running transcript

@@ -9,6 +9,9 @@ import { CreateBeneficiaryDto } from './dto/beneficiary.dto';
 import { CreatePropertyDto } from './dto/property.dto';
 import { CreateAssetDto } from './dto/asset.dto';
 import { UpdatePreferencesDto } from './dto/update-preferences.dto';
+import { CreateVaultDocumentDto } from './dto/vault-document.dto';
+import { CreateConciergeFeedbackDto } from './dto/concierge-feedback.dto';
+import { RequestUploadUrlDto } from '../storage/dto/request-upload-url.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.CUSTOMER)
@@ -89,5 +92,35 @@ export class ProfileController {
   @Delete('assets/:id')
   deleteAsset(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.profileService.deleteAsset(user, id);
+  }
+
+  @Get('vault')
+  getVault(@CurrentUser() user: AuthenticatedUser) {
+    return this.profileService.getVault(user);
+  }
+
+  @Post('vault/upload-url')
+  createVaultUploadUrl(@CurrentUser() user: AuthenticatedUser, @Body() dto: RequestUploadUrlDto) {
+    return this.profileService.createVaultUploadUrl(user, dto);
+  }
+
+  @Post('vault')
+  addVaultDocument(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateVaultDocumentDto) {
+    return this.profileService.addVaultDocument(user, dto);
+  }
+
+  @Delete('vault/:id')
+  deleteVaultDocument(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.profileService.deleteVaultDocument(user, id);
+  }
+
+  @Get('concierge-feedback')
+  listConciergeFeedback(@CurrentUser() user: AuthenticatedUser) {
+    return this.profileService.listConciergeFeedback(user);
+  }
+
+  @Post('concierge-feedback')
+  recordConciergeFeedback(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateConciergeFeedbackDto) {
+    return this.profileService.recordConciergeFeedback(user, dto);
   }
 }

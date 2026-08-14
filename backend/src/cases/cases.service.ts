@@ -746,4 +746,83 @@ export class CasesService {
     if (!customer) throw new NotFoundException('No customer profile for this user');
     return customer;
   }
+
+  // ---------------------------------------------------------------------
+  // Case messaging — CaseAccessGuard on the controller already establishes
+  // the caller can see this case; this is just the Message model's CRUD.
+  // ---------------------------------------------------------------------
+
+  async listMessages(caseId: string) {
+    return this.prisma.message.findMany({
+      where: { caseId },
+      orderBy: { createdAt: 'asc' },
+      include: { sender: { select: { id: true, email: true, role: true } } },
+    });
+  }
+
+  async sendMessage(actor: AuthenticatedUser, caseId: string, body: string) {
+    const message = await this.prisma.message.create({
+      data: { caseId, senderId: actor.id, channel: 'web', body },
+      include: { sender: { select: { id: true, email: true, role: true } } },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.message_sent',
+      metadata: { messageId: message.id },
+    });
+
+    return message;
+  }
+
+  // ---------------------------------------------------------------------
+  // Disputes (Complaint model) — raised by the customer against their own
+  // case, resolved by staff. Deliberately minimal: no state machine, just
+  // open (resolvedAt null) / resolved (resolvedAt set), same shape the
+  // Complaint model already had sitting unused.
+  // ---------------------------------------------------------------------
+
+  async raiseDispute(actor: AuthenticatedUser, caseId: string, subject: string, detail: string) {
+    const customer = await this.requireCustomerProfile(actor.id);
+    const dispute = await this.prisma.complaint.create({
+      data: { caseId, customerId: customer.id, subject, detail },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.dispute_raised',
+      metadata: { disputeId: dispute.id, subject },
+    });
+
+    return dispute;
+  }
+
+  async listDisputes(caseId: string) {
+    return this.prisma.complaint.findMany({ where: { caseId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  async resolveDispute(actor: AuthenticatedUser, caseId: string, disputeId: string) {
+    const dispute = await this.prisma.complaint.findUnique({ where: { id: disputeId } });
+    if (!dispute || dispute.caseId !== caseId) throw new NotFoundException('Dispute not found');
+    if (dispute.resolvedAt) throw new BadRequestException('Dispute is already resolved');
+
+    const updated = await this.prisma.complaint.update({
+      where: { id: disputeId },
+      data: { resolvedAt: new Date() },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.dispute_resolved',
+      metadata: { disputeId },
+    });
+
+    return updated;
+  }
 }

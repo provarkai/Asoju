@@ -15,6 +15,8 @@ import { AssignOwnerDto } from './dto/assign-owner.dto';
 import { SetNextActionDto } from './dto/set-next-action.dto';
 import { HoldCaseDto } from './dto/hold-case.dto';
 import { ResumeCaseDto } from './dto/resume-case.dto';
+import { SendMessageDto } from './dto/send-message.dto';
+import { RaiseDisputeDto } from './dto/raise-dispute.dto';
 
 const STAFF_TRIAGE_ROLES = [Role.CASE_MANAGER, Role.RELATIONSHIP_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
 const STAFF_TRANSITION_ROLES = [Role.CASE_MANAGER, Role.QUALITY_CONTROL, Role.ADMIN, Role.SUPER_ADMIN];
@@ -161,5 +163,52 @@ export class CasesController {
   @Post('cases/:caseId/resume')
   resumeCase(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Body() dto: ResumeCaseDto) {
     return this.casesService.resumeCase(user, caseId, dto.reason);
+  }
+
+  // -------------------------------------------------------------------
+  // Case messaging — any role CaseAccessGuard already lets onto the case
+  // (customer, staff collaborator, or bypass-eligible admin) can read and
+  // post; there's no separate messaging-specific role restriction.
+  // -------------------------------------------------------------------
+
+  @UseGuards(CaseAccessGuard)
+  @Get('cases/:caseId/messages')
+  listMessages(@Param('caseId') caseId: string) {
+    return this.casesService.listMessages(caseId);
+  }
+
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/messages')
+  sendMessage(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Body() dto: SendMessageDto) {
+    return this.casesService.sendMessage(user, caseId, dto.body);
+  }
+
+  // -------------------------------------------------------------------
+  // Disputes — the customer raises one against their own case; resolving
+  // is a staff action gated the same way case transitions are.
+  // -------------------------------------------------------------------
+
+  @Roles(Role.CUSTOMER)
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/disputes')
+  raiseDispute(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Body() dto: RaiseDisputeDto) {
+    return this.casesService.raiseDispute(user, caseId, dto.subject, dto.detail);
+  }
+
+  @UseGuards(CaseAccessGuard)
+  @Get('cases/:caseId/disputes')
+  listDisputes(@Param('caseId') caseId: string) {
+    return this.casesService.listDisputes(caseId);
+  }
+
+  @Roles(...STAFF_TRANSITION_ROLES)
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/disputes/:disputeId/resolve')
+  resolveDispute(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Param('disputeId') disputeId: string,
+  ) {
+    return this.casesService.resolveDispute(user, caseId, disputeId);
   }
 }
