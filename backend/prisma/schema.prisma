@@ -572,6 +572,13 @@ model Property {
   city        String?
   state       String?
   description String?
+  /// Optional — most properties are address-only today. When set, lets a
+  /// field agent's check-in be geofence-validated against a real target
+  /// instead of just recorded. Nothing populates this automatically (no
+  /// geocoding integration exists); it's captured only when staff/customer
+  /// supply it directly.
+  latitude    Float?
+  longitude   Float?
   createdAt   DateTime @default(now())
 
   serviceCases ServiceCase[]
@@ -585,6 +592,9 @@ model Asset {
   assetType   String
   description String?
   location    String?
+  /// Same optional-coordinates convention as Property.latitude/longitude.
+  latitude    Float?
+  longitude   Float?
   createdAt   DateTime @default(now())
 
   serviceCases ServiceCase[]
@@ -923,6 +933,21 @@ model Assignment {
   /// (timestamp + location) -> Execute checklist -> ...
   checkInAt       DateTime?
   checkInLocation Json?
+  /// GPS accuracy (metres) the client reported at check-in, when location
+  /// carried real coordinates rather than a plain address string.
+  checkInAccuracy Float?
+  /// PASS — real coordinates, validated against the case's property/asset
+  ///   target coordinates, within the geofence radius.
+  /// UNVERIFIED — checked in without a comparable target (no coordinates
+  ///   on file for this case's property/asset) or without GPS at all
+  ///   (plain address string, or no location supplied). Never blocks
+  ///   check-in — this is the default for the vast majority of cases
+  ///   today, since nothing populates Property/Asset coordinates yet.
+  /// A check-in that fails geofence validation (outside radius, bad
+  /// accuracy, stale fix) is rejected outright and never reaches this
+  /// field — see AssignmentsService.checkIn / geofence.ts.
+  geofenceResult          String?
+  geofenceDistanceMeters  Float?
   completedAt     DateTime?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt

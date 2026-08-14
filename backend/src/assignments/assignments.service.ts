@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { AssignmentRole, AssignmentStatus, CaseStatus, ProviderStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -6,6 +6,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CasesService } from '../cases/cases.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateAssignmentDto } from './dto/create-assignment.dto';
+import { evaluateCheckIn, GEOFENCE_REJECTION_MESSAGES } from '../common/geofence/geofence';
 
 @Injectable()
 export class AssignmentsService {
@@ -145,9 +146,60 @@ export class AssignmentsService {
       throw new BadRequestException('Must accept the assignment before checking in');
     }
 
+    // location stays free-form for backward compatibility (a plain address
+    // string wrapped in an object is still a valid check-in) — lat/lng/
+    // accuracy/capturedAt are read out defensively when present, matching
+    // the shape FieldForce's own check-in client sends.
+    const lat = typeof location?.lat === 'number' ? location.lat : undefined;
+    const lng = typeof location?.lng === 'number' ? location.lng : undefined;
+    const accuracy = typeof location?.accuracy === 'number' ? location.accuracy : undefined;
+    const capturedAt =
+      typeof location?.capturedAt === 'string' || location?.capturedAt instanceof Date
+        ? (location.capturedAt as string | Date)
+        : undefined;
+
+    const serviceCase = await this.prisma.serviceCase.findUnique({
+      where: { id: assignment.caseId },
+      select: {
+        property: { select: { latitude: true, longitude: true } },
+        asset: { select: { latitude: true, longitude: true } },
+      },
+    });
+    const target = serviceCase?.property ?? serviceCase?.asset ?? null;
+
+    const geofence = evaluateCheckIn({
+      lat,
+      lng,
+      accuracy,
+      capturedAt,
+      targetLat: target?.latitude,
+      targetLng: target?.longitude,
+    });
+
+    if (geofence.outcome === 'REJECTED') {
+      await this.audit.record({
+        caseId: assignment.caseId,
+        actorId: actor.id,
+        actorType: 'user',
+        action: 'assignment.check_in_rejected',
+        metadata: { assignmentId, reason: geofence.reason, distanceMeters: geofence.distanceMeters, location },
+      });
+
+      const message = GEOFENCE_REJECTION_MESSAGES[geofence.reason ?? ''] ?? 'Check-in could not be validated.';
+      if (geofence.reason === 'INVALID_COORDINATES') throw new BadRequestException(message);
+      if (geofence.reason === 'OUTSIDE_GEOFENCE') throw new ForbiddenException(message);
+      throw new UnprocessableEntityException(message);
+    }
+
     const updated = await this.prisma.assignment.update({
       where: { id: assignmentId },
-      data: { checkInAt: new Date(), checkInLocation: location as any },
+      data: {
+        checkInAt: new Date(),
+        checkInLocation: location as any,
+        checkInAccuracy: accuracy,
+        geofenceResult: geofence.outcome,
+        geofenceDistanceMeters: geofence.distanceMeters,
+      },
     });
 
     await this.audit.record({
@@ -155,7 +207,7 @@ export class AssignmentsService {
       actorId: actor.id,
       actorType: 'user',
       action: 'assignment.checked_in',
-      metadata: { assignmentId, location },
+      metadata: { assignmentId, location, geofenceResult: geofence.outcome, distanceMeters: geofence.distanceMeters },
     });
 
     return updated;
