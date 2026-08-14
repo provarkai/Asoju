@@ -34,6 +34,7 @@ import { BeneficiaryRelayModule } from './beneficiary-relay/beneficiary-relay.mo
 import { AgentTieringModule } from './agent-tiering/agent-tiering.module';
 import { PredictiveCostingModule } from './predictive-costing/predictive-costing.module';
 import { TrackingModule } from './tracking/tracking.module';
+import { AgentTrustScoreModule } from './agent-trust-score/agent-trust-score.module';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { TrackingModule } from './tracking/tracking.module';
     AgentTieringModule,
     PredictiveCostingModule,
     TrackingModule,
+    AgentTrustScoreModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

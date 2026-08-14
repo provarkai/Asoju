@@ -885,6 +885,39 @@ model Agent {
 
   assignments   Assignment[]
   locationPings LocationPing[]
+  trustScore    AgentTrustScore?
+}
+
+/// Ported from FieldForce's trust-score.ts — a richer, complementary
+/// signal to Agent.tier/qcPassRate (#28's assignment-weighting tier),
+/// not a replacement for it. Weighted composite across five components,
+/// each adapted to what ASOJU's own data model actually tracks (see
+/// AgentTrustScoreService for exactly how each maps — several needed
+/// real adaptation, not a literal copy, since ASOJU has no Mission model
+/// and Assignment.completedAt has no setter anywhere in this app today).
+model AgentTrustScore {
+  id      String @id @default(uuid())
+  agentId String @unique
+  agent   Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  completionScore    Float // % of assignments whose case reached COMPLETED/CLOSED
+  gpsComplianceScore Float // check-in geofence PASS rate, among check-ins with a real target to judge against
+  evidenceScore      Float // % of assignments with evidence submitted before the case's SLA target
+  ratingScore        Float // Agent.performanceScore (1-5 stars), normalised to 0-100
+  responseScore      Float // bucketed avg time from assignment offer to acceptance
+  compositeScore     Float // weighted sum — see TRUST_WEIGHTS
+
+  trustTier  String // NEW | BRONZE | SILVER | GOLD | PLATINUM
+  trustBadge String?
+
+  totalAssignments     Int
+  completedAssignments Int
+
+  previousScore Float?
+  scoreTrend    String @default("STABLE") // IMPROVING | DECLINING | STABLE
+
+  calculatedAt DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Provider {
