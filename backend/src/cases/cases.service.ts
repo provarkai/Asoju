@@ -25,6 +25,7 @@ import { StorageService } from '../storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RaiseDisputeDto } from './dto/raise-dispute.dto';
 import { BENEFICIARY_CASE_SELECT, toBeneficiaryCaseDetail } from './beneficiary-case-view';
+import { slaHoursForCase } from './regional-sla';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
 
@@ -207,7 +208,7 @@ export class CasesService {
         assetId: dto.assetId,
         status: CaseStatus.DRAFT,
         originRequest: { connect: { id: request.id } },
-        slaTargetAt: new Date(Date.now() + slaHoursForPriority(priority) * 60 * 60 * 1000),
+        slaTargetAt: new Date(Date.now() + slaHoursForCase(slaHoursForPriority(priority), dto.location) * 60 * 60 * 1000),
       },
     });
 
@@ -284,7 +285,9 @@ export class CasesService {
         assetId: schedule.assetId,
         status: CaseStatus.DRAFT,
         spawnedFromScheduleId: schedule.id,
-        slaTargetAt: new Date(Date.now() + slaHoursForPriority(CasePriority.STANDARD) * 60 * 60 * 1000),
+        slaTargetAt: new Date(
+          Date.now() + slaHoursForCase(slaHoursForPriority(CasePriority.STANDARD), schedule.location) * 60 * 60 * 1000,
+        ),
       },
     });
 
