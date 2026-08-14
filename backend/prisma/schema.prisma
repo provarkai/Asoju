@@ -1057,6 +1057,19 @@ model Quote {
   scopeId String?
   scope   CaseScope? @relation(fields: [scopeId], references: [id], onDelete: SetNull)
 
+  /// Platform Expansion PRD §4.3 "Exchange Rate Lock & Transparency" —
+  /// "This quote of ₦50,000 is ~$50 at today's rate. This rate is locked
+  /// for 48 hours." Pinned at createQuote() from the same usdToNgnRate()
+  /// helper Subscription pricing already locks (see Subscription.fxRate's
+  /// comment) — this is the informational USD-equivalent shown to the
+  /// customer, distinct from `amount`/`currency` (always the real NGN
+  /// payable, unaffected by whether this lock has expired). Nullable
+  /// throughout: a quote made up entirely of external/third-party lines
+  /// with no ASOJU_SERVICE_FEE portion has nothing meaningful to lock.
+  lockedFxRate   Decimal?  @db.Decimal(12, 4)
+  sourceCurrency String?
+  fxLockExpiry   DateTime?
+
   invoices        Invoice[]
   scLedgerEntries ScLedgerEntry[]
 }

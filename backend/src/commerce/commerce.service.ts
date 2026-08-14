@@ -46,6 +46,19 @@ function quoteValidityHours(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_QUOTE_VALIDITY_HOURS;
 }
 
+const DEFAULT_FX_LOCK_HOURS = 48;
+
+/** Platform Expansion PRD §4.3 — "This rate is locked for 48 hours."
+ * Configurable per environment, same pattern as QUOTE_VALIDITY_HOURS/
+ * PAYMENT_EXPIRY_HOURS. Purely informational (see Quote.fxLockExpiry's
+ * schema comment) — does not gate acceptance; the quote's own expiresAt
+ * is the real deadline. */
+function fxLockHours(): number {
+  const configured = process.env.FX_LOCK_HOURS;
+  const parsed = configured ? Number(configured) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FX_LOCK_HOURS;
+}
+
 const DEFAULT_REFUND_APPROVAL_THRESHOLD_NGN = 200_000;
 
 /** P0 Security, Privacy & Trust Architecture v1.0 §8 "Privileged Action
@@ -131,6 +144,12 @@ export class CommerceService {
     const finalServiceFee = benefit ? benefit.finalAmount : serviceFeeTotal;
     const amount = finalServiceFee + nonServiceFeeTotal;
 
+    // Platform Expansion PRD §4.3 — pinned once, at the moment the
+    // customer first sees a price, from the same rate Subscription
+    // pricing already locks. Only meaningful when there's an actual
+    // ASOJU_SERVICE_FEE portion to express in USD.
+    const fxRate = serviceFeeTotal > 0 ? usdToNgnRate() : null;
+
     const quote = await this.prisma.quote.create({
       data: {
         caseId,
@@ -147,6 +166,9 @@ export class CommerceService {
         discountPercent: benefit?.discountPercent,
         discountAmount: benefit?.discountAmount,
         scAppliedNgn: benefit?.scAppliedNgn,
+        lockedFxRate: fxRate,
+        sourceCurrency: fxRate ? 'USD' : null,
+        fxLockExpiry: fxRate ? new Date(Date.now() + fxLockHours() * 60 * 60 * 1000) : null,
         lines: { create: dto.lines.map((l) => ({ category: l.category, label: l.label, amount: l.amount })) },
       },
       include: { lines: true },

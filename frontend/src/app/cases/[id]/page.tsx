@@ -52,6 +52,9 @@ interface QuoteEntry {
   discountPercent: string | null;
   discountAmount: string | null;
   scAppliedNgn: string | null;
+  lockedFxRate: string | null;
+  sourceCurrency: string | null;
+  fxLockExpiry: string | null;
   lines: QuoteLineEntry[];
 }
 
@@ -303,6 +306,15 @@ export default function CaseDetailPage() {
                     <span>{q.currency} {Number(line.amount).toLocaleString()}</span>
                   </div>
                 ))}
+              {q.lockedFxRate && (
+                <p className="muted" style={{ margin: '0.2rem 0 0.5rem', fontSize: '0.9em' }}>
+                  ≈ {q.sourceCurrency} {(Number(q.amount) / Number(q.lockedFxRate)).toFixed(2)} at today&apos;s rate
+                  ({q.currency} {Number(q.lockedFxRate).toLocaleString()} / {q.sourceCurrency}).
+                  {q.fxLockExpiry && new Date(q.fxLockExpiry) > new Date()
+                    ? ` Locked until ${new Date(q.fxLockExpiry).toLocaleString()}.`
+                    : ' This locked rate has expired — contact support for the current rate.'}
+                </p>
+              )}
               {q.discountPercent && (
                 <div className="case-row">
                   <span className="muted">Membership discount ({Number(q.discountPercent)}%)</span>
