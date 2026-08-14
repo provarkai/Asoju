@@ -719,6 +719,10 @@ model ServiceCase {
   /// P0 Tech Platform §33 "Financial & Analytics Requirements" — see DirectCost.
   directCosts DirectCost[]
 
+  /// Platform Expansion PRD "Moat Builder" — Emergency SOS Protocol, see
+  /// SosAlert.
+  sosAlerts SosAlert[]
+
   @@index([status])
   @@index([customerId])
   @@index([serviceType])
@@ -887,6 +891,7 @@ model Agent {
   locationPings LocationPing[]
   trustScore    AgentTrustScore?
   wallet        WalletAccount?
+  sosAlerts     SosAlert[]
 }
 
 /// Ported from FieldForce's trust-score.ts — a richer, complementary
@@ -989,6 +994,7 @@ model Assignment {
 
   restrictedDocuments Document[]
   locationPings       LocationPing[]
+  sosAlerts           SosAlert[]
 
   @@index([caseId])
 }
@@ -1381,6 +1387,55 @@ model WalletEntry {
   @@index([agentId])
   @@index([walletAccountId])
   @@index([caseId])
+}
+
+/// #40 — Emergency SOS Protocol, ported from FieldForce's sos-protocol.ts.
+/// Trigger/acknowledge/resolve/escalate for a field agent in trouble, with
+/// a 4-channel escalation chain (admin -> whatsapp -> emergency_contact ->
+/// police). One real adaptation from FieldForce: instead of a passive
+/// `evidenceLocked` boolean that nothing else in that codebase actually
+/// enforces, a HIGH/CRITICAL alert on an active case calls this app's
+/// real CasesService.holdCase() — putting the case ON_HOLD is an
+/// enforced, auditable state change (CaseStatusHistory + AuditEvent),
+/// not just a flag. `caseHeld` records whether that happened.
+model SosAlert {
+  id           String      @id @default(uuid())
+  agentId      String
+  agent        Agent       @relation(fields: [agentId], references: [id])
+  caseId       String?
+  case         ServiceCase? @relation(fields: [caseId], references: [id])
+  assignmentId String?
+  assignment   Assignment? @relation(fields: [assignmentId], references: [id])
+
+  alertType String // GENERAL | MEDICAL | SECURITY | SAFETY | LOST
+  severity  String // LOW | MEDIUM | HIGH | CRITICAL
+  message   String?
+  latitude  Float
+  longitude Float
+  accuracy  Float?
+  address   String?
+
+  status String @default("ACTIVE") // ACTIVE | ACKNOWLEDGED | RESOLVED | ESCALATED | FALSE_ALARM
+
+  acknowledgedById String? // User.id — no Prisma relation, same convention as CaseStatusHistory.changedById
+  acknowledgedAt   DateTime?
+  resolvedById     String?
+  resolvedAt       DateTime?
+  resolutionNotes  String?
+
+  escalationLevel   Int      @default(0)
+  escalatedChannels String[] @default([]) // subset of admin/whatsapp/emergency_contact/police, in order added
+
+  /// True when triggering this alert actually placed the linked case
+  /// ON_HOLD (severity HIGH/CRITICAL + an active, holdable case).
+  caseHeld Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agentId])
+  @@index([caseId])
+  @@index([status])
 }
 
 /// P0 Tech Platform Requirements §33 "Financial & Analytics Requirements"

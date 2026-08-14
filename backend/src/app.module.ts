@@ -37,6 +37,7 @@ import { TrackingModule } from './tracking/tracking.module';
 import { AgentTrustScoreModule } from './agent-trust-score/agent-trust-score.module';
 import { AgentWalletModule } from './agent-wallet/agent-wallet.module';
 import { AgentFinancialPlanningModule } from './agent-financial-planning/agent-financial-planning.module';
+import { AgentSosModule } from './agent-sos/agent-sos.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { AgentFinancialPlanningModule } from './agent-financial-planning/agent-f
     AgentTrustScoreModule,
     AgentWalletModule,
     AgentFinancialPlanningModule,
+    AgentSosModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
