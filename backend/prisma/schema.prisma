@@ -886,6 +886,7 @@ model Agent {
   assignments   Assignment[]
   locationPings LocationPing[]
   trustScore    AgentTrustScore?
+  wallet        WalletAccount?
 }
 
 /// Ported from FieldForce's trust-score.ts — a richer, complementary
@@ -1328,7 +1329,58 @@ model Payout {
   amount        Decimal        @db.Decimal(12, 2)
   currency      String         @default("NGN")
   status        PaymentStatus  @default(PENDING)
+  /// #38 — the field this model always lacked a caller for. Set on every
+  /// payout AgentWalletService.recordPayout creates; there is no payment
+  /// gateway integration for outbound agent transfers, so a Payout row
+  /// here is Finance recording that a payout already happened (same
+  /// "this is a record, not a trigger" honesty as DirectCost), not a
+  /// money-movement call. Debits the agent's WalletAccount by the same
+  /// amount — see WalletEntry (type PAYOUT_DEBIT) for the ledger side.
+  note          String?
   createdAt     DateTime       @default(now())
+}
+
+/// #38 — a real agent earnings ledger, inherited from FieldForce's
+/// ledger.ts/WalletAccount pattern. Confirmed nothing equivalent existed:
+/// Payout (above) had zero call sites, and there was no way to track what
+/// an agent had actually earned versus been paid. Deliberately simpler
+/// than FieldForce's pending/qcCleared/available three-bucket balance —
+/// ASOJU has no automatic case->fee formula to credit earnings against
+/// (nothing in this codebase ties a case's price to an agent's cut), so
+/// crediting is a single explicit Finance action (recordEarning, gated on
+/// the case having actually passed QC) rather than an automatic pending
+/// balance that clears itself. One bucket, not three: availableBalance.
+model WalletAccount {
+  id               String   @id @default(uuid())
+  agentId          String   @unique
+  agent            Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  availableBalance Decimal  @default(0) @db.Decimal(12, 2)
+  totalEarnings    Decimal  @default(0) @db.Decimal(12, 2)
+  totalPaid        Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  entries WalletEntry[]
+}
+
+/// Immutable ledger — a correction is a new row, never an edit to a prior
+/// one, same discipline as DirectCost/Refund/Reconciliation.
+model WalletEntry {
+  id              String        @id @default(uuid())
+  agentId         String
+  walletAccountId String
+  walletAccount   WalletAccount @relation(fields: [walletAccountId], references: [id], onDelete: Cascade)
+  type            String // EARNING | PAYOUT_DEBIT
+  amount          Decimal       @db.Decimal(12, 2) // always positive; `type` gives direction
+  caseId          String? // set on EARNING entries
+  payoutId        String? // set on PAYOUT_DEBIT entries
+  description     String?
+  actorId         String? // who recorded this (Finance/Admin)
+  createdAt       DateTime      @default(now())
+
+  @@index([agentId])
+  @@index([walletAccountId])
+  @@index([caseId])
 }
 
 /// P0 Tech Platform Requirements §33 "Financial & Analytics Requirements"
