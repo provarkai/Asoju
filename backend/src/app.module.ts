@@ -36,6 +36,7 @@ import { PredictiveCostingModule } from './predictive-costing/predictive-costing
 import { TrackingModule } from './tracking/tracking.module';
 import { AgentTrustScoreModule } from './agent-trust-score/agent-trust-score.module';
 import { AgentWalletModule } from './agent-wallet/agent-wallet.module';
+import { AgentFinancialPlanningModule } from './agent-financial-planning/agent-financial-planning.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { AgentWalletModule } from './agent-wallet/agent-wallet.module';
     TrackingModule,
     AgentTrustScoreModule,
     AgentWalletModule,
+    AgentFinancialPlanningModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
