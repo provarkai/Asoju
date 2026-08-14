@@ -13,6 +13,9 @@ chat-service/data/*.db-wal
 chat-service/uploads/*
 !chat-service/uploads/.gitkeep
 
+# Locally rendered service report PDFs (dev-only LOCAL storage provider)
+storage/service-reports/
+
 # Runtime / logs
 *.pid
 *.log
