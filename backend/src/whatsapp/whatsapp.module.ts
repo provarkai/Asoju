@@ -3,9 +3,10 @@ import { WhatsappService } from './whatsapp.service';
 import { WhatsappSenderService } from './whatsapp-sender.service';
 import { WhatsappController } from './whatsapp.controller';
 import { AiModule } from '../ai/ai.module';
+import { CasesModule } from '../cases/cases.module';
 
 @Module({
-  imports: [AiModule],
+  imports: [AiModule, CasesModule],
   providers: [WhatsappService, WhatsappSenderService],
   controllers: [WhatsappController],
   // WhatsappSenderService is also exported (not just WhatsappService) so

@@ -8,6 +8,8 @@ import { CasesService } from '../cases/cases.service';
 import { RiskEngineService } from '../risk/risk-engine.service';
 import { StorageService } from '../storage/storage.service';
 import { AgentTieringService } from '../agent-tiering/agent-tiering.service';
+import { WhatsappSenderService } from '../whatsapp/whatsapp-sender.service';
+import { buildCaseApprovalButtons } from '../whatsapp/case-approval-buttons';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateEvidenceDto } from './dto/create-evidence.dto';
 import { PerformQcDto } from './dto/perform-qc.dto';
@@ -30,6 +32,7 @@ export class EvidenceService {
     private readonly riskEngine: RiskEngineService,
     private readonly storage: StorageService,
     private readonly agentTiering: AgentTieringService,
+    private readonly whatsappSender: WhatsappSenderService,
   ) {}
 
   /** Step one of a real upload: mints a case-scoped key and a short-lived
@@ -195,7 +198,7 @@ export class EvidenceService {
   async performQc(actor: AuthenticatedUser, caseId: string, dto: PerformQcDto) {
     const serviceCase = await this.prisma.serviceCase.findUnique({
       where: { id: caseId },
-      include: { customer: true },
+      include: { customer: { include: { user: true } } },
     });
     if (!serviceCase) throw new NotFoundException('Case not found');
     const qcEligibleStatuses: CaseStatus[] = [CaseStatus.EVIDENCE_SUBMITTED, CaseStatus.QUALITY_CONTROL];
@@ -250,6 +253,21 @@ export class EvidenceService {
           ? `The report for ${serviceCase.caseNumber} is ready for your review — it includes a noted limitation, see the report for details.`
           : `The report for ${serviceCase.caseNumber} is ready for your review — approve it or let us know if something needs another look.`,
       );
+
+      // Platform Expansion PRD §6.1 "Deeper WhatsApp-first case approval"
+      // — on top of the in-app/channel-fanout notification above, a
+      // customer who's on WhatsApp (same signal NotificationsService
+      // already uses) gets tappable Approve/Request-changes buttons
+      // wired to CasesService.recordApproval via WhatsappService.
+      const customerUser = serviceCase.customer.user;
+      if (customerUser.preferredChannel === 'whatsapp' && customerUser.phone && this.whatsappSender.isConfigured()) {
+        await this.whatsappSender.sendApprovalRequest(
+          customerUser.phone,
+          serviceCase.caseNumber,
+          buildCaseApprovalButtons(caseId),
+        );
+      }
+
       return { outcome: dto.outcome, report };
     }
 

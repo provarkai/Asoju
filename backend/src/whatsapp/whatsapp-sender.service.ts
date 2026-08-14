@@ -51,6 +51,56 @@ export class WhatsappSenderService {
       return { sent: false, dryRun: true };
     }
 
+    return this.postMessage({
+      to: toPhone,
+      channel: 'whatsapp',
+      text,
+      // This is a conversational AI reply, not a notification — never
+      // silently reroute it to SMS if WhatsApp delivery fails (Zavu
+      // defaults fallbackEnabled to true, which would otherwise text a
+      // customer expecting a WhatsApp thread from an unrecognised SMS
+      // sender instead).
+      fallbackEnabled: false,
+    });
+  }
+
+  /** Platform Expansion PRD §6.1 "Deeper WhatsApp-first case approval" —
+   * a report-ready notification with tappable Approve/Request-changes
+   * buttons instead of plain text, so a customer can act without typing.
+   * Button `id`s are echoed back verbatim on reply (see
+   * case-approval-buttons.ts) — that's a general WhatsApp Business
+   * Cloud API interactive-message convention, not confirmed against
+   * Zavu's own docs specifically (same caveat as WhatsappWebhookGuard's
+   * inbound signature gap — verify byte-for-byte against a real Zavu
+   * payload before this carries real customer approvals). Dry-run-safe
+   * same as sendMessage. */
+  async sendApprovalRequest(
+    toPhone: string,
+    caseNumber: string,
+    buttons: { id: string; title: string }[],
+  ): Promise<{ sent: boolean; dryRun: boolean }> {
+    const bodyText = `Your report for ${caseNumber} is ready for review.`;
+    if (!this.isConfigured()) {
+      this.logger.warn(
+        `WhatsApp interactive approval request is not configured (dry run) — would have sent to ${toPhone}: "${bodyText}" with buttons ${buttons.map((b) => b.title).join(', ')}`,
+      );
+      return { sent: false, dryRun: true };
+    }
+
+    return this.postMessage({
+      to: toPhone,
+      channel: 'whatsapp',
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: bodyText },
+        action: { buttons: buttons.map((b) => ({ type: 'reply', reply: { id: b.id, title: b.title } })) },
+      },
+      fallbackEnabled: false,
+    });
+  }
+
+  private async postMessage(payload: Record<string, unknown>): Promise<{ sent: boolean; dryRun: boolean }> {
     const apiKey = process.env.ZAVU_API_KEY!;
     const senderId = process.env.ZAVU_SENDER_ID;
 
@@ -61,17 +111,7 @@ export class WhatsappSenderService {
         'Content-Type': 'application/json',
         ...(senderId ? { 'Zavu-Sender': senderId } : {}),
       },
-      body: JSON.stringify({
-        to: toPhone,
-        channel: 'whatsapp',
-        text,
-        // This is a conversational AI reply, not a notification — never
-        // silently reroute it to SMS if WhatsApp delivery fails (Zavu
-        // defaults fallbackEnabled to true, which would otherwise text a
-        // customer expecting a WhatsApp thread from an unrecognised SMS
-        // sender instead).
-        fallbackEnabled: false,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
