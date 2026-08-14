@@ -5,6 +5,7 @@ import { apiFetch } from '@/lib/api';
 import { useAuthGuard } from '@/lib/useAuthGuard';
 import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
 import { SecuritySettings } from '@/components/SecuritySettings';
+import { VaultSection } from '@/components/profile/VaultSection';
 
 interface Beneficiary { id: string; fullName: string; relationship: string | null; phone: string | null; userId: string | null }
 interface Property { id: string; address: string; city: string | null; state: string | null }
@@ -418,6 +419,8 @@ export default function ProfilePage() {
           <button className="btn" type="submit">Add asset</button>
         </form>
       </div>
+
+      <VaultSection />
     </div>
   );
 }
