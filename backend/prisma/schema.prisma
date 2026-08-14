@@ -334,30 +334,32 @@ model User {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  customer              Customer?
-  agentProfile          Agent?
-  providerProfile       Provider?
-  refreshTokens         RefreshToken[]
-  passwordResetTokens   PasswordResetToken[]
-  caseCollaborators     CaseCollaborator[]
-  uploadedEvidence      Evidence[]             @relation("EvidenceUploader")
-  auditEvents           AuditEvent[]
-  messagesSent          Message[]              @relation("MessageSender")
-  notifications         Notification[]
-  approvals             Approval[]
-  ratings               Rating[]
-  rmPortfolio           Customer[]             @relation("CustomerRm")
-  whatsAppThread        WhatsAppThread?
-  partnerContact        PartnerContact?
-  scopesCreated         CaseScope[]            @relation("ScopeCreatedBy")
-  scopesConfirmed       CaseScope[]            @relation("ScopeConfirmedBy")
-  planConfigsUpdated    MembershipPlanConfig[] @relation("PlanConfigUpdatedBy")
-  ownedCases            ServiceCase[]          @relation("CaseOwner")
-  directCostsRecorded   DirectCost[]
-  refundRequestsMade    RefundRequest[]        @relation("RefundRequestedBy")
-  refundRequestsDecided RefundRequest[]        @relation("RefundDecidedBy")
-  beneficiaryProfile    Beneficiary?           @relation("BeneficiaryUser")
-  disputesResolved      Dispute[]
+  customer                             Customer?
+  agentProfile                         Agent?
+  providerProfile                      Provider?
+  refreshTokens                        RefreshToken[]
+  passwordResetTokens                  PasswordResetToken[]
+  caseCollaborators                    CaseCollaborator[]
+  uploadedEvidence                     Evidence[]                @relation("EvidenceUploader")
+  auditEvents                          AuditEvent[]
+  messagesSent                         Message[]                 @relation("MessageSender")
+  notifications                        Notification[]
+  approvals                            Approval[]
+  ratings                              Rating[]
+  rmPortfolio                          Customer[]                @relation("CustomerRm")
+  whatsAppThread                       WhatsAppThread?
+  partnerContact                       PartnerContact?
+  scopesCreated                        CaseScope[]               @relation("ScopeCreatedBy")
+  scopesConfirmed                      CaseScope[]               @relation("ScopeConfirmedBy")
+  planConfigsUpdated                   MembershipPlanConfig[]    @relation("PlanConfigUpdatedBy")
+  ownedCases                           ServiceCase[]             @relation("CaseOwner")
+  directCostsRecorded                  DirectCost[]
+  refundRequestsMade                   RefundRequest[]           @relation("RefundRequestedBy")
+  refundRequestsDecided                RefundRequest[]           @relation("RefundDecidedBy")
+  beneficiaryProfile                   Beneficiary?              @relation("BeneficiaryUser")
+  disputesResolved                     Dispute[]
+  beneficiaryRelayMessagesSent         BeneficiaryRelayMessage[] @relation("BeneficiaryRelaySender")
+  beneficiaryRelayMessagesAcknowledged BeneficiaryRelayMessage[] @relation("BeneficiaryRelayAcknowledgedBy")
 
   @@index([role])
 }
@@ -644,26 +646,27 @@ model ServiceCase {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  originRequest  ServiceRequest?     @relation("RequestToCase")
-  tasks          CaseTask[]
-  statusHistory  CaseStatusHistory[]
-  riskFlags      CaseRiskFlag[]
-  assignments    Assignment[]
-  collaborators  CaseCollaborator[]
-  documents      Document[]
-  evidence       Evidence[]
-  reports        Report[]
-  quotes         Quote[]
-  invoices       Invoice[]
-  messages       Message[]
-  complaints     Complaint[]
-  incidents      Incident[]
-  auditEvents    AuditEvent[]
-  approvals      Approval[]
-  aiInteractions AiInteraction[]
-  rating         Rating?
-  disputes       Dispute[]
-  arrivalProfile ArrivalProfile?
+  originRequest            ServiceRequest?           @relation("RequestToCase")
+  tasks                    CaseTask[]
+  statusHistory            CaseStatusHistory[]
+  riskFlags                CaseRiskFlag[]
+  assignments              Assignment[]
+  collaborators            CaseCollaborator[]
+  documents                Document[]
+  evidence                 Evidence[]
+  reports                  Report[]
+  quotes                   Quote[]
+  invoices                 Invoice[]
+  messages                 Message[]
+  complaints               Complaint[]
+  incidents                Incident[]
+  auditEvents              AuditEvent[]
+  approvals                Approval[]
+  aiInteractions           AiInteraction[]
+  rating                   Rating?
+  disputes                 Dispute[]
+  arrivalProfile           ArrivalProfile?
+  beneficiaryRelayMessages BeneficiaryRelayMessage[]
 
   /// Section 12 P1 "recurring services" — set when this case was the one
   /// a recurring schedule was configured from.
@@ -1570,6 +1573,46 @@ model Dispute {
   resolvedById    String?
   resolvedBy      User?         @relation(fields: [resolvedById], references: [id])
   createdAt       DateTime      @default(now())
+
+  @@index([caseId])
+}
+
+/// Platform Expansion PRD §4.4 "Two-Way Beneficiary Relay" — upgrades the
+/// read-only Beneficiary portal (BENEFICIARY_CASE_SELECT) to a
+/// structured, moderated channel. Deliberately Beneficiary <-> Case
+/// Manager only: CaseAccessGuard already keeps FIELD_AGENT/PROVIDER off
+/// any :caseId route entirely for other roles, and this module's own
+/// @Roles() list (Role.BENEFICIARY + case-management staff, no
+/// FIELD_AGENT/PROVIDER) is what actually delivers "without exposing
+/// their PII to the Field Agent" — agents never reach this endpoint, not
+/// just a response-shape filter.
+enum BeneficiaryRelayMessageType {
+  MESSAGE
+  OBJECTION
+}
+
+model BeneficiaryRelayMessage {
+  id     String      @id @default(uuid())
+  caseId String
+  case   ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  /// Whoever actually sent it — the beneficiary's own User for an inbound
+  /// message, a staff member's User for a reply.
+  senderId        String
+  sender          User    @relation("BeneficiaryRelaySender", fields: [senderId], references: [id])
+  fromBeneficiary Boolean
+
+  type BeneficiaryRelayMessageType @default(MESSAGE)
+  body String
+
+  /// Set when staff mark an OBJECTION as triaged — MESSAGE-type entries
+  /// are never expected to need this (a plain message doesn't sit in a
+  /// "needs response" queue the way an objection does).
+  acknowledgedAt   DateTime?
+  acknowledgedById String?
+  acknowledgedBy   User?     @relation("BeneficiaryRelayAcknowledgedBy", fields: [acknowledgedById], references: [id])
+
+  createdAt DateTime @default(now())
 
   @@index([caseId])
 }

@@ -30,6 +30,7 @@ import { RiskEngineModule } from './risk/risk-engine.module';
 import { PartnersModule } from './partners/partners.module';
 import { VaultModule } from './vault/vault.module';
 import { ArrivalModule } from './arrival/arrival.module';
+import { BeneficiaryRelayModule } from './beneficiary-relay/beneficiary-relay.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { ArrivalModule } from './arrival/arrival.module';
     PartnersModule,
     VaultModule,
     ArrivalModule,
+    BeneficiaryRelayModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
