@@ -6,6 +6,7 @@ import {
   CasePriority,
   CaseStatus,
   CollaboratorRole,
+  DisputeStatus,
   Role,
   ServiceType,
 } from '@prisma/client';
@@ -19,6 +20,8 @@ import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { filterDocumentsForFieldActor } from '../documents/document-visibility';
 import { redactCustomerName } from '../common/pii-restricted-roles';
 import { StorageService } from '../storage/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { RaiseDisputeDto } from './dto/raise-dispute.dto';
 import { BENEFICIARY_CASE_SELECT, toBeneficiaryCaseDetail } from './beneficiary-case-view';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
@@ -67,6 +70,7 @@ export class CasesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly storage: StorageService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // -- Service requests (pre-case intake) ------------------------------
@@ -739,6 +743,103 @@ export class CasesService {
     });
 
     return updated;
+  }
+
+  /** Section 3.1 — customer rejects the delivered report. Only reachable
+   * from CUSTOMER_REVIEW (the report must actually be in front of them),
+   * and — like holdCase/resumeCase — bypasses the static TRANSITIONS map
+   * since DISPUTED is a side-status, not a normal forward step. Creates a
+   * standalone Dispute record (structured reasons + its own resolution
+   * lifecycle) rather than reusing Approval, which has no "team resolves
+   * this later" concept. */
+  async raiseDispute(actor: AuthenticatedUser, caseId: string, dto: RaiseDisputeDto) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+    if (serviceCase.status !== CaseStatus.CUSTOMER_REVIEW) {
+      throw new BadRequestException('Disputes can only be raised once a report is ready for your review');
+    }
+
+    const customer = await this.requireCustomerProfile(actor.id);
+    const dispute = await this.prisma.dispute.create({
+      data: { caseId, customerId: customer.id, reasons: dto.reasons, notes: dto.notes },
+    });
+
+    await this.prisma.serviceCase.update({ where: { id: caseId }, data: { status: CaseStatus.DISPUTED } });
+    await this.prisma.caseStatusHistory.create({
+      data: {
+        caseId,
+        fromStatus: CaseStatus.CUSTOMER_REVIEW,
+        toStatus: CaseStatus.DISPUTED,
+        changedById: actor.id,
+        reason: `Customer disputed the report: ${dto.reasons.join(', ')}`,
+      },
+    });
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.dispute_raised',
+      metadata: { disputeId: dispute.id, reasons: dto.reasons },
+    });
+    await this.notifications.notify(
+      actor.id,
+      'Dispute filed',
+      'The report has been locked and a rework on the disputed items has been scheduled.',
+    );
+
+    return dispute;
+  }
+
+  /** Staff-side resolution — accepts the dispute and sends the case back
+   * for rework. Only one OPEN dispute is expected per case at a time
+   * (raiseDispute requires CUSTOMER_REVIEW, which a case can't re-enter
+   * while DISPUTED), but this resolves the oldest open one defensively
+   * rather than assuming exactly one exists. */
+  async resolveDispute(actor: AuthenticatedUser, caseId: string, note?: string) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({
+      where: { id: caseId },
+      include: { customer: true },
+    });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+    if (serviceCase.status !== CaseStatus.DISPUTED) {
+      throw new BadRequestException('Case is not disputed');
+    }
+
+    const dispute = await this.prisma.dispute.findFirst({
+      where: { caseId, status: DisputeStatus.OPEN },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (dispute) {
+      await this.prisma.dispute.update({
+        where: { id: dispute.id },
+        data: { status: DisputeStatus.RESOLVED, resolvedAt: new Date(), resolvedById: actor.id },
+      });
+    }
+
+    await this.prisma.serviceCase.update({ where: { id: caseId }, data: { status: CaseStatus.ADDITIONAL_WORK } });
+    await this.prisma.caseStatusHistory.create({
+      data: {
+        caseId,
+        fromStatus: CaseStatus.DISPUTED,
+        toStatus: CaseStatus.ADDITIONAL_WORK,
+        changedById: actor.id,
+        reason: note ?? 'Dispute accepted — rework scheduled on disputed items',
+      },
+    });
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.dispute_resolved',
+      metadata: { disputeId: dispute?.id, note },
+    });
+    await this.notifications.notify(
+      serviceCase.customer.userId,
+      'Dispute accepted — rework underway',
+      "We've accepted your dispute and scheduled rework on the disputed items.",
+    );
+
+    return { ok: true };
   }
 
   private async requireCustomerProfile(userId: string) {

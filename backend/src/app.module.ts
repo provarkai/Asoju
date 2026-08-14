@@ -28,6 +28,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { RiskEngineModule } from './risk/risk-engine.module';
 import { PartnersModule } from './partners/partners.module';
+import { VaultModule } from './vault/vault.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { PartnersModule } from './partners/partners.module';
     AccountsModule,
     RiskEngineModule,
     PartnersModule,
+    VaultModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

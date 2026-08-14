@@ -6,6 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { AiService } from './ai.service';
 import { ConciergeMessageDto } from './dto/concierge-message.dto';
+import { ConciergeFeedbackDto } from './dto/concierge-feedback.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('ai/concierge')
@@ -16,6 +17,12 @@ export class AiController {
   @Post('message')
   sendMessage(@CurrentUser() user: AuthenticatedUser, @Body() dto: ConciergeMessageDto) {
     return this.aiService.converse(user, dto);
+  }
+
+  @Roles(Role.CUSTOMER)
+  @Post('feedback')
+  recordFeedback(@CurrentUser() user: AuthenticatedUser, @Body() dto: ConciergeFeedbackDto) {
+    return this.aiService.recordConciergeFeedback(user, dto);
   }
 }
 

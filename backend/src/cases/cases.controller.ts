@@ -15,6 +15,7 @@ import { AssignOwnerDto } from './dto/assign-owner.dto';
 import { SetNextActionDto } from './dto/set-next-action.dto';
 import { HoldCaseDto } from './dto/hold-case.dto';
 import { ResumeCaseDto } from './dto/resume-case.dto';
+import { RaiseDisputeDto } from './dto/raise-dispute.dto';
 
 const STAFF_TRIAGE_ROLES = [Role.CASE_MANAGER, Role.RELATIONSHIP_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
 const STAFF_TRANSITION_ROLES = [Role.CASE_MANAGER, Role.QUALITY_CONTROL, Role.ADMIN, Role.SUPER_ADMIN];
@@ -161,5 +162,31 @@ export class CasesController {
   @Post('cases/:caseId/resume')
   resumeCase(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Body() dto: ResumeCaseDto) {
     return this.casesService.resumeCase(user, caseId, dto.reason);
+  }
+
+  /** Section 3.1 — customer rejects the delivered report with specific,
+   * structured reasons (distinct from the lighter REQUEST_ADDITIONAL_WORK
+   * approval action — see raiseDispute's docstring). */
+  @Roles(Role.CUSTOMER)
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/dispute')
+  raiseDispute(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Body() dto: RaiseDisputeDto,
+  ) {
+    return this.casesService.raiseDispute(user, caseId, dto);
+  }
+
+  /** Staff-side: accepts the dispute and schedules rework. */
+  @Roles(...OPS_ROLES)
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/dispute/resolve')
+  resolveDispute(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Body() dto: ResumeCaseDto,
+  ) {
+    return this.casesService.resolveDispute(user, caseId, dto.reason);
   }
 }

@@ -99,6 +99,12 @@ enum CaseStatus {
   /// generic POST /transition, using ServiceCase.heldFromStatus to
   /// remember the way back.
   ON_HOLD
+  /// Section 3.1 — customer rejected the delivered report (raiseDispute).
+  /// Same "outside the static TRANSITIONS map" treatment as ON_HOLD: a
+  /// disputed case always resolves back to ADDITIONAL_WORK via
+  /// CasesService.resolveDispute, a fixed edge, so unlike ON_HOLD this
+  /// doesn't need its own heldFromStatus-style memory field.
+  DISPUTED
 }
 
 /// P0 Technical Build Spec Section 21 "Payment States". PROCESSING and
@@ -318,6 +324,7 @@ model User {
   refundRequestsMade    RefundRequest[]        @relation("RefundRequestedBy")
   refundRequestsDecided RefundRequest[]        @relation("RefundDecidedBy")
   beneficiaryProfile    Beneficiary?           @relation("BeneficiaryUser")
+  disputesResolved      Dispute[]
 
   @@index([role])
 }
@@ -391,6 +398,10 @@ model Customer {
   subscriptions      Subscription[]
   complaints         Complaint[]
   recurringSchedules RecurringSchedule[]
+  vaultDocuments     VaultDocument[]
+  verifiedAssets     VerifiedAsset[]
+  disputes           Dispute[]
+  conciergeFeedback  ConciergeFeedback[]
 }
 
 /// e.g. customer's parents/family being helped.
@@ -618,6 +629,7 @@ model ServiceCase {
   approvals      Approval[]
   aiInteractions AiInteraction[]
   rating         Rating?
+  disputes       Dispute[]
 
   /// Section 12 P1 "recurring services" — set when this case was the one
   /// a recurring schedule was configured from.
@@ -1461,4 +1473,112 @@ model Rating {
   stars     Int // 1-5
   comment   String?
   createdAt DateTime    @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Customer dispute / rejection workflow (Section 3.1)
+// ---------------------------------------------------------------------------
+
+enum DisputeStatus {
+  OPEN
+  RESOLVED
+}
+
+/// Customer-initiated rejection of a delivered report (CasesService.
+/// raiseDispute/resolveDispute). Distinct from Complaint, which is a
+/// staff-logged issue that doesn't necessarily come from the customer or
+/// move the case's state machine — raising a Dispute always transitions
+/// the case to CaseStatus.DISPUTED and locks it pending team review.
+model Dispute {
+  id           String        @id @default(uuid())
+  caseId       String
+  case         ServiceCase   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  customerId   String
+  customer     Customer      @relation(fields: [customerId], references: [id])
+  reasons      String[]
+  notes        String?
+  status       DisputeStatus @default(OPEN)
+  resolvedAt   DateTime?
+  resolvedById String?
+  resolvedBy   User?         @relation(fields: [resolvedById], references: [id])
+  createdAt    DateTime      @default(now())
+
+  @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// Customer document vault (Section 4.1/4.2 — "My Nigeria" locker)
+// ---------------------------------------------------------------------------
+
+enum VaultCategory {
+  TITLE_DEED
+  CAC_CERT
+  POWER_OF_ATTORNEY
+  IDENTITY
+  OTHER
+}
+
+/// Customer-owned documents stored independently of any single case (title
+/// deeds, CAC certs, IDs) — distinct from Document, which is always
+/// case-scoped. Same presign-then-verify upload pattern as
+/// Document/Evidence (see StorageService), just keyed by customerId
+/// instead of caseId.
+model VaultDocument {
+  id         String        @id @default(uuid())
+  customerId String
+  customer   Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name       String
+  category   VaultCategory @default(OTHER)
+  notes      String?
+  storageKey String?
+  fileName   String?
+  fileSize   Int?
+  isVerified Boolean       @default(false)
+  verifiedAt DateTime?
+  createdAt  DateTime      @default(now())
+
+  @@index([customerId])
+}
+
+/// Reusable, staff-verified legal assets (e.g. Power of Attorney) — once
+/// verified, intended to be referenced by future cases requiring legal
+/// execution instead of re-verifying the same document each time.
+model VerifiedAsset {
+  id         String        @id @default(uuid())
+  customerId String
+  customer   Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type       VaultCategory
+  name       String
+  verified   Boolean       @default(false)
+  verifiedAt DateTime?
+  notes      String?
+  createdAt  DateTime      @default(now())
+
+  @@index([customerId])
+}
+
+// ---------------------------------------------------------------------------
+// AI Concierge feedback loop (Section 7)
+// ---------------------------------------------------------------------------
+
+enum ConciergeFeedbackRating {
+  UP
+  DOWN
+}
+
+/// Thumbs up/down on an individual AI Concierge reply, so the team can
+/// review real conversations and iterate on the concierge prompt
+/// (system-prompt.ts) — separate from AiInteraction, which logs the
+/// structured outcome of a whole turn, not a human quality rating of it.
+model ConciergeFeedback {
+  id          String                  @id @default(uuid())
+  customerId  String
+  customer    Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rating      ConciergeFeedbackRating
+  userMessage String
+  aiReply     String
+  hadQuote    Boolean                 @default(false)
+  createdAt   DateTime                @default(now())
+
+  @@index([customerId])
 }

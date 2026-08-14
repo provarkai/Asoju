@@ -6,6 +6,7 @@ import { AuditService } from '../audit/audit.service';
 import { CONCIERGE_SYSTEM_PROMPT, PERSONAL_ASSISTANT_SYSTEM_PROMPT } from './system-prompt';
 import { scoreLead } from './scoring';
 import { ConciergeMessageDto } from './dto/concierge-message.dto';
+import { ConciergeFeedbackDto } from './dto/concierge-feedback.dto';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 
 interface ConciergeTurnResult {
@@ -274,5 +275,33 @@ export class AiService {
     });
 
     return { reply };
+  }
+
+  /** Section 7 — thumbs up/down on a single Concierge reply. Separate from
+   * AiInteraction (which logs the structured outcome of a whole turn, not
+   * a human quality rating of it) so the team can pull "what are customers
+   * marking as bad replies" without wading through every turn. */
+  async recordConciergeFeedback(user: AuthenticatedUser, dto: ConciergeFeedbackDto) {
+    const customer = await this.prisma.customer.findUnique({ where: { userId: user.id } });
+    if (!customer) throw new Error('No customer profile for this user');
+
+    const feedback = await this.prisma.conciergeFeedback.create({
+      data: {
+        customerId: customer.id,
+        rating: dto.rating,
+        userMessage: dto.userMessage,
+        aiReply: dto.aiReply,
+        hadQuote: dto.hadQuote ?? false,
+      },
+    });
+
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'user',
+      action: 'ai.concierge_feedback_recorded',
+      metadata: { feedbackId: feedback.id, rating: dto.rating },
+    });
+
+    return feedback;
   }
 }
