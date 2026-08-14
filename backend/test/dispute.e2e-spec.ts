@@ -8,6 +8,11 @@ import { Role } from '@prisma/client';
  * Section 3.1 — customer dispute/rejection workflow. Real app, real
  * Postgres. Same "outside the static TRANSITIONS map" treatment as
  * case-hold-resume.e2e-spec.ts covers for ON_HOLD.
+ *
+ * Platform Expansion PRD §3.1's "structured gap form": disputes now
+ * point at specific CaseTask checklist items (disputedTaskIds), not just
+ * free text, and raising one reopens exactly those tasks as the rework
+ * scope for the originally-assigned field agent.
  */
 describe('Case dispute workflow', () => {
   let app: INestApplication;
@@ -22,8 +27,10 @@ describe('Case dispute workflow', () => {
 
   /** Fast-forwards a fresh case to CUSTOMER_REVIEW — same setup as
    * qc-outcomes.e2e-spec.ts's createCaseAtEvidenceSubmitted, plus the
-   * QC approval that actually lands it in CUSTOMER_REVIEW. */
-  async function createCaseAtCustomerReview(): Promise<string> {
+   * QC approval that actually lands it in CUSTOMER_REVIEW. Returns the
+   * case's seeded checklist task ids alongside the caseId so tests can
+   * build a real structured gap form. */
+  async function createCaseAtCustomerReview(): Promise<{ caseId: string; taskIds: string[] }> {
     const reqRes = await request(app.getHttpServer())
       .post('/api/service-requests')
       .set('Authorization', `Bearer ${customerToken}`)
@@ -81,7 +88,12 @@ describe('Case dispute workflow', () => {
       .send({ outcome: 'APPROVED', summary: 'Inspection complete' })
       .expect(201);
 
-    return caseId;
+    const tasks = await prisma.caseTask.findMany({ where: { caseId }, orderBy: { sortOrder: 'asc' } });
+    // Mark them complete first (as a real QC-approved case would have),
+    // so raising a dispute has something meaningful to reopen.
+    await prisma.caseTask.updateMany({ where: { caseId }, data: { isComplete: true, completedAt: new Date() } });
+
+    return { caseId, taskIds: tasks.map((t) => t.id) };
   }
 
   beforeAll(async () => {
@@ -104,16 +116,28 @@ describe('Case dispute workflow', () => {
     await prisma.$disconnect();
   });
 
-  it('raises a dispute with structured reasons, then staff resolves it back to ADDITIONAL_WORK', async () => {
-    const caseId = await createCaseAtCustomerReview();
+  it('raises a dispute against specific checklist items, reopens exactly those, then staff resolves it back to ADDITIONAL_WORK', async () => {
+    const { caseId, taskIds } = await createCaseAtCustomerReview();
+    const disputedTaskIds = taskIds.slice(0, 2);
+    const untouchedTaskIds = taskIds.slice(2);
 
     const raised = await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/dispute`)
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ reasons: ['Photos missing', 'Wrong address visited'], notes: 'Please redo' })
+      .send({ disputedTaskIds, reasons: ['Photos missing', 'Wrong address visited'], notes: 'Please redo' })
       .expect(201);
     expect(raised.body.status).toBe('OPEN');
+    expect(raised.body.disputedTaskIds.sort()).toEqual([...disputedTaskIds].sort());
     expect(raised.body.reasons).toEqual(['Photos missing', 'Wrong address visited']);
+
+    // The rework scope: exactly the disputed tasks reopened, everything
+    // else the customer didn't flag stays completed.
+    const disputedAfter = await prisma.caseTask.findMany({ where: { id: { in: disputedTaskIds } } });
+    expect(disputedAfter.every((t) => t.isComplete === false)).toBe(true);
+    if (untouchedTaskIds.length > 0) {
+      const untouchedAfter = await prisma.caseTask.findMany({ where: { id: { in: untouchedTaskIds } } });
+      expect(untouchedAfter.every((t) => t.isComplete === true)).toBe(true);
+    }
 
     const caseAfterRaise = await request(app.getHttpServer())
       .get(`/api/cases/${caseId}`)
@@ -139,12 +163,22 @@ describe('Case dispute workflow', () => {
     expect(dispute?.resolvedById).toBeTruthy();
   });
 
-  it('rejects raising a dispute with no reasons', async () => {
-    const caseId = await createCaseAtCustomerReview();
+  it('rejects raising a dispute with no disputed items', async () => {
+    const { caseId } = await createCaseAtCustomerReview();
     await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/dispute`)
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ reasons: [] })
+      .send({ disputedTaskIds: [] })
+      .expect(400);
+  });
+
+  it("rejects a disputed item that isn't a checklist task on this case", async () => {
+    const { caseId } = await createCaseAtCustomerReview();
+    const { taskIds: otherCaseTaskIds } = await createCaseAtCustomerReview();
+    await request(app.getHttpServer())
+      .post(`/api/cases/${caseId}/dispute`)
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ disputedTaskIds: [otherCaseTaskIds[0]] })
       .expect(400);
   });
 
@@ -163,12 +197,12 @@ describe('Case dispute workflow', () => {
     await request(app.getHttpServer())
       .post(`/api/cases/${caseRes.body.id}/dispute`)
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ reasons: ['too early'] })
+      .send({ disputedTaskIds: ['too-early'] })
       .expect(400);
   });
 
   it('rejects resolving a dispute on a case that is not disputed', async () => {
-    const caseId = await createCaseAtCustomerReview();
+    const { caseId } = await createCaseAtCustomerReview();
     await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/dispute/resolve`)
       .set('Authorization', `Bearer ${adminToken}`)
@@ -177,16 +211,16 @@ describe('Case dispute workflow', () => {
   });
 
   it('blocks a field agent from raising or resolving a dispute', async () => {
-    const caseId = await createCaseAtCustomerReview();
+    const { caseId, taskIds } = await createCaseAtCustomerReview();
     await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/dispute`)
       .set('Authorization', `Bearer ${agentToken}`)
-      .send({ reasons: ['trying anyway'] })
+      .send({ disputedTaskIds: taskIds.slice(0, 1) })
       .expect(403);
   });
 
   it('the generic transition endpoint cannot be used to enter or leave DISPUTED', async () => {
-    const caseId = await createCaseAtCustomerReview();
+    const { caseId, taskIds } = await createCaseAtCustomerReview();
     await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/transition`)
       .set('Authorization', `Bearer ${adminToken}`)
@@ -196,7 +230,7 @@ describe('Case dispute workflow', () => {
     await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/dispute`)
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ reasons: ['bad report'] })
+      .send({ disputedTaskIds: taskIds.slice(0, 1), reasons: ['bad report'] })
       .expect(201);
 
     await request(app.getHttpServer())
@@ -206,12 +240,26 @@ describe('Case dispute workflow', () => {
       .expect(400);
   });
 
-  it('records case.dispute_raised and case.dispute_resolved audit events', async () => {
-    const caseId = await createCaseAtCustomerReview();
+  it('notifies the originally-assigned field agent when a dispute is raised against their work', async () => {
+    const { caseId, taskIds } = await createCaseAtCustomerReview();
     await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/dispute`)
       .set('Authorization', `Bearer ${customerToken}`)
-      .send({ reasons: ['Missing evidence'] })
+      .send({ disputedTaskIds: taskIds.slice(0, 1) })
+      .expect(201);
+
+    const notifications = await prisma.notification.findMany({
+      where: { userId: agent.user.id, title: { contains: 'Rework needed' } },
+    });
+    expect(notifications.length).toBeGreaterThan(0);
+  });
+
+  it('records case.dispute_raised and case.dispute_resolved audit events', async () => {
+    const { caseId, taskIds } = await createCaseAtCustomerReview();
+    await request(app.getHttpServer())
+      .post(`/api/cases/${caseId}/dispute`)
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ disputedTaskIds: taskIds.slice(0, 1), reasons: ['Missing evidence'] })
       .expect(201);
     await request(app.getHttpServer())
       .post(`/api/cases/${caseId}/dispute/resolve`)

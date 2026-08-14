@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { randomUUID } from 'crypto';
 import {
   ApprovalAction,
+  AssignmentRole,
   AssignmentStatus,
   CasePriority,
   CaseStatus,
@@ -759,9 +760,35 @@ export class CasesService {
       throw new BadRequestException('Disputes can only be raised once a report is ready for your review');
     }
 
+    // Structured gap form: every disputed item must actually be one of
+    // this case's checklist tasks — no disputing tasks from another
+    // case, no free-floating ids.
+    const disputedTasks = await this.prisma.caseTask.findMany({
+      where: { id: { in: dto.disputedTaskIds }, caseId },
+      select: { id: true },
+    });
+    if (disputedTasks.length !== dto.disputedTaskIds.length) {
+      throw new BadRequestException('One or more disputed items are not checklist tasks on this case');
+    }
+
     const customer = await this.requireCustomerProfile(actor.id);
     const dispute = await this.prisma.dispute.create({
-      data: { caseId, customerId: customer.id, reasons: dto.reasons, notes: dto.notes },
+      data: {
+        caseId,
+        customerId: customer.id,
+        disputedTaskIds: dto.disputedTaskIds,
+        reasons: dto.reasons ?? [],
+        notes: dto.notes,
+      },
+    });
+
+    // Auto-generated rework: reopen exactly the disputed checklist items.
+    // The existing checklist is the rework task the field agent already
+    // works from — nothing else on the case is touched, so completed
+    // items the customer didn't flag stay completed.
+    await this.prisma.caseTask.updateMany({
+      where: { id: { in: dto.disputedTaskIds }, caseId },
+      data: { isComplete: false, completedAt: null },
     });
 
     await this.prisma.serviceCase.update({ where: { id: caseId }, data: { status: CaseStatus.DISPUTED } });
@@ -771,7 +798,7 @@ export class CasesService {
         fromStatus: CaseStatus.CUSTOMER_REVIEW,
         toStatus: CaseStatus.DISPUTED,
         changedById: actor.id,
-        reason: `Customer disputed the report: ${dto.reasons.join(', ')}`,
+        reason: `Customer disputed ${dto.disputedTaskIds.length} checklist item(s)${dto.reasons?.length ? `: ${dto.reasons.join(', ')}` : ''}`,
       },
     });
     await this.audit.record({
@@ -779,13 +806,28 @@ export class CasesService {
       actorId: actor.id,
       actorType: 'user',
       action: 'case.dispute_raised',
-      metadata: { disputeId: dispute.id, reasons: dto.reasons },
+      metadata: { disputeId: dispute.id, disputedTaskIds: dto.disputedTaskIds, reasons: dto.reasons ?? [] },
     });
     await this.notifications.notify(
       actor.id,
       'Dispute filed',
       'The report has been locked and a rework on the disputed items has been scheduled.',
     );
+
+    // Notify the originally-assigned field agent directly — they're the
+    // one whose checklist just reopened, not just the ops queue.
+    const fieldAssignment = await this.prisma.assignment.findFirst({
+      where: { caseId, role: AssignmentRole.FIELD_AGENT, agentId: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      include: { agent: { select: { userId: true } } },
+    });
+    if (fieldAssignment?.agent) {
+      await this.notifications.notify(
+        fieldAssignment.agent.userId,
+        'Rework needed — customer disputed part of your report',
+        `${dto.disputedTaskIds.length} checklist item(s) were reopened for rework on case ${serviceCase.caseNumber}.`,
+      );
+    }
 
     return dispute;
   }

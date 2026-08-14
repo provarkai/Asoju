@@ -1502,18 +1502,29 @@ enum DisputeStatus {
 /// move the case's state machine — raising a Dispute always transitions
 /// the case to CaseStatus.DISPUTED and locks it pending team review.
 model Dispute {
-  id           String        @id @default(uuid())
-  caseId       String
-  case         ServiceCase   @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  customerId   String
-  customer     Customer      @relation(fields: [customerId], references: [id])
-  reasons      String[]
-  notes        String?
-  status       DisputeStatus @default(OPEN)
-  resolvedAt   DateTime?
-  resolvedById String?
-  resolvedBy   User?         @relation(fields: [resolvedById], references: [id])
-  createdAt    DateTime      @default(now())
+  id         String      @id @default(uuid())
+  caseId     String
+  case       ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer    @relation(fields: [customerId], references: [id])
+
+  /// Structured gap form (P0 Platform Expansion PRD §3.1) — which specific
+  /// CaseTask checklist items the customer is disputing, not just free
+  /// text. raiseDispute() validates every id here actually belongs to
+  /// this case's tasks and reopens exactly these (isComplete: false) as
+  /// the rework scope for the originally-assigned field agent — the
+  /// existing checklist *is* the rework task, no separate entity needed.
+  disputedTaskIds String[]
+  /// Free-text context alongside the structured items above (e.g. "photos
+  /// too dark to verify") — kept from the original design, no longer the
+  /// only signal of what's wrong.
+  reasons         String[]
+  notes           String?
+  status          DisputeStatus @default(OPEN)
+  resolvedAt      DateTime?
+  resolvedById    String?
+  resolvedBy      User?         @relation(fields: [resolvedById], references: [id])
+  createdAt       DateTime      @default(now())
 
   @@index([caseId])
 }
