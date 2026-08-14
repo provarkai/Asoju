@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { useAuthGuard } from '@/lib/useAuthGuard';
 import { humanApprovalAction, humanCaseStatus, humanServiceType } from '@/lib/case-status';
+import { ArrivalProfileForm } from '@/components/ArrivalProfileForm';
 
 interface StatusHistoryEntry {
   id: string;
@@ -253,6 +254,8 @@ export default function CaseDetailPage() {
         <h2 style={{ marginTop: 0 }}>What you asked us to do</h2>
         <p>{detail.description}</p>
       </div>
+
+      {detail.serviceType === 'ARRIVAL_SUPPORT' && <ArrivalProfileForm caseId={detail.id} />}
 
       {scope && (
         <div className="card">

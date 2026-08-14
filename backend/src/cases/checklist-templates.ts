@@ -105,4 +105,21 @@ export const CHECKLIST_TEMPLATES: Record<ServiceType, string[]> = {
     'Identify exceptions',
     'Complete coordination submission',
   ],
+
+  // Phase 2 "ASOJU Arrival" (Master PRD v2.0 §6.4) — pre-arrival/welcome-
+  // home coordination, from the same standard-checklist pattern generalized
+  // from the service's scope bullets. ArrivalProfile (arrival.service.ts)
+  // carries the structured flight/accommodation detail this checklist's
+  // confirmations are actually checking against.
+  [ServiceType.ARRIVAL_SUPPORT]: [
+    'Confirm arrival date, flight, and accommodation address against the Arrival Profile',
+    'Verify accommodation condition and readiness (photos)',
+    'Confirm utilities / internet active at accommodation',
+    'Confirm groceries and essentials stocked, if requested',
+    'Confirm driver / vehicle arranged for airport pickup, if requested',
+    'Complete airport pickup and meet-and-greet, if requested',
+    'Record observations',
+    'Identify exceptions',
+    'Complete arrival coordination submission',
+  ],
 };

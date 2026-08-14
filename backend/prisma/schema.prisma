@@ -59,6 +59,17 @@ enum ServiceType {
   INVESTMENT_SUPPORT
   AGRICULTURE_SUPPORT
   BEREAVEMENT_SUPPORT
+  /// Phase 2 "ASOJU Arrival" (Master PRD v2.0 §6.4, Phase 2 Product
+  /// Architecture & Expansion Blueprint §6/§45 "recommended next build" —
+  /// the clearest bridge from the Concierge model into a broader
+  /// diaspora-support platform). Pre-arrival/welcome-home coordination:
+  /// accommodation, utilities, groceries, airport pickup, local transport.
+  /// Same case-shaped execution as every other service (Arrival Technical
+  /// & Engineering Development v1.0 §1 "not a separate application") —
+  /// its own checklist below and a supplementary ArrivalProfile for the
+  /// structured pre-arrival details (flight, accommodation) the generic
+  /// case model has no fields for.
+  ARRIVAL_SUPPORT
 }
 
 enum CaseTier {
@@ -630,6 +641,7 @@ model ServiceCase {
   aiInteractions AiInteraction[]
   rating         Rating?
   disputes       Dispute[]
+  arrivalProfile ArrivalProfile?
 
   /// Section 12 P1 "recurring services" — set when this case was the one
   /// a recurring schedule was configured from.
@@ -1555,6 +1567,36 @@ model VerifiedAsset {
   createdAt  DateTime      @default(now())
 
   @@index([customerId])
+}
+
+// ---------------------------------------------------------------------------
+// ASOJU Arrival (Phase 2 — Master PRD v2.0 §6.4)
+// ---------------------------------------------------------------------------
+
+/// The "Arrival Plan" step the Arrival Technical & Engineering
+/// Development spec's golden flow places between Payment and Job Card —
+/// structured pre-arrival detail the generic ServiceCase has no fields
+/// for. One per ARRIVAL_SUPPORT case (customer fills in as part of
+/// intake/scope, staff can amend); the actual Job Card/evidence/QC/report
+/// pipeline this feeds is entirely the shared, already-generic one.
+model ArrivalProfile {
+  id                   String      @id @default(uuid())
+  caseId               String      @unique
+  case                 ServiceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  arrivalDate          DateTime?
+  flightNumber         String?
+  departureAirport     String?
+  arrivalAirport       String?
+  accommodationAddress String?
+  accommodationType    String? // hotel | short_let | family_home | other
+  numberOfTravelers    Int?
+  pickupRequired       Boolean     @default(false)
+  groceriesRequired    Boolean     @default(false)
+  specialRequests      String?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  @@index([caseId])
 }
 
 // ---------------------------------------------------------------------------

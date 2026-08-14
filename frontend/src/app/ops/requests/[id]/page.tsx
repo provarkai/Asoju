@@ -29,6 +29,7 @@ const SERVICE_TYPES = [
   'INVESTMENT_SUPPORT',
   'AGRICULTURE_SUPPORT',
   'BEREAVEMENT_SUPPORT',
+  'ARRIVAL_SUPPORT',
 ];
 
 export default function ConvertRequestPage() {
