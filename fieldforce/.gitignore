@@ -1,0 +1,17 @@
+# Local SQLite databases (dev only)
+db/*.db
+db/*.db-shm
+db/*.db-wal
+chat-service/data/*.db
+chat-service/data/*.db-shm
+chat-service/data/*.db-wal
+
+# User uploads (chat attachments) — keep the directory, not its contents
+chat-service/uploads/*
+!chat-service/uploads/.gitkeep
+
+# Runtime / logs
+*.pid
+*.log
+dev.log
+server.log
