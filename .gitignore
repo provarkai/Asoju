@@ -20,7 +20,7 @@ npm-debug.log*
 
 # Prisma
 backend/prisma/migrations/dev.db
-fieldforce/db/*.db
+fieldforce/prisma/db/
 fieldforce/mini-services/*/data/
 fieldforce/mini-services/*/uploads/
 
