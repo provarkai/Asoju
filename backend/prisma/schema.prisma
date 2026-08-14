@@ -883,7 +883,8 @@ model Agent {
   tier       AgentTier @default(BRONZE)
   qcPassRate Float? // fraction of QcReview outcomes that passed QC, null until this agent has any
 
-  assignments Assignment[]
+  assignments   Assignment[]
+  locationPings LocationPing[]
 }
 
 model Provider {
@@ -953,8 +954,37 @@ model Assignment {
   updatedAt       DateTime         @updatedAt
 
   restrictedDocuments Document[]
+  locationPings       LocationPing[]
 
   @@index([caseId])
+}
+
+/// Continuous location tracking while an assignment is active (between
+/// check-in and completion) — distinct from Assignment.checkInLocation,
+/// which is a single point-in-time record. Populated by a field agent's
+/// app pinging periodically; used to reconstruct a path/distance for a
+/// visit and to feed an ops "active agents" view. Ported from FieldForce's
+/// live-tracking.ts.
+model LocationPing {
+  id           String     @id @default(uuid())
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  agentId      String
+  agent        Agent      @relation(fields: [agentId], references: [id])
+  latitude     Float
+  longitude    Float
+  /// GPS accuracy (metres), when reported. Not itself a rejection reason —
+  /// continuous background tracking is noisier than a deliberate check-in
+  /// and shouldn't fail a whole ping over one bad reading. Distance/path
+  /// calculations filter out low-accuracy pings instead of rejecting them
+  /// at write time.
+  accuracy     Float?
+  capturedAt   DateTime
+  createdAt    DateTime   @default(now())
+
+  @@index([assignmentId])
+  @@index([agentId])
+  @@index([capturedAt])
 }
 
 // ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ import { ArrivalModule } from './arrival/arrival.module';
 import { BeneficiaryRelayModule } from './beneficiary-relay/beneficiary-relay.module';
 import { AgentTieringModule } from './agent-tiering/agent-tiering.module';
 import { PredictiveCostingModule } from './predictive-costing/predictive-costing.module';
+import { TrackingModule } from './tracking/tracking.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { PredictiveCostingModule } from './predictive-costing/predictive-costing
     BeneficiaryRelayModule,
     AgentTieringModule,
     PredictiveCostingModule,
+    TrackingModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
