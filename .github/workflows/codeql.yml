@@ -24,6 +24,11 @@ jobs:
     permissions:
       security-events: write
       contents: read
+      # codeql-action/analyze looks up workflow-run metadata via the
+      # Actions API when uploading SARIF results — without this, the
+      # upload fails with "Resource not accessible by integration" even
+      # though the scan itself completes and exports SARIF successfully.
+      actions: read
     strategy:
       fail-fast: false
       matrix:
