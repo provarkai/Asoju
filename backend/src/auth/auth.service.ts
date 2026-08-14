@@ -11,6 +11,7 @@ import { generateUniqueReferralCode } from '../common/referral-code';
 import { generateTotpSecret, otpAuthUrl, verifyTotpCode } from './totp';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 
 export interface TokenPair {
   accessToken: string;
@@ -316,6 +317,55 @@ export class AuthService {
     ]);
 
     await this.audit.record({ actorId: stored.userId, actorType: 'user', action: 'user.password_reset_completed' });
+  }
+
+  /**
+   * Section 5.7 "Admin Console" — the one self-service gap the README
+   * called out: staff/partner accounts previously needed raw Prisma/psql.
+   * Creates a User with no usable password and immediately issues it a
+   * password-reset-style setup link (same PasswordResetToken model,
+   * same email/dry-run/devToken shape as forgotPassword) rather than
+   * generating a password the admin would have to relay insecurely —
+   * the new account owner sets their own via the existing
+   * POST /auth/reset-password. Returns the created user (and the setup
+   * token outside production, for local dev/testing without a mail
+   * provider configured — same convention as forgotPassword's devToken).
+   */
+  async adminProvisionAccount(actor: AuthenticatedUser, email: string, role: Role) {
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) throw new ConflictException('An account with this email already exists');
+
+    // Never a real, usable credential — argon2-hashing random bytes the
+    // account holder never sees means there is no password to guess or
+    // leak before they complete setup via the reset-password link below.
+    const passwordHash = await argon2.hash(randomBytes(32).toString('hex'));
+    const user = await this.prisma.user.create({ data: { email, passwordHash, role } });
+
+    await this.audit.record({
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'user.admin_provisioned',
+      metadata: { userId: user.id, email, role },
+    });
+
+    const token = randomBytes(32).toString('hex');
+    await this.prisma.passwordResetToken.create({
+      data: { userId: user.id, tokenHash: this.hashToken(token), expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS) },
+    });
+
+    const setupLink = `${this.frontendUrl()}/reset-password?token=${token}`;
+    const sendResult = await this.email.sendEmail(
+      email,
+      'Set up your ASOJU account',
+      `<p>An ASOJU administrator created a ${role} account for you. Use the link below to set your password. It expires in 30 minutes.</p>` +
+        `<p><a href="${setupLink}">${setupLink}</a></p>`,
+    );
+    if (sendResult.dryRun) {
+      this.logger.warn(`[dry-run] Account provisioned for ${email} (${role}) — no email provider configured. Setup token: ${token}`);
+    }
+
+    const publicUser = this.toPublicUser(user);
+    return process.env.NODE_ENV !== 'production' ? { user: publicUser, devToken: token } : { user: publicUser };
   }
 
   /**
