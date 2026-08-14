@@ -31,7 +31,15 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: "postgresql://asoju:asoju@localhost:5432/asoju_test?schema=public"
+      # connection_limit caps each e2e spec file's Prisma pool (the app's
+      # own PrismaService *and* test/utils/fixtures.ts's standalone
+      # PrismaClient both read this same URL) instead of the client
+      # default of `num_cpus*2+1` per pool. With 28 spec files booting a
+      # full Nest app one after another under --runInBand, uncapped pools
+      # meant up to ~18 sockets/FDs open per suite — this bounds that to
+      # a known, small footprint instead of letting it grow with however
+      # many cores happen to be on the runner.
+      DATABASE_URL: "postgresql://asoju:asoju@localhost:5432/asoju_test?schema=public&connection_limit=5"
       JWT_ACCESS_SECRET: "ci-only-access-secret-never-used-outside-this-workflow"
       JWT_REFRESH_SECRET: "ci-only-refresh-secret-never-used-outside-this-workflow"
       AUTH_THROTTLE_LIMIT: "1000"
