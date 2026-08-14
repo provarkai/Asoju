@@ -142,4 +142,39 @@ describe('WhatsappSenderService — Zavu integration', () => {
       expect(result).toEqual({ sent: false, dryRun: false });
     });
   });
+
+  describe('circuit breaker — protects against a cascading Zavu outage', () => {
+    it('short-circuits after repeated failures, without calling fetch again', async () => {
+      process.env.ZAVU_API_KEY = 'zv_test_abc123';
+      fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => ({ code: 'server_error', message: 'down' }) });
+      const service = new WhatsappSenderService();
+
+      // failureThreshold is 3 for the zavu-whatsapp breaker — three real
+      // failed sends should trip it.
+      for (let i = 0; i < 3; i++) {
+        const result = await service.sendMessage('+2348012345678', 'hi');
+        expect(result).toEqual({ sent: false, dryRun: false });
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      // 4th call: circuit is open — rejected before ever calling fetch.
+      const blocked = await service.sendMessage('+2348012345678', 'hi');
+      expect(blocked).toEqual({ sent: false, dryRun: false });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('a single failure does not open the circuit — the next call still reaches Zavu', async () => {
+      process.env.ZAVU_API_KEY = 'zv_test_abc123';
+      const service = new WhatsappSenderService();
+
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ code: 'server_error' }) });
+      await service.sendMessage('+2348012345678', 'first');
+
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ message: { id: 'msg_1', status: 'queued' } }) });
+      const result = await service.sendMessage('+2348012345678', 'second');
+
+      expect(result).toEqual({ sent: true, dryRun: false });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+  });
 });
