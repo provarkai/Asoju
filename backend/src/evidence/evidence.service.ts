@@ -10,6 +10,7 @@ import { StorageService } from '../storage/storage.service';
 import { AgentTieringService } from '../agent-tiering/agent-tiering.service';
 import { WhatsappSenderService } from '../whatsapp/whatsapp-sender.service';
 import { buildCaseApprovalButtons } from '../whatsapp/case-approval-buttons';
+import { VoiceTranscriptionService } from '../voice-transcription/voice-transcription.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateEvidenceDto } from './dto/create-evidence.dto';
 import { PerformQcDto } from './dto/perform-qc.dto';
@@ -33,6 +34,7 @@ export class EvidenceService {
     private readonly storage: StorageService,
     private readonly agentTiering: AgentTieringService,
     private readonly whatsappSender: WhatsappSenderService,
+    private readonly voiceTranscription: VoiceTranscriptionService,
   ) {}
 
   /** Step one of a real upload: mints a case-scoped key and a short-lived
@@ -99,6 +101,7 @@ export class EvidenceService {
         integrityHash,
         capturedAt: new Date(),
         clientRequestId: dto.clientRequestId,
+        languageHint: dto.type === 'VOICE' ? dto.languageHint : undefined,
       },
     });
 
@@ -109,6 +112,17 @@ export class EvidenceService {
       action: 'evidence.submitted',
       metadata: { evidenceId: evidence.id, type: dto.type },
     });
+
+    // #42 — Voice + Auto-Translation. Awaited (not fire-and-forget) so
+    // the response the field agent's app gets back already reflects the
+    // transcription outcome, same as every other real integration here
+    // being a synchronous call rather than a queued job. Never blocks
+    // evidence submission on a bad/unconfigured transcription —
+    // VoiceTranscriptionService.transcribeEvidence never throws.
+    if (dto.type === 'VOICE') {
+      await this.voiceTranscription.transcribeEvidence(evidence.id);
+      return this.prisma.evidence.findUniqueOrThrow({ where: { id: evidence.id } });
+    }
 
     return evidence;
   }

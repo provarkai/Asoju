@@ -1094,6 +1094,20 @@ model Evidence {
   /// against each other.
   clientRequestId String?
 
+  /// #42 — Voice + Auto-Translation, ported from FieldForce's
+  /// voice-translation.ts. Only ever populated for type VOICE; every
+  /// other evidence type leaves these at their NOT_REQUESTED defaults
+  /// forever. transcript* is the original-language Whisper transcription;
+  /// translated* is the English translation (skipped, translatedText =
+  /// transcript, when the source already is English).
+  languageHint       String? // caller-supplied ISO 639-1 hint (yo/ha/ig/en), improves Whisper accuracy
+  transcript         String?
+  transcriptLang     String?
+  translatedText     String?
+  translatedLang     String?
+  transcriptionStatus String @default("NOT_REQUESTED") // NOT_REQUESTED | COMPLETED | FAILED
+  translationStatus   String @default("NOT_REQUESTED") // NOT_REQUESTED | COMPLETED | FAILED
+
   @@unique([caseId, clientRequestId])
   @@index([caseId])
 }

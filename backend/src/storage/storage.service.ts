@@ -89,6 +89,19 @@ export class StorageService {
     await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType }));
   }
 
+  /** The one server-side *read* path (#42 — voice evidence transcription
+   * needs the actual audio bytes to hand to Whisper, not a link a human
+   * clicks). Dry-run returns null rather than fabricating bytes — callers
+   * must treat that the same as "no real object exists here yet". */
+  async getBuffer(key: string): Promise<Buffer | null> {
+    if (!this.client || !this.bucket) return null;
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    if (!res.Body) return null;
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of res.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  }
+
   /** Never a predictable public URL (Section 11.2) — always short-lived and
    * signed, even in dry-run mode (where it's a non-functional sentinel). */
   async getViewUrl(key: string): Promise<string> {

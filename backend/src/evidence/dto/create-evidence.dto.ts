@@ -36,4 +36,12 @@ export class CreateEvidenceDto {
   @IsOptional()
   @IsString()
   clientRequestId?: string;
+
+  /** #42 — only meaningful for type VOICE. ISO 639-1 hint (yo/ha/ig/en)
+   * that measurably improves Whisper's transcription accuracy on
+   * lower-resource languages when the agent's language is already known.
+   * Harmless to send for other evidence types; simply ignored. */
+  @IsOptional()
+  @IsString()
+  languageHint?: string;
 }
