@@ -30,6 +30,8 @@ const SERVICE_TYPES = [
   'AGRICULTURE_SUPPORT',
   'BEREAVEMENT_SUPPORT',
   'ARRIVAL_SUPPORT',
+  'LEGAL_DOCUMENT_SERVICES',
+  'HEALTHCARE_COORDINATION',
 ];
 
 export default function ConvertRequestPage() {

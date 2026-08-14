@@ -122,4 +122,38 @@ export const CHECKLIST_TEMPLATES: Record<ServiceType, string[]> = {
     'Identify exceptions',
     'Complete arrival coordination submission',
   ],
+
+  // Platform Expansion PRD §6.2 "Legal / Document Services Vertical" —
+  // "Title Verification" / "CAC Document Retrieval": the agent visits a
+  // government registry instead of a physical property, so the standard
+  // checklist pattern is generalized to registry visits and certified
+  // document handoff rather than site photography.
+  [ServiceType.LEGAL_DOCUMENT_SERVICES]: [
+    'Confirm the document(s)/title requested and the issuing registry',
+    'Confirm any reference numbers, file numbers, or prior correspondence needed for retrieval',
+    'Visit the registry / government office',
+    'Photograph the retrieved or verified document(s)',
+    'Confirm document authenticity markers (seal, signature, watermark) where applicable',
+    'Collect certified copies / receipts of any fees paid',
+    'Record observations',
+    'Identify exceptions',
+    'Complete legal/document services submission',
+  ],
+
+  // Platform Expansion PRD §6.3 "Healthcare Coordination Vertical" —
+  // "Hospital Visit / Medical Checkup": agent facilitates a beneficiary
+  // hospital visit and collects the resulting medical report/notes. §6.3
+  // notes this leverages Two-Way Beneficiary Relay for scheduling — not
+  // yet built, so this checklist stands on its own until that lands.
+  [ServiceType.HEALTHCARE_COORDINATION]: [
+    'Confirm beneficiary details and hospital/clinic location',
+    'Confirm appointment time and attending doctor, if scheduled',
+    'Accompany or facilitate beneficiary at the hospital visit',
+    'Photograph relevant documentation (admission, prescriptions, receipts)',
+    'Collect the medical report / doctor\'s notes',
+    'Confirm signed doctor\'s notes are present and legible',
+    'Record observations',
+    'Identify exceptions',
+    'Complete healthcare coordination submission',
+  ],
 };

@@ -70,6 +70,17 @@ enum ServiceType {
   /// structured pre-arrival details (flight, accommodation) the generic
   /// case model has no fields for.
   ARRIVAL_SUPPORT
+  /// Platform Expansion PRD §6.2 "Legal / Document Services Vertical" —
+  /// "Title Verification" or "CAC Document Retrieval." The PRD's own
+  /// architectural note: "Zero architectural changes... Agent visits the
+  /// government registry instead of a physical property" — same case
+  /// engine, same checklist pattern, no new models.
+  LEGAL_DOCUMENT_SERVICES
+  /// Platform Expansion PRD §6.3 "Healthcare Coordination Vertical" —
+  /// "Hospital Visit / Medical Checkup." Agent facilitates a beneficiary
+  /// hospital visit, collects the medical report, uploads signed doctor's
+  /// notes. Same "zero architectural changes" framing as §6.2.
+  HEALTHCARE_COORDINATION
 }
 
 enum CaseTier {
