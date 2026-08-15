@@ -46,7 +46,6 @@ export function SiteHeader() {
             </>
           ) : (
             <>
-              <Link href="/trust">Trust</Link>
               <Link href="/login">Sign in</Link>
               <Link href="/register" className="btn">
                 Get started

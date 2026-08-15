@@ -32,6 +32,9 @@ const SERVICE_TYPE_LABELS: Record<string, string> = {
   INVESTMENT_SUPPORT: 'Investment Support',
   AGRICULTURE_SUPPORT: 'Agriculture Support',
   BEREAVEMENT_SUPPORT: 'Bereavement & Funeral Logistics',
+  ARRIVAL_SUPPORT: 'ASOJU Arrival — Pre-Arrival & Welcome Home',
+  LEGAL_DOCUMENT_SERVICES: 'Legal & Document Services',
+  HEALTHCARE_COORDINATION: 'Healthcare Coordination',
 };
 
 const APPROVAL_ACTION_LABELS: Record<string, string> = {
