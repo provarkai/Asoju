@@ -196,37 +196,54 @@ endpoints exist).
 
 ---
 
-## 5. Open decisions (yours, not mine to guess)
+## 5. Open decisions — all resolved (15 Aug 2026)
 
-1. **`StructuredRequest` vs. `ServiceRequest`** — extend the existing
-   model with the richer fields, or add `StructuredRequest` as a new,
-   separate model that later converts into a `ServiceRequest`/`Case`? The
-   existing 46 e2e specs and every current staff-triage screen read
-   `ServiceRequest` directly, so this has real blast-radius implications
-   either way.
-2. **How far to automate at launch.** The spec's own maturity model goes
-   to A5; my recommendation above is Phase 3 lands eligibility
-   *decisioning* without yet acting on it, and Phase 4 starts with exactly
-   one low-complexity workflow behind a kill switch. Confirm that's the
-   right level of caution for a first cut, or if a narrower/wider start is
-   wanted.
-3. **Anonymous Concierge access** — this scope makes the existing P0 gap
-   (`FRONTEND_HANDOFF_V1_GAP_MAP.md` §2) more central: the target flow
-   explicitly wants the AI to "prepare the complete case and quote before
-   asking the customer to authenticate." That's a bigger anonymous-surface
-   decision than just "let them chat" — it means draft `StructuredRequest`
-   and even draft pricing exist before any authentication. Needs its own
-   sign-off, not an inherited assumption.
-4. **Retention policy for anonymous/Concierge data** — the source spec
-   explicitly declines to define this ("a product/legal/security policy
-   decision," `§29`). Needed before Phase 3, since `StructuredRequest`
-   and `ConciergeSession` both hold pre-auth customer data.
+1. **`StructuredRequest` vs. `ServiceRequest`** — **resolved: extend
+   `ServiceRequest`.** Add the Concierge-generated fields (`objective`,
+   `subject`, `timing`, `requirements`, `missingInformation`, etc. —
+   nullable/additive) directly onto the existing model rather than
+   introducing a parallel one. It's the same real object (raw lead →
+   convert → case) just enriched, not a genuinely different thing, and
+   this avoids a second model the 46 existing e2e specs and every
+   staff-triage screen would need to be kept in sync with.
+2. **How far to automate at launch.** — **resolved: decide, don't act
+   yet.** Phase 3 lands eligibility decisioning (`AUTO`/`CUSTOMER_INPUT`/
+   `ESCALATE`/`UNSUPPORTED`/`BLOCKED`) and audits every decision against
+   real traffic; every case still goes through staff triage exactly as
+   today. Phase 4 (letting `AUTO` actually create a case, one
+   low-complexity workflow at a time behind a kill switch) only starts
+   once Phase 3's decisions have been observed and trusted in practice —
+   not bundled into the same pass.
+3. **Anonymous Concierge access** — **resolved: chat only, no structured
+   data pre-auth.** Fixes the P0 gap from `FRONTEND_HANDOFF_V1_GAP_MAP.md`
+   §2 (anonymous visitors get a real AI conversation instead of today's
+   scripted demo) without taking on the source spec's full ambition of a
+   complete draft case + price existing before authentication. No
+   `StructuredRequest` (i.e. no enriched `ServiceRequest` fields per
+   decision #1) or pricing preview is generated until the customer signs
+   in — smaller anonymous attack/abuse surface to secure, and the
+   anonymous-endpoint auth-relaxation work from Sprint 0's gap-map §2 can
+   stay scoped to conversation only.
+4. **Retention policy for anonymous/pre-auth Concierge data** —
+   **resolved: conservative engineering default, not a final policy.**
+   Anonymous/unconverted `ConciergeSession` (and any future enriched
+   `ServiceRequest` fields that never convert) auto-delete after 30 days;
+   once a session converts to a real `ServiceRequest`/`Case`, it keeps
+   that record's existing retention (indefinite, same as every other case
+   today). This is a placeholder pending real legal/compliance review, not
+   a decision made with that authority — flag it for that review before
+   this is treated as final policy.
 5. **Admin UI scope for Phase 1** — resolved for the first cut: backend
    CRUD only (`/admin/pricing/price-books[...]`), no frontend screen yet.
    Finance/Ops can configure it via the API today; a real staff-facing
    screen is a fair, separate follow-up ticket once someone's actually
    using the API version day-to-day. Revisit if that turns out to be too
    much friction in practice.
+
+All five decisions are now resolved — Phase 2 (Escalation + Idempotency
+infrastructure) and Phase 3 (Structured Request + Eligibility Decision,
+per decisions #1 and #3 above) are ready to be scoped into real tickets
+whenever you want to proceed.
 
 ---
 
