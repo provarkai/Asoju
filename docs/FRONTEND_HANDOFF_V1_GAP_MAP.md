@@ -290,13 +290,32 @@ claims, presented as genuine reviews with no real customer data behind
 them. Removed entirely (commit `7e8ee14`) rather than relabelled, per
 the same governance principle above.
 
+**Closed since the above was written:**
+- `useAuthGuard`'s `/login` redirect now carries `?returnTo=`, read and
+  validated by `/login`'s own `afterSignIn` — a direct deep link to a
+  protected page survives the sign-in round trip.
+- **Frontend test framework restored.** The pre-merge Vitest + RTL setup
+  (§5's "Closed" note) didn't survive adopting `main`'s frontend rewrite
+  — confirmed post-merge (`frontend/package.json` had no test
+  dependencies, no config). Rebuilt against the current Radix/route-group
+  component tree: `vitest.config.mts` (rationale in its own header
+  comment), `vitest.setup.ts` (jsdom polyfills Radix and framer-motion's
+  viewport feature need — `matchMedia`, `ResizeObserver`,
+  `IntersectionObserver`, pointer-capture, `scrollIntoView`), 17 tests
+  (`Button`, `Input`/`Textarea`, `Badge`, `Dialog` — the closest
+  equivalents to the old baseline's primitives in this component set,
+  which has no `Accordion`; plus a homepage smoke test, including a
+  regression guard against the fabricated-testimonials section reappearing),
+  wired into `ci.yml`'s `frontend` job ahead of the build step.
+
 **Still open, smaller items:**
-- `useAuthGuard`'s redirect to `/login` doesn't carry a `returnTo`, so a
-  direct deep link to a protected page loses its destination after
-  sign-in (§7 above, Sprint 3).
 - Sprint 4's exact locked section list ("Representation", "Why ASOJU")
   isn't 1:1 with the homepage's current section names — content review,
   not a rebuild.
-- Sprint 2's analytics events (privacy-filtering scope undecided) and
-  component/state-transition tests (no test framework exists post-merge)
-  remain open, per §7 above.
+- Sprint 2's analytics events remain open: privacy-filtering scope (what's
+  safe to log from a Concierge conversation) still needs a decision from
+  outside this repo audit before any event ships.
+- No protected-route/auth-state tests, no API-mocking-based loading/
+  success/error tests, and no browser-level E2E framework (Playwright/
+  Cypress) yet — the restored baseline covers presentational components
+  only, same scope the original pre-merge baseline had.

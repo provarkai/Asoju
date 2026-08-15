@@ -95,6 +95,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # Vitest + React Testing Library baseline (see vitest.config.mts's
+      # own comment for the framework choice/rationale) — component-level
+      # tests, distinct from and much cheaper than the backend-e2e job.
+      - run: npm run test --workspace=frontend
       - run: npm run build --workspace=frontend
 
   deploy:
