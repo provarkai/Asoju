@@ -9,7 +9,7 @@ import { naira } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 interface PlanConfig {
-  plan: 'PRIORITY' | 'PREMIUM';
+  plan: 'ESSENTIAL' | 'PRIORITY' | 'PREMIUM';
   priceUsd: number;
   scGrantUsd: number;
   discountPercent: number;
@@ -18,25 +18,25 @@ interface PlanConfig {
 
 interface Subscription {
   id: string;
-  plan: 'PRIORITY' | 'PREMIUM';
+  plan: 'ESSENTIAL' | 'PRIORITY' | 'PREMIUM';
   status: string;
   renewsAt: string | null;
   scBalanceUsd: number;
   planConfig: PlanConfig;
 }
 
-const PLAN_LABEL: Record<string, string> = { PRIORITY: 'Priority', PREMIUM: 'Premium' };
+const PLAN_LABEL: Record<string, string> = { ESSENTIAL: 'Essential', PRIORITY: 'Priority', PREMIUM: 'Premium' };
 const FX_RATE_NGN_PER_USD = 1600;
 
-// Ported from asoju-app-main's BillingView. The prototype showed four
-// tiers (Pay As You Go, Essential, Priority, Premium) — the real
-// MembershipPlan enum only has PRIORITY and PREMIUM (see schema.prisma;
-// MembershipPlanConfig is "seeded by migration for both plans", meaning
-// exactly those two). "Essential" isn't a real subscribable plan in this
-// backend at all. Pay As You Go stays as the always-available, nothing-
-// to-subscribe-to default; Essential is dropped rather than shown next
-// to a Subscribe button that would 400 on a plan enum value that
-// doesn't exist. Landing's pricing section was fixed the same way.
+// Ported from asoju-app-main's BillingView, all four tiers (Pay As You
+// Go, Essential, Priority, Premium) — Essential was briefly dropped
+// earlier in this conversion because the real MembershipPlan enum only
+// had PRIORITY/PREMIUM at the time, but visual confirmation against the
+// live asoju.freebuff.app deployment (which shows all four, and whose
+// own prototype schema always had ESSENTIAL as a real subscriptionPlan
+// value) made clear that was a gap in this backend, not a real design
+// decision — restored by adding ESSENTIAL to the enum + seeding its
+// pricing (see the migration comment) rather than leaving it out.
 export default function BillingPage() {
   const [plans, setPlans] = useState<PlanConfig[] | null>(null);
   const [sub, setSub] = useState<Subscription | null | undefined>(undefined);
@@ -57,15 +57,15 @@ export default function BillingPage() {
   if (error) return <p className="error-text">{error}</p>;
   if (!plans || sub === undefined) {
     return (
-      <div className="grid gap-4 sm:grid-cols-2">
-        {[0, 1].map((i) => (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
           <div key={i} className="h-48 animate-pulse rounded-2xl bg-forest/5" />
         ))}
       </div>
     );
   }
 
-  const doSubscribe = async (plan: 'PRIORITY' | 'PREMIUM') => {
+  const doSubscribe = async (plan: 'ESSENTIAL' | 'PRIORITY' | 'PREMIUM') => {
     setBusy(plan);
     setError(null);
     try {
@@ -149,7 +149,7 @@ export default function BillingPage() {
 
       {error && <p className="error-text mt-4">{error}</p>}
 
-      <div className="mt-8 grid gap-5 sm:grid-cols-3">
+      <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         <div className="flex flex-col rounded-2xl border border-forest/10 bg-white p-6 shadow-sm">
           <h3 className="font-display text-lg font-semibold text-forest">Pay As You Go</h3>
           <p className="mt-1 text-xs text-forest/55">Pay-per-service, no subscription needed.</p>

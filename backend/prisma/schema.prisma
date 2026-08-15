@@ -1281,7 +1281,14 @@ model AuditEvent {
 /// — P0 Technical Build Spec v1.0 Section 17 "Membership Engine"). Distinct
 /// from CaseTier: `plan` is the commercial membership product (price/SC/
 /// discount), `tier` is still what governs how a linked case is handled.
+/// Added ESSENTIAL after launch: this backend only shipped PRIORITY/
+/// PREMIUM initially, but the product's own intended design (the
+/// asoju-app-main prototype's subscriptionPlanValidator, and its own
+/// PLAN_META pricing table) always had ESSENTIAL as the entry-level
+/// paid tier below PRIORITY. Restored to match, not a new invention —
+/// see MembershipPlanConfig's seed migration for the pricing.
 enum MembershipPlan {
+  ESSENTIAL
   PRIORITY
   PREMIUM
 }
