@@ -1195,6 +1195,86 @@ model QuoteLine {
   @@index([quoteId])
 }
 
+/// docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 1 — the deterministic
+/// pricing engine. Only one PriceBook is ever `active` at a time (enforced
+/// by PricingEngineService.activatePriceBook in a transaction, same
+/// "exactly one current" pattern as CaseScope's version history). Historical
+/// quotes keep their `priceBookId` (Quote.priceBookId below) so changing
+/// which book is active never rewrites what an already-issued quote used —
+/// per the source spec's "historical quotes must remain reproducible."
+model PriceBook {
+  id            String    @id @default(uuid())
+  currency      String    @default("USD")
+  /// Auto-incremented by PricingEngineService.createPriceBook — a plain
+  /// audit/display counter, not itself the activation switch (`active` is).
+  version       Int       @unique @default(autoincrement())
+  active        Boolean   @default(false)
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  createdAt     DateTime  @default(now())
+
+  priceRules      PriceRule[]
+  multiplierRules MultiplierRule[]
+  quotes          Quote[]
+
+  @@index([active])
+}
+
+/// A base service-fee price for one (serviceType, zone) pair within a
+/// PriceBook. Deliberately zone-*specific* rather than zone-optional: the
+/// one real, already-approved pricing decision this migrates from code to
+/// data (backend/src/commerce/regional-pricing.ts's BASE_RATE_USD — Lagos
+/// $50, South-West $80) is a genuinely different number per zone, not one
+/// number with a zone-agnostic fallback. No row should ever exist for
+/// PricingZone.OTHER — that zone is deliberately unpriced ("TBD by Case
+/// Manager at scoping," pricing-zone.ts) and PricingEngineService returns a
+/// clear "no price configured" result for it rather than inventing one.
+model PriceRule {
+  id          String      @id @default(uuid())
+  priceBookId String
+  priceBook   PriceBook   @relation(fields: [priceBookId], references: [id], onDelete: Cascade)
+  serviceType ServiceType
+  zone        PricingZone
+  /// USD, matching regional-pricing.ts / MembershipPlanConfig.priceUsd —
+  /// converted to NGN at resolution time via the same usdToNgnRate() used
+  /// everywhere else USD crosses into what the customer actually pays.
+  value       Decimal     @db.Decimal(12, 2)
+  label       String
+  /// Highest priority wins when more than one active rule matches the same
+  /// (serviceType, zone) — lets a new rule be added and proven out before
+  /// the old one is deactivated, without a gap in coverage.
+  priority    Int         @default(0)
+  active      Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+
+  @@index([priceBookId, serviceType, zone, active])
+}
+
+enum MultiplierType {
+  /// The one real multiplier that exists today — regional-pricing.ts's
+  /// URGENCY_MULTIPLIER (1.5x), triggered by CasePriority.URGENT. Other
+  /// multiplier types from the source spec (weekend/holiday, complexity)
+  /// are deliberately not modeled here — there's no real, already-approved
+  /// rule for them to migrate, and inventing one would be fabricating a
+  /// pricing decision this repo has no authority to make.
+  URGENCY
+}
+
+model MultiplierRule {
+  id           String         @id @default(uuid())
+  priceBookId  String
+  priceBook    PriceBook      @relation(fields: [priceBookId], references: [id], onDelete: Cascade)
+  type         MultiplierType
+  /// Only meaningful for type=URGENCY today — which CasePriority triggers
+  /// this multiplier.
+  casePriority CasePriority?
+  multiplier   Decimal        @db.Decimal(5, 2)
+  active       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+
+  @@index([priceBookId, type, active])
+}
+
 model Quote {
   id         String      @id @default(uuid())
   caseId     String
@@ -1205,6 +1285,18 @@ model Quote {
   expiresAt  DateTime?
   acceptedAt DateTime?
   createdAt  DateTime    @default(now())
+
+  /// docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 1 traceability — set
+  /// only when this quote's ASOJU_SERVICE_FEE line came from
+  /// PricingEngineService's calculator rather than a fully staff-typed
+  /// amount (CreateQuoteDto.priceBookId is optional; most quotes today
+  /// still won't have one, and that's fine — this is additive, not a
+  /// replacement for manual quoting). Never mutated after creation, same
+  /// as every other field on an issued quote — per the source spec,
+  /// changing which PriceBook is active must never alter a historical
+  /// quote's own reference.
+  priceBookId String?
+  priceBook   PriceBook? @relation(fields: [priceBookId], references: [id], onDelete: SetNull)
 
   /// Membership discount/SC application (P0 Technical Build Spec Section
   /// 17) — nullable-throughout: only populated when the case's customer

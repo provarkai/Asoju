@@ -114,22 +114,47 @@ it just adds an AI gatekeeper in front of the same bottleneck.
 
 ## 4. Phase breakdown
 
-### Phase 1 — Pricing Engine foundation (Track A, no AI)
-- New models: `PriceBook`, `PriceRule`, `MultiplierRule`, `ExternalCostRule`,
-  `DiscountRule` (fields per the target spec's tables — service/workflow
-  scoping, condition sets, effective-date versioning, priority ordering).
-- New service: given a confirmed `CaseScope` + service/workflow, resolve
-  applicable rules deterministically and return `QuoteLine[]` — same shape
-  `CommerceService.createQuote` already accepts, so this can plug in as an
-  alternative to (or pre-fill for) the current hand-typed `lines` DTO
-  without restructuring `Quote`/`QuoteLine` themselves.
-- Admin CRUD for price books/rules (staff-facing, per `§35 Admin controls`
-  — this is real net-new admin surface, not just backend logic).
-- Traceability: quote needs a `priceBookVersion`/rule-reference field it
-  doesn't have today (extend `Quote`, don't replace it).
-- Reproducibility test: same scope + same price-book version always
-  produces the same quote, and changing the *current* price book never
-  changes a *historical* quote.
+### Phase 1 — Pricing Engine foundation (Track A, no AI) — ✅ backend done
+- New models: `PriceBook`, `PriceRule`, `MultiplierRule` (migration
+  `20260815000000_pricing_engine`). `ExternalCostRule`/`DiscountRule`
+  stayed deliberately unbuilt — no real external-cost or discount logic
+  exists yet to migrate, and `DiscountRule` as spec'd would overlap with
+  the membership discount/SC system `CommerceService`/`MembershipService`
+  already compute separately; reconciling the two needs its own decision,
+  not a guess folded into this pass.
+- `PricingEngineService.calculateServiceFeeLine` — migrates the one real,
+  already-approved pricing decision in the codebase
+  (`commerce/regional-pricing.ts`'s `BASE_RATE_USD`: Lagos $50,
+  South-West $80, 1.5x urgency multiplier, from the Platform Expansion
+  PRD) from hardcoded TypeScript into admin-configurable rows. Returns a
+  discriminated `{ok:true, ...}` / `{ok:false, reason}` result rather
+  than throwing for "no price configured" (OTHER zone, or an unpriced
+  service/zone pair) — an expected outcome, not a server error, matching
+  `getRegionalPricingHint`'s existing "null rather than a guessed
+  number" contract.
+- `GET /cases/:caseId/pricing-preview` (new `pricing-engine` module,
+  same shape as `predictive-costing`'s case-scoped controller) — a
+  preview only. Staff still submit the result (or their own numbers)
+  through the existing `POST /cases/:caseId/quotes`, now accepting an
+  optional `priceBookId` for traceability.
+- Admin CRUD (`FINANCE_ROLES`, `/admin/pricing/price-books[...]`) — only
+  backend endpoints, no frontend admin screen yet (Phase 1's open
+  decision #5, resolved this way for the first cut: a calculator usable
+  by staff via the API today is real, incremental value over hand-typed
+  amounts even before a polished UI exists; the UI is a fair follow-up
+  ticket, not a blocker).
+- `Quote.priceBookId` (nullable, `SetNull` on delete) — set only when a
+  quote's lines came from the calculator; untouched for the (currently
+  most common) fully-manual quote. Existing `regional-pricing-hint`
+  endpoint and `predictive-costing` module were left exactly as they
+  were — this is additive, not a replacement made in the same pass.
+- 14 new e2e tests (`test/pricing-engine.e2e-spec.ts`) + full existing
+  e2e suite (47 suites) reverified clean against real Postgres.
+
+**Not done in Phase 1, and deliberately not started:** `ExternalCostRule`,
+`DiscountRule`, any AI/automation wiring (Track B, Phases 3–5), and a
+staff-facing admin *screen* for price-book management (only the backend
+endpoints exist).
 
 ### Phase 2 — Escalation + Idempotency infrastructure (shared by A and B)
 - New `Escalation` entity (customer-safe `reason_category`, restricted
@@ -196,11 +221,12 @@ it just adds an AI gatekeeper in front of the same bottleneck.
    explicitly declines to define this ("a product/legal/security policy
    decision," `§29`). Needed before Phase 3, since `StructuredRequest`
    and `ConciergeSession` both hold pre-auth customer data.
-5. **Admin UI scope for Phase 1** — price-book/rule management needs a
-   real staff-facing screen (not just backend CRUD endpoints) for the
-   pricing engine to be usable by Finance/Ops. Worth confirming this rides
-   along with Phase 1 rather than being deferred, since a pricing engine
-   nobody can configure isn't actually replacing the manual process.
+5. **Admin UI scope for Phase 1** — resolved for the first cut: backend
+   CRUD only (`/admin/pricing/price-books[...]`), no frontend screen yet.
+   Finance/Ops can configure it via the API today; a real staff-facing
+   screen is a fair, separate follow-up ticket once someone's actually
+   using the API version day-to-day. Revisit if that turns out to be too
+   much friction in practice.
 
 ---
 

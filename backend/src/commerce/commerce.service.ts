@@ -169,6 +169,11 @@ export class CommerceService {
         lockedFxRate: fxRate,
         sourceCurrency: fxRate ? 'USD' : null,
         fxLockExpiry: fxRate ? new Date(Date.now() + fxLockHours() * 60 * 60 * 1000) : null,
+        // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 1 traceability —
+        // undefined (not persisted) for the common case of a fully
+        // staff-typed quote; only set when dto.priceBookId was passed
+        // through from the pricing-preview calculator.
+        priceBookId: dto.priceBookId,
         lines: { create: dto.lines.map((l) => ({ category: l.category, label: l.label, amount: l.amount })) },
       },
       include: { lines: true },

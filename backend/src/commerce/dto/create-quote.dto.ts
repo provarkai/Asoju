@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsOptional, IsString, Length, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsOptional, IsString, IsUUID, Length, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateQuoteLineDto } from './create-quote-line.dto';
 
@@ -19,4 +19,13 @@ export class CreateQuoteDto {
   @IsString()
   @Length(3, 3)
   currency?: string;
+
+  /** docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 1 traceability — pass
+   * this through when `lines` came from
+   * GET /cases/:caseId/pricing-preview's calculator, so the issued quote
+   * records which PriceBook produced it. Omit for a fully staff-typed
+   * quote, same as before this field existed. */
+  @IsOptional()
+  @IsUUID()
+  priceBookId?: string;
 }

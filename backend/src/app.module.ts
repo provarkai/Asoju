@@ -33,6 +33,7 @@ import { ArrivalModule } from './arrival/arrival.module';
 import { BeneficiaryRelayModule } from './beneficiary-relay/beneficiary-relay.module';
 import { AgentTieringModule } from './agent-tiering/agent-tiering.module';
 import { PredictiveCostingModule } from './predictive-costing/predictive-costing.module';
+import { PricingEngineModule } from './pricing-engine/pricing-engine.module';
 import { TrackingModule } from './tracking/tracking.module';
 import { AgentTrustScoreModule } from './agent-trust-score/agent-trust-score.module';
 import { AgentWalletModule } from './agent-wallet/agent-wallet.module';
@@ -75,6 +76,7 @@ import { CaseReportPdfModule } from './case-report-pdf/case-report-pdf.module';
     BeneficiaryRelayModule,
     AgentTieringModule,
     PredictiveCostingModule,
+    PricingEngineModule,
     TrackingModule,
     AgentTrustScoreModule,
     AgentWalletModule,
