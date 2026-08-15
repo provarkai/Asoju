@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -20,18 +20,21 @@ describe('Customer document vault', () => {
   let caseManagerToken: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customerA, customerB, caseManager] = await Promise.all([
-      createCustomer('vault-a'),
-      createCustomer('vault-b'),
-      createStaff('vault-cm', Role.CASE_MANAGER),
-    ]);
-    [tokenA, tokenB, caseManagerToken] = await Promise.all([
-      login(app, customerA.email),
-      login(app, customerB.email),
-      login(app, caseManager.email),
-    ]);
+      [customerA, customerB, caseManager] = await Promise.all([
+        createCustomer('vault-a'),
+        createCustomer('vault-b'),
+        createStaff('vault-cm', Role.CASE_MANAGER),
+      ]);
+      [tokenA, tokenB, caseManagerToken] = await Promise.all([
+        login(app, customerA.email),
+        login(app, customerB.email),
+        login(app, caseManager.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -40,13 +40,16 @@ describe('Dynamic SLA by region', () => {
   }
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, admin] = await Promise.all([
-      createCustomer('regional-sla'),
-      createStaff('regional-sla-admin', Role.ADMIN),
-    ]);
-    [customerToken, adminToken] = await Promise.all([login(app, customer.email), login(app, admin.email)]);
+      [customer, admin] = await Promise.all([
+        createCustomer('regional-sla'),
+        createStaff('regional-sla-admin', Role.ADMIN),
+      ]);
+      [customerToken, adminToken] = await Promise.all([login(app, customer.email), login(app, admin.email)]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

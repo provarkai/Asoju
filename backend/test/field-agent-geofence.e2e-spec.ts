@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Role } from '@prisma/client';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 
 /**
@@ -27,9 +27,12 @@ describe('Field agent GPS check-in — geofence validation', () => {
   const FAR = { lat: 6.4281, lng: 3.4219 };
 
   beforeAll(async () => {
-    app = await createTestApp();
-    admin = await createStaff('geofence-admin', Role.ADMIN);
-    adminToken = await login(app, admin.email);
+    await withSetupRetry(async () => {
+      app = await createTestApp();
+      admin = await createStaff('geofence-admin', Role.ADMIN);
+      adminToken = await login(app, admin.email);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

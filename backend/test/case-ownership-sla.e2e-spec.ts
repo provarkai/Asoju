@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -54,21 +54,24 @@ describe('Case ownership, next action and SLA target', () => {
   }
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, caseManager, secondCaseManager, admin, agent] = await Promise.all([
-      createCustomer('ownersla'),
-      createStaff('ownersla-cm', Role.CASE_MANAGER),
-      createStaff('ownersla-cm2', Role.CASE_MANAGER),
-      createStaff('ownersla-admin', Role.ADMIN),
-      createAgent('ownersla-agent'),
-    ]);
-    [customerToken, caseManagerToken, adminToken, agentToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, caseManager.email),
-      login(app, admin.email),
-      login(app, agent.email),
-    ]);
+      [customer, caseManager, secondCaseManager, admin, agent] = await Promise.all([
+        createCustomer('ownersla'),
+        createStaff('ownersla-cm', Role.CASE_MANAGER),
+        createStaff('ownersla-cm2', Role.CASE_MANAGER),
+        createStaff('ownersla-admin', Role.ADMIN),
+        createAgent('ownersla-agent'),
+      ]);
+      [customerToken, caseManagerToken, adminToken, agentToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, caseManager.email),
+        login(app, admin.email),
+        login(app, agent.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

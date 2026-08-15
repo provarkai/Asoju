@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -117,20 +117,23 @@ describe('Deterministic pricing engine', () => {
   }
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, admin, caseManager, agent] = await Promise.all([
-      createCustomer('pricing-engine'),
-      createStaff('pricing-engine-admin', Role.ADMIN),
-      createStaff('pricing-engine-cm', Role.CASE_MANAGER),
-      createStaff('pricing-engine-agent', Role.FIELD_AGENT),
-    ]);
-    [customerToken, adminToken, caseManagerToken, agentToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, admin.email),
-      login(app, caseManager.email),
-      login(app, agent.email),
-    ]);
+      [customer, admin, caseManager, agent] = await Promise.all([
+        createCustomer('pricing-engine'),
+        createStaff('pricing-engine-admin', Role.ADMIN),
+        createStaff('pricing-engine-cm', Role.CASE_MANAGER),
+        createStaff('pricing-engine-agent', Role.FIELD_AGENT),
+      ]);
+      [customerToken, adminToken, caseManagerToken, agentToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, admin.email),
+        login(app, caseManager.email),
+        login(app, agent.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

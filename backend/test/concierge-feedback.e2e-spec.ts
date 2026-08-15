@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -18,13 +18,16 @@ describe('AI Concierge feedback', () => {
   let agentToken: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, agent] = await Promise.all([
-      createCustomer('concierge-fb'),
-      createStaff('concierge-fb-agent', Role.FIELD_AGENT),
-    ]);
-    [customerToken, agentToken] = await Promise.all([login(app, customer.email), login(app, agent.email)]);
+      [customer, agent] = await Promise.all([
+        createCustomer('concierge-fb'),
+        createStaff('concierge-fb-agent', Role.FIELD_AGENT),
+      ]);
+      [customerToken, agentToken] = await Promise.all([login(app, customer.email), login(app, agent.email)]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

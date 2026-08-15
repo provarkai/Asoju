@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma, uniqueEmail, DEFAULT_PASSWORD } from './utils/fixtures';
 import { PartnerType, Role } from '@prisma/client';
 
@@ -21,18 +21,21 @@ describe('Admin Console — account provisioning', () => {
   let customerToken: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [admin, caseManager, customer] = await Promise.all([
-      createStaff('admin-console-admin', Role.ADMIN),
-      createStaff('admin-console-cm', Role.CASE_MANAGER),
-      createCustomer('admin-console'),
-    ]);
-    [adminToken, caseManagerToken, customerToken] = await Promise.all([
-      login(app, admin.email),
-      login(app, caseManager.email),
-      login(app, customer.email),
-    ]);
+      [admin, caseManager, customer] = await Promise.all([
+        createStaff('admin-console-admin', Role.ADMIN),
+        createStaff('admin-console-cm', Role.CASE_MANAGER),
+        createCustomer('admin-console'),
+      ]);
+      [adminToken, caseManagerToken, customerToken] = await Promise.all([
+        login(app, admin.email),
+        login(app, caseManager.email),
+        login(app, customer.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -86,24 +86,27 @@ describe('Region-based quoting engine', () => {
   }
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, admin, agent] = await Promise.all([
-      createCustomer('regional-pricing'),
-      createStaff('regional-pricing-admin', Role.ADMIN),
-      createStaff('regional-pricing-agent', Role.FIELD_AGENT),
-    ]);
-    [customerToken, adminToken, agentToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, admin.email),
-      login(app, agent.email),
-    ]);
+      [customer, admin, agent] = await Promise.all([
+        createCustomer('regional-pricing'),
+        createStaff('regional-pricing-admin', Role.ADMIN),
+        createStaff('regional-pricing-agent', Role.FIELD_AGENT),
+      ]);
+      [customerToken, adminToken, agentToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, admin.email),
+        login(app, agent.email),
+      ]);
 
-    await request(app.getHttpServer())
-      .post('/api/me/subscription')
-      .set('Authorization', `Bearer ${customerToken}`)
-      .send({ plan: 'PRIORITY' })
-      .expect(201);
+      await request(app.getHttpServer())
+        .post('/api/me/subscription')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({ plan: 'PRIORITY' })
+        .expect(201);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

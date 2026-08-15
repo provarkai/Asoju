@@ -61,3 +61,34 @@ export async function ensureHealthyApp(app: INestApplication): Promise<INestAppl
     return createTestApp();
   }
 }
+
+/**
+ * Retries an entire `beforeAll` setup block from scratch on a transient
+ * connection reset. `ensureHealthyApp` only guards *between* tests, after
+ * `beforeAll` has already completed once — a reset during `beforeAll`
+ * itself (app boot, the `login()` calls every spec file makes, or a
+ * file's own ad-hoc setup requests) fails every test in the file
+ * identically, since Jest reports the same `beforeAll` error for each and
+ * never runs their `beforeEach`. Observed directly in CI: 8/8 tests in one
+ * file failing with the exact same `connect ECONNRESET` on the exact same
+ * port — one failure in `beforeAll`, reported once per test, not 8
+ * separate resets.
+ *
+ * Retrying the *whole* block (not just one call inside it) is what's
+ * actually safe here: every spec file's `beforeAll` creates its fixtures
+ * with randomized emails (see fixtures.ts's `uniqueEmail`), so a retried
+ * attempt never collides with, or re-mutates, anything the failed attempt
+ * left behind — it just builds an entirely fresh set of users/cases and
+ * leaves a few harmless orphaned rows from the aborted attempt.
+ */
+export async function withSetupRetry(setup: () => Promise<void>, attempts = 3): Promise<void> {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await setup();
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (i === attempts || !/ECONNRESET|ECONNREFUSED|socket hang up/.test(message)) throw err;
+    }
+  }
+}

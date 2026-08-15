@@ -1,7 +1,7 @@
 import { randomBytes } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma, uniqueEmail } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -29,20 +29,23 @@ describe('Beneficiary relay', () => {
   let agentToken: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, admin, caseManager, agent] = await Promise.all([
-      createCustomer('relay'),
-      createStaff('relay-admin', Role.ADMIN),
-      createStaff('relay-cm', Role.CASE_MANAGER),
-      createAgent('relay-agent'),
-    ]);
-    [customerToken, adminToken, caseManagerToken, agentToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, admin.email),
-      login(app, caseManager.email),
-      login(app, agent.email),
-    ]);
+      [customer, admin, caseManager, agent] = await Promise.all([
+        createCustomer('relay'),
+        createStaff('relay-admin', Role.ADMIN),
+        createStaff('relay-cm', Role.CASE_MANAGER),
+        createAgent('relay-agent'),
+      ]);
+      [customerToken, adminToken, caseManagerToken, agentToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, admin.email),
+        login(app, caseManager.email),
+        login(app, agent.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

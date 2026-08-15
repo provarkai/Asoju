@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import {
   createAgent,
   createCustomer,
@@ -47,103 +47,106 @@ describe('Authorization (IDOR/BOLA)', () => {
 
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customerA, customerB, admin, caseManager, relationshipManager, ownAgent, strangerAgent, partner] =
-      await Promise.all([
-        createCustomer('authz-a'),
-        createCustomer('authz-b'),
-        createStaff('authz-admin', Role.ADMIN),
-        createStaff('authz-cm', Role.CASE_MANAGER),
-        createStaff('authz-rm', Role.RELATIONSHIP_MANAGER),
-        createAgent('authz-own'),
-        createAgent('authz-stranger'),
-        createPartnerContact('authz'),
-      ]);
+      [customerA, customerB, admin, caseManager, relationshipManager, ownAgent, strangerAgent, partner] =
+        await Promise.all([
+          createCustomer('authz-a'),
+          createCustomer('authz-b'),
+          createStaff('authz-admin', Role.ADMIN),
+          createStaff('authz-cm', Role.CASE_MANAGER),
+          createStaff('authz-rm', Role.RELATIONSHIP_MANAGER),
+          createAgent('authz-own'),
+          createAgent('authz-stranger'),
+          createPartnerContact('authz'),
+        ]);
 
-    [tokenA, tokenB, adminToken, caseManagerToken, rmToken, ownAgentToken, strangerAgentToken, partnerToken] =
-      await Promise.all([
-        login(app, customerA.email),
-        login(app, customerB.email),
-        login(app, admin.email),
-        login(app, caseManager.email),
-        login(app, relationshipManager.email),
-        login(app, ownAgent.email),
-        login(app, strangerAgent.email),
-        login(app, partner.email),
-      ]);
+      [tokenA, tokenB, adminToken, caseManagerToken, rmToken, ownAgentToken, strangerAgentToken, partnerToken] =
+        await Promise.all([
+          login(app, customerA.email),
+          login(app, customerB.email),
+          login(app, admin.email),
+          login(app, caseManager.email),
+          login(app, relationshipManager.email),
+          login(app, ownAgent.email),
+          login(app, strangerAgent.email),
+          login(app, partner.email),
+        ]);
 
-    // Build a real case for customer A: request -> admin converts -> admin
-    // assigns ownAgent -> agent accepts (case moves to IN_PROGRESS).
-    const reqRes = await request(app.getHttpServer())
-      .post('/api/service-requests')
-      .set('Authorization', `Bearer ${tokenA}`)
-      .send({ rawDescription: 'Inspect my property', location: 'Lagos', channel: 'web' })
-      .expect(201);
-
-    const caseRes = await request(app.getHttpServer())
-      .post(`/api/service-requests/${reqRes.body.id}/convert`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ serviceType: 'PROPERTY_INSPECTION', description: 'Inspect', location: 'Lagos', priority: 'STANDARD' })
-      .expect(201);
-    caseId = caseRes.body.id;
-
-    await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/transition`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ toStatus: 'SUBMITTED' })
-      .expect(201);
-    await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/transition`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ toStatus: 'UNDER_REVIEW' })
-      .expect(201);
-
-    // Fast-forward past quote/payment (Quote -> accept -> webhook — already
-    // covered by its own manual + unit verification) straight to SCHEDULED,
-    // the state assignment creation requires. This suite is about
-    // authorization on top of that state, not the payment chain itself.
-    await prisma.serviceCase.update({ where: { id: caseId }, data: { status: 'SCHEDULED', paymentStatus: 'PAID' } });
-
-    const assignRes = await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/assignments`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ role: 'FIELD_AGENT', agentId: ownAgent.agent.id })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .post(`/api/assignments/${assignRes.body.id}/accept`)
-      .set('Authorization', `Bearer ${ownAgentToken}`)
-      .expect(201);
-
-    // A storageKey can only come from the upload-url endpoint now (P0
-    // hardening follow-up — see storage.service.ts); every test that
-    // creates a document goes through it first, same as a real client
-    // would.
-    async function issueDocumentStorageKey(): Promise<string> {
-      const res = await request(app.getHttpServer())
-        .post(`/api/cases/${caseId}/documents/upload-url`)
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({ fileName: 'access.pdf', contentType: 'application/pdf' })
+      // Build a real case for customer A: request -> admin converts -> admin
+      // assigns ownAgent -> agent accepts (case moves to IN_PROGRESS).
+      const reqRes = await request(app.getHttpServer())
+        .post('/api/service-requests')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ rawDescription: 'Inspect my property', location: 'Lagos', channel: 'web' })
         .expect(201);
-      return res.body.storageKey;
-    }
 
-    // One unrestricted document and one staff-only document, for the
-    // document-classification tests below.
-    const allDoc = await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/documents`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ label: 'Access instructions', storageKey: await issueDocumentStorageKey(), visibility: 'ALL' })
-      .expect(201);
-    allVisibleDocId = allDoc.body.id;
+      const caseRes = await request(app.getHttpServer())
+        .post(`/api/service-requests/${reqRes.body.id}/convert`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ serviceType: 'PROPERTY_INSPECTION', description: 'Inspect', location: 'Lagos', priority: 'STANDARD' })
+        .expect(201);
+      caseId = caseRes.body.id;
 
-    const staffDoc = await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/documents`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ label: 'Internal risk note', storageKey: await issueDocumentStorageKey(), visibility: 'STAFF_ONLY' })
-      .expect(201);
-    staffOnlyDocId = staffDoc.body.id;
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/transition`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ toStatus: 'SUBMITTED' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/transition`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ toStatus: 'UNDER_REVIEW' })
+        .expect(201);
+
+      // Fast-forward past quote/payment (Quote -> accept -> webhook — already
+      // covered by its own manual + unit verification) straight to SCHEDULED,
+      // the state assignment creation requires. This suite is about
+      // authorization on top of that state, not the payment chain itself.
+      await prisma.serviceCase.update({ where: { id: caseId }, data: { status: 'SCHEDULED', paymentStatus: 'PAID' } });
+
+      const assignRes = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/assignments`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ role: 'FIELD_AGENT', agentId: ownAgent.agent.id })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post(`/api/assignments/${assignRes.body.id}/accept`)
+        .set('Authorization', `Bearer ${ownAgentToken}`)
+        .expect(201);
+
+      // A storageKey can only come from the upload-url endpoint now (P0
+      // hardening follow-up — see storage.service.ts); every test that
+      // creates a document goes through it first, same as a real client
+      // would.
+      async function issueDocumentStorageKey(): Promise<string> {
+        const res = await request(app.getHttpServer())
+          .post(`/api/cases/${caseId}/documents/upload-url`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ fileName: 'access.pdf', contentType: 'application/pdf' })
+          .expect(201);
+        return res.body.storageKey;
+      }
+
+      // One unrestricted document and one staff-only document, for the
+      // document-classification tests below.
+      const allDoc = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/documents`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ label: 'Access instructions', storageKey: await issueDocumentStorageKey(), visibility: 'ALL' })
+        .expect(201);
+      allVisibleDocId = allDoc.body.id;
+
+      const staffDoc = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/documents`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ label: 'Internal risk note', storageKey: await issueDocumentStorageKey(), visibility: 'STAFF_ONLY' })
+        .expect(201);
+      staffOnlyDocId = staffDoc.body.id;
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

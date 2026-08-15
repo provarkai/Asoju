@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Role } from '@prisma/client';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 
 /**
@@ -22,17 +22,20 @@ describe('Voice evidence — transcription hook (dry run, no OPENAI_API_KEY in C
   let agentToken: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
-    [customer, admin, agent] = await Promise.all([
-      createCustomer('voice-evidence'),
-      createStaff('voice-evidence-admin', Role.ADMIN),
-      createAgent('voice-evidence-agent'),
-    ]);
-    [customerToken, adminToken, agentToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, admin.email),
-      login(app, agent.email),
-    ]);
+    await withSetupRetry(async () => {
+      app = await createTestApp();
+      [customer, admin, agent] = await Promise.all([
+        createCustomer('voice-evidence'),
+        createStaff('voice-evidence-admin', Role.ADMIN),
+        createAgent('voice-evidence-agent'),
+      ]);
+      [customerToken, adminToken, agentToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, admin.email),
+        login(app, agent.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

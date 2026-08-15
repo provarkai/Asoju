@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -22,11 +22,14 @@ describe('WhatsApp interactive-button case approval', () => {
   const WEBHOOK_SECRET = 'test-whatsapp-webhook-secret';
 
   beforeAll(async () => {
-    process.env.WHATSAPP_WEBHOOK_SECRET = WEBHOOK_SECRET;
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      process.env.WHATSAPP_WEBHOOK_SECRET = WEBHOOK_SECRET;
+      app = await createTestApp();
 
-    admin = await createStaff('whatsapp-approval-admin', Role.ADMIN);
-    adminToken = await login(app, admin.email);
+      admin = await createStaff('whatsapp-approval-admin', Role.ADMIN);
+      adminToken = await login(app, admin.email);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

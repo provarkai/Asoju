@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { DEFAULT_PASSWORD, createCustomer, prisma } from './utils/fixtures';
 import { generateTotpCode } from '../src/auth/totp';
 
@@ -13,7 +13,10 @@ describe('Privileged authentication', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

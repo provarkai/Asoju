@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -24,44 +24,47 @@ describe('Scope versioning and the quote gate', () => {
   let caseId: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customerA, customerB, admin, agent] = await Promise.all([
-      createCustomer('scope-a'),
-      createCustomer('scope-b'),
-      createStaff('scope-admin', Role.ADMIN),
-      createAgent('scope-agent'),
-    ]);
-    [tokenA, tokenB, adminToken, agentToken] = await Promise.all([
-      login(app, customerA.email),
-      login(app, customerB.email),
-      login(app, admin.email),
-      login(app, agent.email),
-    ]);
+      [customerA, customerB, admin, agent] = await Promise.all([
+        createCustomer('scope-a'),
+        createCustomer('scope-b'),
+        createStaff('scope-admin', Role.ADMIN),
+        createAgent('scope-agent'),
+      ]);
+      [tokenA, tokenB, adminToken, agentToken] = await Promise.all([
+        login(app, customerA.email),
+        login(app, customerB.email),
+        login(app, admin.email),
+        login(app, agent.email),
+      ]);
 
-    const reqRes = await request(app.getHttpServer())
-      .post('/api/service-requests')
-      .set('Authorization', `Bearer ${tokenA}`)
-      .send({ rawDescription: 'Inspect my property before I quote', location: 'Lagos', channel: 'web' })
-      .expect(201);
+      const reqRes = await request(app.getHttpServer())
+        .post('/api/service-requests')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ rawDescription: 'Inspect my property before I quote', location: 'Lagos', channel: 'web' })
+        .expect(201);
 
-    const caseRes = await request(app.getHttpServer())
-      .post(`/api/service-requests/${reqRes.body.id}/convert`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ serviceType: 'PROPERTY_INSPECTION', description: 'Inspect', location: 'Lagos', priority: 'STANDARD' })
-      .expect(201);
-    caseId = caseRes.body.id;
+      const caseRes = await request(app.getHttpServer())
+        .post(`/api/service-requests/${reqRes.body.id}/convert`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ serviceType: 'PROPERTY_INSPECTION', description: 'Inspect', location: 'Lagos', priority: 'STANDARD' })
+        .expect(201);
+      caseId = caseRes.body.id;
 
-    await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/transition`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ toStatus: 'SUBMITTED' })
-      .expect(201);
-    await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/transition`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ toStatus: 'UNDER_REVIEW' })
-      .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/transition`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ toStatus: 'SUBMITTED' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/transition`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ toStatus: 'UNDER_REVIEW' })
+        .expect(201);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

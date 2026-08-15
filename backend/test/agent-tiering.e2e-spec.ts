@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -94,18 +94,21 @@ describe('Field Agent Tiering', () => {
   }
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, admin, caseManager] = await Promise.all([
-      createCustomer('agent-tiering'),
-      createStaff('agent-tiering-admin', Role.ADMIN),
-      createStaff('agent-tiering-cm', Role.CASE_MANAGER),
-    ]);
-    [customerToken, adminToken, caseManagerToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, admin.email),
-      login(app, caseManager.email),
-    ]);
+      [customer, admin, caseManager] = await Promise.all([
+        createCustomer('agent-tiering'),
+        createStaff('agent-tiering-admin', Role.ADMIN),
+        createStaff('agent-tiering-cm', Role.CASE_MANAGER),
+      ]);
+      [customerToken, adminToken, caseManagerToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, admin.email),
+        login(app, caseManager.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

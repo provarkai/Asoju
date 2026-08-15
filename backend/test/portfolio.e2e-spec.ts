@@ -1,7 +1,7 @@
 import { randomBytes } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma, uniqueEmail } from './utils/fixtures';
 import { PaymentStatus, Role } from '@prisma/client';
 
@@ -32,14 +32,17 @@ describe('Customer portfolio dashboard', () => {
   let adminToken: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, admin, agent] = await Promise.all([
-      createCustomer('portfolio'),
-      createStaff('portfolio-admin', Role.ADMIN),
-      createAgent('portfolio-agent'),
-    ]);
-    [customerToken, adminToken] = await Promise.all([login(app, customer.email), login(app, admin.email)]);
+      [customer, admin, agent] = await Promise.all([
+        createCustomer('portfolio'),
+        createStaff('portfolio-admin', Role.ADMIN),
+        createAgent('portfolio-agent'),
+      ]);
+      [customerToken, adminToken] = await Promise.all([login(app, customer.email), login(app, admin.email)]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

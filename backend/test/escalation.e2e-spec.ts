@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -49,22 +49,25 @@ describe('Escalations', () => {
   }
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, otherCustomer, admin, caseManager, agent] = await Promise.all([
-      createCustomer('escalation'),
-      createCustomer('escalation-other'),
-      createStaff('escalation-admin', Role.ADMIN),
-      createStaff('escalation-cm', Role.CASE_MANAGER),
-      createStaff('escalation-agent', Role.FIELD_AGENT),
-    ]);
-    [customerToken, otherCustomerToken, adminToken, caseManagerToken, agentToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, otherCustomer.email),
-      login(app, admin.email),
-      login(app, caseManager.email),
-      login(app, agent.email),
-    ]);
+      [customer, otherCustomer, admin, caseManager, agent] = await Promise.all([
+        createCustomer('escalation'),
+        createCustomer('escalation-other'),
+        createStaff('escalation-admin', Role.ADMIN),
+        createStaff('escalation-cm', Role.CASE_MANAGER),
+        createStaff('escalation-agent', Role.FIELD_AGENT),
+      ]);
+      [customerToken, otherCustomerToken, adminToken, caseManagerToken, agentToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, otherCustomer.email),
+        login(app, admin.email),
+        login(app, caseManager.email),
+        login(app, agent.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

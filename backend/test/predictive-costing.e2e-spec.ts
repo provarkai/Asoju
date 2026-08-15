@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role, ServiceType } from '@prisma/client';
 import { classifyZone } from '../src/scope/pricing-zone';
@@ -78,20 +78,23 @@ describe('Predictive Costing', () => {
   }
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, admin, finance, caseManager] = await Promise.all([
-      createCustomer('predictive-costing'),
-      createStaff('predictive-costing-admin', Role.ADMIN),
-      createStaff('predictive-costing-finance', Role.FINANCE),
-      createStaff('predictive-costing-cm', Role.CASE_MANAGER),
-    ]);
-    [customerToken, adminToken, financeToken, caseManagerToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, admin.email),
-      login(app, finance.email),
-      login(app, caseManager.email),
-    ]);
+      [customer, admin, finance, caseManager] = await Promise.all([
+        createCustomer('predictive-costing'),
+        createStaff('predictive-costing-admin', Role.ADMIN),
+        createStaff('predictive-costing-finance', Role.FINANCE),
+        createStaff('predictive-costing-cm', Role.CASE_MANAGER),
+      ]);
+      [customerToken, adminToken, financeToken, caseManagerToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, admin.email),
+        login(app, finance.email),
+        login(app, caseManager.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

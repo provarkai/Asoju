@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Role } from '@prisma/client';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 
 /**
@@ -21,12 +21,15 @@ describe('Agent financial planning — projection built on the real wallet ledge
   let financeToken: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
-    [admin, finance] = await Promise.all([
-      createStaff('finplan-admin', Role.ADMIN),
-      createStaff('finplan-finance', Role.FINANCE),
-    ]);
-    [adminToken, financeToken] = await Promise.all([login(app, admin.email), login(app, finance.email)]);
+    await withSetupRetry(async () => {
+      app = await createTestApp();
+      [admin, finance] = await Promise.all([
+        createStaff('finplan-admin', Role.ADMIN),
+        createStaff('finplan-finance', Role.FINANCE),
+      ]);
+      [adminToken, financeToken] = await Promise.all([login(app, admin.email), login(app, finance.email)]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

@@ -1,7 +1,7 @@
 import { ConflictException, INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { randomUUID } from 'crypto';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role, IdempotencyOperation } from '@prisma/client';
 import { IdempotencyService } from '../src/common/idempotency/idempotency.service';
@@ -23,18 +23,21 @@ describe('Idempotency-Key handling', () => {
   let adminToken: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, otherCustomer, admin] = await Promise.all([
-      createCustomer('idem'),
-      createCustomer('idem-other'),
-      createStaff('idem-admin', Role.ADMIN),
-    ]);
-    [customerToken, otherCustomerToken, adminToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, otherCustomer.email),
-      login(app, admin.email),
-    ]);
+      [customer, otherCustomer, admin] = await Promise.all([
+        createCustomer('idem'),
+        createCustomer('idem-other'),
+        createStaff('idem-admin', Role.ADMIN),
+      ]);
+      [customerToken, otherCustomerToken, adminToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, otherCustomer.email),
+        login(app, admin.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a

@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Role } from '@prisma/client';
-import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 
 /**
@@ -23,17 +23,20 @@ describe('Agent wallet — real earnings ledger', () => {
   let caseManagerToken: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
-    [admin, finance, caseManager] = await Promise.all([
-      createStaff('wallet-admin', Role.ADMIN),
-      createStaff('wallet-finance', Role.FINANCE),
-      createStaff('wallet-cm', Role.CASE_MANAGER),
-    ]);
-    [adminToken, financeToken, caseManagerToken] = await Promise.all([
-      login(app, admin.email),
-      login(app, finance.email),
-      login(app, caseManager.email),
-    ]);
+    await withSetupRetry(async () => {
+      app = await createTestApp();
+      [admin, finance, caseManager] = await Promise.all([
+        createStaff('wallet-admin', Role.ADMIN),
+        createStaff('wallet-finance', Role.FINANCE),
+        createStaff('wallet-cm', Role.CASE_MANAGER),
+      ]);
+      [adminToken, financeToken, caseManagerToken] = await Promise.all([
+        login(app, admin.email),
+        login(app, finance.email),
+        login(app, caseManager.email),
+      ]);
+
+    });
   });
 
   // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a
