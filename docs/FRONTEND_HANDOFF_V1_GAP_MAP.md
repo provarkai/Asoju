@@ -181,15 +181,49 @@ completed/cancelled) — no gap here beyond wiring the real names in.
 
 ---
 
-## 5. Recommended next step (not started — awaiting your go-ahead)
+## 5. Sprint Plan v2.1 revision (15 Aug 2026)
 
-This document is the Sprint 0 output; no code changed. Two independent
-follow-on tickets are now unblocked and ready to scope separately whenever
-you want to proceed:
+`docs/v2.0-engineering-specs/ASOJU_Developer_Implementation_Sprint_Plan_v2.1.docx`
+supersedes the v2.0 sprint plan in that same folder. It makes two changes
+worth recording here:
+
+- **Confirms §4 above independently**: it explicitly calls out "the
+  current repository has no frontend test framework configured" as a P0
+  gap — the same finding this document flagged. **Closed**: Vitest +
+  React Testing Library + jsdom is now set up
+  (`frontend/vitest.config.ts`, `frontend/vitest.setup.ts`, `npm run
+  test --workspace=frontend`, wired into `ci.yml`), with a 20-test
+  baseline covering the Sprint 1 primitives (`Button`, `Field`/
+  `Input`/`Textarea`, `Modal`, `Accordion`, `StatusBadge`) plus a
+  homepage smoke test. Framework choice and rationale are documented in
+  `vitest.config.ts`'s own comment, per that doc's "select ... document
+  the selection and rationale" instruction. Still open: no protected-
+  route/auth-state tests, no API-mocking-based loading/success/error
+  tests, and no browser-level E2E framework yet (Playwright/Cypress) —
+  those are the plan's own next items, not done here.
+- **Introduces a materially larger, net-new architecture** not covered
+  by anything audited so far: an `AutomationCapability`/`AutomationRule`/
+  `AutomationDecision` eligibility engine (`AUTO` / `CUSTOMER_INPUT` /
+  `ESCALATE` / `UNSUPPORTED` / `BLOCKED`), a deterministic `PriceBook`/
+  `PriceRule`/`MultiplierRule`/`ExternalCostRule` pricing engine, and a
+  standalone `Escalation` entity — none of which exist in the current
+  backend. This is a genuine new scope decision (how it relates to the
+  existing manual `service-requests` → staff `convert` → case flow;
+  whether it replaces or sits alongside today's quote/pricing logic in
+  `CommerceService`) that needs your direction before any of it gets
+  built, not something to infer from the doc alone.
+
+## 6. Recommended next step
+
+Sprint 1 (frontend design-system + global shell) and the P0 frontend test
+infrastructure from §5 are both done — see git history on
+`claude/new-file-repo-9fezh8`. Still open, in rough priority order:
 
 1. **Backend**: Design A (rename+restructure `ServiceType`→`ServiceFamily`)
    from §1, plus a product decision + implementation for the anonymous-
    Concierge gap in §2.
-2. **Frontend**: Sprint 1 of the handoff's own plan (design-system
-   primitives + global shell + six-service nav), which does not depend on
-   either backend change above and could start in parallel.
+2. **Backend, larger**: the Automation Eligibility / Pricing Engine /
+   Escalation architecture from §5 — needs a scoping decision before any
+   of it is built.
+3. **Frontend**: Sprint 2 of the original handoff plan (AI Concierge
+   foundation) — blocked on decision #1 above (anonymous Concierge access).

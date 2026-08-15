@@ -36,8 +36,14 @@ function FieldChrome({
 }: FieldChromeProps & { id: string; children: React.ReactNode }) {
   const { hintId, errorId } = fieldIds(id);
   return (
-    <label htmlFor={id}>
-      <span>
+    // A wrapping <div>, not <label> — the label element itself only wraps
+    // the label text (via htmlFor/id association below). Nesting the
+    // hint/error text inside <label> too would fold it into the label's
+    // computed accessible name (e.g. getByLabelText('Email') failing
+    // because the real name became "Email Enter a valid email address"),
+    // which the component test suite caught.
+    <div className="field">
+      <label htmlFor={id}>
         {label}
         {required && (
           <span aria-hidden="true" style={{ color: 'var(--asoju-danger)' }}>
@@ -45,7 +51,7 @@ function FieldChrome({
             *
           </span>
         )}
-      </span>
+      </label>
       {children}
       {hint && !error && (
         <span id={hintId} className="muted" style={{ fontWeight: 400 }}>
@@ -57,7 +63,7 @@ function FieldChrome({
           {error}
         </span>
       )}
-    </label>
+    </div>
   );
 }
 

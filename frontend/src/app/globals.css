@@ -341,6 +341,20 @@ label {
   font-weight: 600;
 }
 
+/* Input/Textarea (frontend/src/components/ui/Field.tsx) — the wrapping
+   element is a <div>, not <label>, so this doesn't inherit the bare
+   `label` rule above; see that file's comment for why. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 input,
 select,
 textarea {

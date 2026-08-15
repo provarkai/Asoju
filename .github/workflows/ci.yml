@@ -75,6 +75,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Unit/component tests (Vitest + React Testing Library)
+        run: npm run test --workspace=frontend
       - run: npm run build --workspace=frontend
       - name: Dependency vulnerability scan (fails only on critical)
         run: npm audit --workspace=frontend --audit-level=critical

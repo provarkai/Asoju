@@ -45,7 +45,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
           <span className="btn__spinner-dot" />
         </span>
       )}
-      <span style={loading ? { visibility: 'hidden' } : undefined}>{children}</span>
+      {/* opacity, not visibility:hidden — visibility:hidden is excluded from
+          accessible-name computation, which would silently strip the
+          button's name (and violate spec §5 "every button needs an
+          accessible name") for the whole duration of the loading state. */}
+      <span style={loading ? { opacity: 0 } : undefined}>{children}</span>
     </button>
   );
 });
