@@ -2,18 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, usePathname, useRouter } from 'next/navigation';
-import {
-  Bell,
-  CreditCard,
-  FilePlus2,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  UserRound,
-  UsersRound,
-  Vault,
-  X,
-} from 'lucide-react';
+import { Bell, CreditCard, FilePlus2, LayoutDashboard, LogOut, Menu, UserRound, Vault, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiFetch, clearSession } from '@/lib/api';
 import { useAuthGuard } from '@/lib/useAuthGuard';
@@ -25,13 +14,19 @@ import { timeAgo } from '@/lib/statusMeta';
 // /dashboard/* or /profile, this sidebar is the primary nav; SiteHeader
 // stays exactly as-is for every other role (ops/field/partner/
 // beneficiary), whose routes are untouched, still under (portal).
+//
+// No "Team" entry — the prototype's TeamView/TeamCaseView was an
+// admin-only internal case board+detail hardcoded to `role === "admin"`,
+// fully redundant with this app's real /ops console (proper RBAC across
+// many staff roles, not a single hardcoded check). Not ported; see the
+// Concierge Lab addition to /ops instead for the one genuinely new piece
+// TeamView had (AI-feedback review).
 const NAV = [
   { key: 'home', label: 'My cases', path: '/dashboard', icon: LayoutDashboard },
   { key: 'new', label: 'New request', path: '/dashboard/new', icon: FilePlus2 },
   { key: 'billing', label: 'Billing & SC', path: '/dashboard/billing', icon: CreditCard },
   { key: 'vault', label: 'My Nigeria Vault', path: '/dashboard/vault', icon: Vault },
   { key: 'profile', label: 'Profile', path: '/profile', icon: UserRound },
-  { key: 'team', label: 'Team', path: '/dashboard/team', icon: UsersRound },
 ];
 
 interface NotificationItem {
@@ -48,7 +43,6 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
   const pathname = usePathname();
   const params = useParams();
   const caseId = typeof params?.id === 'string' ? params.id : undefined;
-  const teamCaseId = typeof params?.caseId === 'string' ? params.caseId : undefined;
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -65,21 +59,17 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
 
   const unread = notifications.filter((n) => !n.readAt).length;
 
-  const activeKey = teamCaseId
-    ? 'team'
-    : caseId
-      ? 'case'
-      : pathname === '/dashboard/new'
-        ? 'new'
-        : pathname === '/dashboard/billing'
-          ? 'billing'
-          : pathname === '/dashboard/vault'
-            ? 'vault'
-            : pathname === '/profile'
-              ? 'profile'
-              : pathname?.startsWith('/dashboard/team')
-                ? 'team'
-                : 'home';
+  const activeKey = caseId
+    ? 'case'
+    : pathname === '/dashboard/new'
+      ? 'new'
+      : pathname === '/dashboard/billing'
+        ? 'billing'
+        : pathname === '/dashboard/vault'
+          ? 'vault'
+          : pathname === '/profile'
+            ? 'profile'
+            : 'home';
 
   const handleSignOut = () => {
     clearSession();

@@ -448,6 +448,22 @@ export class ProfileService {
     });
   }
 
+  /** Staff-facing counterpart — "Concierge Lab" (asoju-app-main's
+   * TeamView had this as an admin-only board section; the rest of that
+   * view was a redundant duplicate of /ops and wasn't ported). Every
+   * customer's feedback, not just one, with enough of the customer/
+   * interaction identity attached that staff reviewing it can tell whose
+   * conversation they're looking at. */
+  async listAllConciergeFeedback() {
+    return this.prisma.conciergeFeedback.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        customer: { select: { fullName: true } },
+        interaction: { select: { promptSummary: true } },
+      },
+    });
+  }
+
   private async requireCustomer(userId: string) {
     const customer = await this.prisma.customer.findUnique({ where: { userId } });
     if (!customer) throw new NotFoundException('No customer profile for this user');

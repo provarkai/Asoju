@@ -124,3 +124,19 @@ export class ProfileController {
     return this.profileService.recordConciergeFeedback(user, dto);
   }
 }
+
+/** "Concierge Lab" (/ops) — admin-only, deliberately its own controller
+ * rather than a route on ProfileController above, whose whole class is
+ * @Roles(Role.CUSTOMER). Same reasoning as AiPublicController being
+ * split out in ai.controller.ts. */
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.ADMIN, Role.SUPER_ADMIN)
+@Controller('admin/concierge-feedback')
+export class AdminConciergeFeedbackController {
+  constructor(private readonly profileService: ProfileService) {}
+
+  @Get()
+  listAll() {
+    return this.profileService.listAllConciergeFeedback();
+  }
+}
