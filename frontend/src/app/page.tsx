@@ -402,29 +402,6 @@ function Landing() {
         </div>
       </div>
 
-      {/* FOOTER */}
-      <div className="full-bleed landing-footer">
-        <div className="landing-inner">
-          <div className="landing-footer__inner">
-            <div className="brand">
-              ASOJU
-              <small>Your trusted presence back home.</small>
-            </div>
-            <div className="landing-footer__links">
-              <a href="#services">Services</a>
-              <a href="#how">How it works</a>
-              <a href="#trust">Trust &amp; evidence</a>
-              <a href="#pricing">Pricing</a>
-            </div>
-            <div className="muted">🏢 Lagos · Abuja &amp; environs</div>
-          </div>
-          <p className="landing-footer__disclaimer">
-            ASOJU is a technology-enabled coordination &amp; execution platform, not a law firm,
-            surveying firm or estate agency. All professional opinions come from appropriately
-            licensed professionals.
-          </p>
-        </div>
-      </div>
     </div>
   );
 }

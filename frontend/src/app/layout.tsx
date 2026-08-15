@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import { SiteHeader } from '@/components/SiteHeader';
+import { GlobalFooter } from '@/components/GlobalFooter';
+import { ToastProvider } from '@/components/ui/Toast';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -12,8 +14,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <SiteHeader />
-        <main className="container">{children}</main>
+        <ToastProvider>
+          <SiteHeader />
+          <main className="container">{children}</main>
+          <GlobalFooter />
+        </ToastProvider>
       </body>
     </html>
   );

@@ -14,10 +14,100 @@
   --asoju-muted: #6b6a63;
   --asoju-danger: #a4262c;
   --radius: 10px;
+
+  /* -------------------------------------------------------------------
+     Design-system foundation tokens (Sprint 1 — docs/frontend-handoff-
+     v1.0/03_Design_System). Extends the palette above rather than
+     replacing it, per that spec's own "use the repository's existing
+     token system if present" rule. Status/semantic colors reuse the
+     existing --asoju-* palette so success/warning/info/danger stay
+     visually consistent with everything already shipped.
+     ------------------------------------------------------------------- */
+
+  /* Status semantics — mapped to real backend states in Badge/Status
+     (CaseStatus/PaymentStatus per docs/FRONTEND_HANDOFF_V1_GAP_MAP.md §3),
+     not invented per-screen. */
+  --asoju-success: var(--asoju-green);
+  --asoju-success-bg: var(--asoju-green-light);
+  --asoju-warning: var(--asoju-clay-deep);
+  --asoju-warning-bg: color-mix(in srgb, var(--asoju-gold) 16%, transparent);
+  --asoju-danger-bg: color-mix(in srgb, var(--asoju-danger) 14%, transparent);
+  --asoju-info: #2b5e8c;
+  --asoju-info-bg: color-mix(in srgb, #2b5e8c 12%, transparent);
+  --asoju-neutral-bg: color-mix(in srgb, var(--asoju-muted) 14%, transparent);
+
+  /* Type scale — the sizes already in use across the app/landing page,
+     named so components reference a scale instead of magic numbers. */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.85rem;
+  --font-size-base: 1rem;
+  --font-size-md: 1.1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 2rem;
+  --font-size-3xl: 2.5rem;
+  --font-size-hero: 3.2rem;
+
+  /* Spacing scale (4px base) — for new components; existing hand-tuned
+     rem values elsewhere are left as-is rather than churned. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* Layout */
+  --container-max: 880px;
+  --container-wide-max: 1180px;
+  --header-height: 4rem;
+
+  /* Focus & motion */
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--asoju-green) 35%, transparent);
+  --focus-ring-on-dark: 0 0 0 3px color-mix(in srgb, var(--asoju-gold-light) 45%, transparent);
+  --transition-fast: 150ms ease;
+  --transition-base: 220ms ease;
+
+  /* z-index scale — so overlays/toasts/header stacking is centralized
+     instead of ad hoc per component. */
+  --z-header: 100;
+  --z-overlay: 200;
+  --z-modal: 210;
+  --z-toast: 300;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Accessible focus — visible for keyboard users, silent for mouse/touch.
+   Design-system spec §19 "visible focus states" / §21 "accessibility is
+   part of the component contract". */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.landing-section--dark :focus-visible,
+[data-on-dark] :focus-visible {
+  box-shadow: var(--focus-ring-on-dark);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 html,
@@ -80,6 +170,135 @@ a {
 .nav a,
 .nav button {
   font-size: 0.9rem;
+}
+
+/* GlobalHeader responsive nav (Sprint 1) — SiteHeader.tsx */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.site-header__inner {
+  gap: var(--space-4);
+}
+
+.nav-trigger {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--asoju-border);
+  border-radius: 8px;
+  padding: 0.4rem 0.65rem;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.services-menu {
+  position: relative;
+}
+
+.services-menu summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--asoju-ink);
+  padding: 0.3rem 0;
+}
+
+.services-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.services-menu summary::after {
+  content: '▾';
+  margin-left: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--asoju-muted);
+}
+
+.services-menu[open] summary::after {
+  content: '▴';
+}
+
+.services-menu__panel {
+  position: absolute;
+  top: calc(100% + 0.6rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-header);
+  display: grid;
+  gap: 0.25rem;
+  min-width: 20rem;
+  background: var(--asoju-card);
+  border: 1px solid var(--asoju-border);
+  border-radius: 0.85rem;
+  padding: 0.6rem;
+  box-shadow: 0 24px 50px -24px rgb(18 34 28 / 0.35);
+}
+
+.services-menu__panel a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.6rem;
+  color: var(--asoju-ink);
+  text-decoration: none;
+}
+
+.services-menu__panel a:hover,
+.services-menu__panel a:focus-visible {
+  background: var(--asoju-green-light);
+}
+
+.services-menu__panel .muted {
+  font-size: 0.78rem;
+}
+
+.mobile-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mobile-nav a {
+  color: var(--asoju-ink);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 0.3rem 0;
+}
+
+.mobile-nav__heading {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--asoju-muted);
+}
+
+.mobile-nav__divider {
+  border: none;
+  border-top: 1px solid var(--asoju-border);
+  margin: var(--space-2) 0;
+}
+
+@media (max-width: 860px) {
+  .nav--desktop {
+    display: none;
+  }
+  .nav-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
 }
 
 main {
@@ -845,6 +1064,263 @@ button {
   justify-content: space-between;
   padding: 0.25rem 0;
   border-bottom: 1px dashed var(--asoju-border);
+}
+
+/* ---------------------------------------------------------------------
+   Design-system primitives (Sprint 1) — Button loading state, Card
+   interactive variant, Modal/Drawer overlay, Accordion, Toast, Skeleton.
+   Components: frontend/src/components/ui/*
+   ------------------------------------------------------------------- */
+
+.btn {
+  position: relative;
+}
+
+.btn__spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn__spinner-dot {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  animation: btn-spin 0.7s linear infinite;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.card--interactive {
+  cursor: pointer;
+  transition: transform var(--transition-base), box-shadow var(--transition-base);
+}
+
+.card--interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px -16px rgb(18 34 28 / 0.22);
+}
+
+/* Modal / Drawer overlay */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: color-mix(in srgb, var(--asoju-ink) 55%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+
+.modal-panel {
+  position: relative;
+  z-index: var(--z-modal);
+  background: var(--asoju-card);
+  border-radius: 1rem;
+  width: 100%;
+  max-width: 32rem;
+  max-height: calc(100vh - 2 * var(--space-4));
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 30px 70px -30px rgb(18 34 28 / 0.45);
+}
+
+.modal-panel--drawer {
+  margin-left: auto;
+  margin-right: 0;
+  max-width: 26rem;
+  height: 100%;
+  max-height: 100vh;
+  border-radius: 0;
+}
+
+@media (max-width: 640px) {
+  .modal-overlay {
+    padding: 0;
+  }
+  .modal-panel,
+  .modal-panel--drawer {
+    max-width: 100%;
+    height: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+}
+
+.modal-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-5) var(--space-5) var(--space-4);
+  border-bottom: 1px solid var(--asoju-border);
+}
+
+.modal-panel__title {
+  margin: 0;
+  font-size: var(--font-size-md);
+}
+
+.modal-panel__close {
+  background: transparent;
+  border: none;
+  font-size: 1rem;
+  color: var(--asoju-muted);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+}
+
+.modal-panel__close:hover {
+  background: var(--asoju-sand);
+}
+
+.modal-panel__body {
+  padding: var(--space-5);
+  overflow-y: auto;
+}
+
+.modal-panel__footer {
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--asoju-border);
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
+
+/* Accordion */
+
+.accordion {
+  display: flex;
+  flex-direction: column;
+}
+
+.accordion__item {
+  border-bottom: 1px solid var(--asoju-border);
+}
+
+.accordion__heading {
+  margin: 0;
+}
+
+.accordion__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: transparent;
+  border: none;
+  padding: var(--space-4) 0;
+  font-weight: 600;
+  font-size: var(--font-size-base);
+  text-align: left;
+  color: var(--asoju-ink);
+}
+
+.accordion__icon {
+  color: var(--asoju-green);
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.accordion__panel {
+  padding: 0 0 var(--space-4);
+  color: var(--asoju-muted);
+  line-height: 1.6;
+}
+
+.accordion__panel[hidden] {
+  display: none;
+}
+
+/* Toast */
+
+.toast-stack {
+  position: fixed;
+  bottom: var(--space-5);
+  right: var(--space-5);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: min(24rem, calc(100vw - 2 * var(--space-5)));
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 0.75rem;
+  background: var(--asoju-ink);
+  color: #fff;
+  box-shadow: 0 16px 40px -20px rgb(18 34 28 / 0.5);
+  font-size: var(--font-size-sm);
+  animation: toast-in var(--transition-base);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast--success {
+  background: var(--asoju-green-deep);
+}
+
+.toast--danger {
+  background: var(--asoju-danger);
+}
+
+.toast__close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.7;
+  padding: 0;
+  margin-left: auto;
+}
+
+.toast__close:hover {
+  opacity: 1;
+}
+
+/* Skeleton */
+
+.skeleton {
+  display: inline-block;
+  background: linear-gradient(
+    90deg,
+    var(--asoju-border) 25%,
+    color-mix(in srgb, var(--asoju-border) 50%, white) 37%,
+    var(--asoju-border) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
 }
 
 .concierge-demo__quote-line:last-child {
