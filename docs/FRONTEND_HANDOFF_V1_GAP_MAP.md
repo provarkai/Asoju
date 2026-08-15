@@ -308,10 +308,23 @@ the same governance principle above.
   regression guard against the fabricated-testimonials section reappearing),
   wired into `ci.yml`'s `frontend` job ahead of the build step.
 
+**Closed:** Sprint 2's analytics events. Scoping this turned up a bigger
+question than "what's safe to log" — no analytics vendor (PostHog,
+Segment, GA, …) was wired into the frontend at all, and picking one
+carries its own privacy posture for a product handling diaspora users'
+family/financial circumstances. Decision: first-party only, no vendor.
+`ConciergeAnalyticsEvent` (backend, its own schema comment has the full
+rationale) + `AiPublicController.recordAnalyticsEvent` — an enum event
+name and a `metadata` shape validated at the boundary (flat, ≤5 keys,
+each value a short string/number/boolean), not a JSON passthrough, so a
+client bug can't smuggle a raw message into the table even by accident.
+Wired into `AiConciergeDemo.tsx`: `CONCIERGE_OPENED` (mount),
+`QUICK_PROMPT_CLICKED` (chip index only, not the prompt text),
+`MESSAGE_SENT`/`MESSAGE_FAILED` (turn number only), `RETRY_CLICKED`.
+Anonymous by design — a random per-tab id (`sessionStorage`), not a
+userId, since most Concierge usage happens before sign-in.
+
 **Still open, smaller items:**
-- Sprint 2's analytics events remain open: privacy-filtering scope (what's
-  safe to log from a Concierge conversation) still needs a decision from
-  outside this repo audit before any event ships.
 - No protected-route/auth-state tests, no API-mocking-based loading/
   success/error tests, and no browser-level E2E framework (Playwright/
   Cypress) yet — the restored baseline covers presentational components

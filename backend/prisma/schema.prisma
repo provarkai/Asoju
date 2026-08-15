@@ -2207,3 +2207,34 @@ model ConciergeFeedback {
 
   @@index([customerId])
 }
+
+/// FRONTEND_HANDOFF_V1_GAP_MAP.md §5 "add analytics events with privacy
+/// filtering" — first-party only (no third-party vendor: this product
+/// handles diaspora users' family/financial circumstances, so nothing
+/// about Concierge usage leaves ASOJU's own database). Deliberately an
+/// enum, not a free-text event name, and `metadata` is a bounded,
+/// per-event-validated shape (see AnalyticsEventMetadataDto), never a
+/// passthrough JSON blob — the whole point is that a client bug can't
+/// smuggle a raw message or any other PII into this table even by
+/// accident. Anonymous by design: `sessionId` is a client-generated,
+/// per-browser-tab id (sessionStorage, same convention as the concierge
+/// demo's draft-persistence handoff), not a userId — most events fire
+/// before a visitor has ever signed in.
+model ConciergeAnalyticsEvent {
+  id        String                      @id @default(uuid())
+  name      ConciergeAnalyticsEventName
+  sessionId String
+  metadata  Json?
+  createdAt DateTime                    @default(now())
+
+  @@index([name, createdAt])
+  @@index([sessionId])
+}
+
+enum ConciergeAnalyticsEventName {
+  CONCIERGE_OPENED
+  QUICK_PROMPT_CLICKED
+  MESSAGE_SENT
+  MESSAGE_FAILED
+  RETRY_CLICKED
+}

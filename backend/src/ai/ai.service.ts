@@ -7,6 +7,7 @@ import { CONCIERGE_SYSTEM_PROMPT, PERSONAL_ASSISTANT_SYSTEM_PROMPT } from './sys
 import { scoreLead } from './scoring';
 import { ConciergeMessageDto } from './dto/concierge-message.dto';
 import { ConciergeFeedbackDto } from './dto/concierge-feedback.dto';
+import { ConciergeAnalyticsEventDto } from './dto/concierge-analytics-event.dto';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 
 interface ConciergeTurnResult {
@@ -337,5 +338,22 @@ export class AiService {
     });
 
     return feedback;
+  }
+
+  /** First-party Concierge usage analytics (see AiPublicController and
+   * ConciergeAnalyticsEvent's own schema comment). Deliberately not an
+   * AuditService.record call: audit entries are accountability records
+   * tied to a real actor taking an action, and most of this traffic is
+   * anonymous by design (same reasoning demoConverse above never touches
+   * the audit log). No return value worth shaping — the frontend fires
+   * these and moves on regardless of outcome. */
+  async recordAnalyticsEvent(dto: ConciergeAnalyticsEventDto): Promise<void> {
+    await this.prisma.conciergeAnalyticsEvent.create({
+      data: {
+        name: dto.name,
+        sessionId: dto.sessionId,
+        metadata: dto.metadata ?? undefined,
+      },
+    });
   }
 }

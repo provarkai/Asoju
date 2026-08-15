@@ -136,6 +136,7 @@ export function ServicePageShell({ service }: { service: ServiceFamily }) {
               onNavigate={go}
               greeting={`Hi 👋 — I'm the ASOJU AI Concierge. Tell me what you need for ${service.name.replace('ASOJU ', '')} and I'll capture the essentials.`}
               quickPrompts={service.quickPrompts}
+              source={service.slug}
             />
           </motion.div>
         </div>

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CheckCircle2, RotateCcw, Send, ShieldCheck, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { trackConciergeEvent } from '@/lib/analytics';
 import { Button } from '@/components/ui/button';
 
 type UiMsg =
@@ -48,11 +49,15 @@ export default function AiConciergeDemo({
   onNavigate,
   greeting = DEFAULT_GREETING,
   quickPrompts = DEFAULT_QUICK_PROMPTS,
+  source = 'homepage',
 }: {
   isAuthenticated: boolean;
   onNavigate: (path: string) => void;
   greeting?: string;
   quickPrompts?: string[];
+  /** Which page embeds this widget — 'homepage' or a service slug (see
+   * ServicePageShell). Analytics metadata only, never rendered. */
+  source?: string;
 }) {
   const [messages, setMessages] = useState<UiMsg[]>([
     { id: 0, kind: 'text', role: 'assistant', text: greeting },
@@ -60,11 +65,20 @@ export default function AiConciergeDemo({
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
   const idRef = useRef(1);
+  const turnRef = useRef(0);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, thinking]);
+
+  // Fires once per mount, not per render (the widget mounts once per page
+  // visit — StrictMode's dev-only double-invoke is the one exception,
+  // acceptable noise for a usage counter, not worth guarding against).
+  useEffect(() => {
+    trackConciergeEvent('CONCIERGE_OPENED', { source });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const nextId = () => idRef.current++;
 
@@ -100,6 +114,8 @@ export default function AiConciergeDemo({
   // screen, rather than appending a second copy of the same message).
   const submitTurn = async (next: UiMsg[], content: string) => {
     setThinking(true);
+    const turnNumber = ++turnRef.current;
+    trackConciergeEvent('MESSAGE_SENT', { source, turnNumber });
     try {
       const res = await apiFetch<DemoTurnResult>('/ai/concierge/demo-message', {
         method: 'POST',
@@ -114,6 +130,7 @@ export default function AiConciergeDemo({
       }
     } catch (e) {
       console.error(e);
+      trackConciergeEvent('MESSAGE_FAILED', { source, turnNumber });
       // Retry state (Sprint 2) — re-sends exactly this message rather
       // than making the visitor retype it; the failed user turn stays
       // visible in `messages` above this card.
@@ -156,6 +173,7 @@ export default function AiConciergeDemo({
 
   const retry = (msgId: number, retryText: string) => {
     if (thinking) return;
+    trackConciergeEvent('RETRY_CLICKED', { source });
     const withoutError = messages.filter((x) => x.id !== msgId);
     setMessages(withoutError);
     submitTurn(withoutError, retryText);
@@ -212,11 +230,14 @@ export default function AiConciergeDemo({
 
         {showChips && (
           <div className="flex flex-wrap gap-2 border-t border-forest/8 bg-white px-4 pt-3">
-            {quickPrompts.map((p) => (
+            {quickPrompts.map((p, i) => (
               <button
                 key={p}
                 type="button"
-                onClick={() => send(p)}
+                onClick={() => {
+                  trackConciergeEvent('QUICK_PROMPT_CLICKED', { source, promptIndex: i });
+                  send(p);
+                }}
                 className="rounded-full border border-forest/15 bg-ivory/60 px-3 py-1.5 text-left text-[11px] font-medium text-forest/75 transition-colors hover:border-forest/35 hover:bg-white"
               >
                 {p}
