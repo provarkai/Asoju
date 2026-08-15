@@ -32,6 +32,11 @@ RUN npm run build --workspace=frontend
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# Without this, Next's standalone server.js binds to localhost only inside
+# the container -- fine for a health check run from inside the same
+# container, but refused for any proxy connecting over the container's
+# actual network IP (Fly's, Render's, any of them).
+ENV HOSTNAME="0.0.0.0"
 
 # next.config.mjs sets output: 'standalone' — traces the minimal deps this
 # app actually needs into .next/standalone rather than shipping the full
