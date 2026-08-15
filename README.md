@@ -592,6 +592,51 @@ component underneath the infra decision:
   now follows the two test jobs — see "Deploying (Railway)" below for what it does and, more
   importantly, the manual setup it depends on that no amount of code can do for you.
 
+## Live deployment (Render)
+
+**This is the platform actually running the app right now** — Fly.io's free trial force-stops every
+machine after 5 minutes (a billing gate, see "Deploying (Fly.io)" below), so the live deploy moved to
+Render, which has a real no-card free tier. Both services are up and have been verified end-to-end
+against real HTTP traffic, not just a passing build:
+
+- Backend: https://asoju-backend.onrender.com (`GET /api/health/ready` → `{"status":"ok"}`)
+- Frontend: https://asoju-frontend.onrender.com
+- A real `POST /api/auth/register` was run against the live backend from the live frontend's origin —
+  201, a row landed in the live `asoju-db` Postgres, a JWT came back, and the response's
+  `access-control-allow-origin` header confirmed CORS is scoped to the real frontend origin, not `*`.
+
+**What's provisioned:** two Render web services (`asoju-backend`, `asoju-frontend`, region `oregon`,
+free plan, Docker runtime off `Dockerfile.backend` / `Dockerfile.frontend`) plus a free Postgres instance
+(`asoju-db`) attached via its internal connection string. Every backend secret from
+`.env.production.example` that has a real value is set (JWT secrets freshly generated, live OpenRouter/
+Paystack/Resend keys, `CORS_ORIGIN`/`FRONTEND_URL` pointed at the real frontend URL).
+
+**Two real bugs surfaced getting this live** — worth knowing if this ever needs debugging again:
+1. `frontend/public/` was empty, and git doesn't track empty directories, so it silently never made it
+   into the repo. Every local/sandbox build "worked" because the untracked directory was still sitting on
+   disk there; the first build off an actual clean clone (Render's) failed on
+   `COPY --from=build /repo/frontend/public` with "not found". Fixed by committing a `.gitkeep`.
+2. Next's standalone `server.js` binds to `localhost` unless `HOSTNAME=0.0.0.0` is set — the process comes
+   up fine, logs "Ready", even answers a check run from inside its own container, but a reverse proxy
+   connecting over the container's real network IP (which is how every host actually reaches it) gets
+   connection refused. This is invisible in the logs — no crash, no error, just a 502 from the edge with a
+   perfectly healthy-looking app underneath. Fixed with one `ENV HOSTNAME="0.0.0.0"` line in
+   `Dockerfile.frontend`.
+
+**Known limitation of the free tier:** both services sleep after ~15 minutes idle and take a few seconds
+to wake on the next request (you'll see it as one slow first load, not an error). The Postgres free
+instance also expires after 90 days unless upgraded. Fine for a demo/staging deploy; worth knowing before
+treating this as the permanent home for production traffic.
+
+**To redeploy after a code change**, from the repo root (needs a Render API key):
+```bash
+curl -X POST -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+  -d '{"clearCache":"do_not_clear"}' https://api.render.com/v1/services/<service-id>/deploys
+```
+Or push to the connected branch and click "Manual Deploy" in the Render dashboard — `autoDeploy` is off
+here, matching this repo's convention (elsewhere) of gating deploys on tests passing rather than on every
+push.
+
 ## Deploying (Railway)
 
 Railway was the host chosen for this project (project ID `3a589d6b-ad92-4c4d-bc3d-ffe570480345`).
@@ -635,9 +680,10 @@ services via `railway up`.
 
 ## Deploying (Fly.io)
 
-Fly.io is the platform actually provisioned and deploy-tested for this project — Railway's project
-tokens didn't authenticate, so the target moved. Unlike the Railway section above, this one **is**
-verified against a real deploy attempt, not just written from docs: `Dockerfile.backend` and
+Fly.io was the second platform attempted, after Railway's project tokens didn't authenticate — it's not
+where the app is live today (see "Live deployment (Render)" above), because the Fly account's free trial
+force-stops every machine after 5 minutes. The infra below is still real and still deploy-tested, and
+worth returning to since Fly's actual paid tier has no such cap: `Dockerfile.backend` and
 `Dockerfile.frontend` (repo root, multi-stage, npm-workspaces-aware) both build and boot cleanly, and
 `prisma migrate deploy` runs successfully against the live `asoju-db` Postgres cluster.
 
