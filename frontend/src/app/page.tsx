@@ -17,7 +17,6 @@ import {
   PhoneCall,
   ShieldCheck,
   Sparkles,
-  Star,
   UserCheck,
   Map,
 } from 'lucide-react';
@@ -88,27 +87,6 @@ const TRUST_LABELS = [
   { label: 'Customer Provided', copy: 'Information came from you' },
   { label: 'Third-Party Statement', copy: 'Stated by another party — flagged as such' },
   { label: 'Not Independently Verified', copy: 'No independent confirmation yet' },
-];
-
-const TESTIMONIALS = [
-  {
-    name: 'Adaeze O.',
-    location: 'London, UK',
-    text: "I bought a plot in Ibeju-Lekki without stepping foot in Nigeria. ASOJU's report showed me the access road, the fence, even the neighbour's construction — dated photos of everything. I finally slept well.",
-    initials: 'AO',
-  },
-  {
-    name: 'Tunde A.',
-    location: 'Houston, USA',
-    text: "My contractor said the deck was poured. ASOJU's site visit said otherwise, with video proof. We saved a five-figure mistake. This is the service I wish existed years ago.",
-    initials: 'TA',
-  },
-  {
-    name: 'Ngozi E.',
-    location: 'Toronto, Canada',
-    text: 'I manage my parents\' farm from abroad. Every inspection comes back with clear evidence and a report I actually understand. My mother finally believes I\'m watching over things.',
-    initials: 'NE',
-  },
 ];
 
 // ASOJU landing — hero, services, golden path, trust, pricing,
@@ -559,43 +537,6 @@ export default function Landing() {
             are mutually exclusive — applying your SC replaces the discount. Quotes lock today&apos;s
             parallel-market rate for 48 hours.
           </p>
-        </div>
-      </section>
-
-      {/* -------------------------------------------------- TESTIMONIALS */}
-      <section className="mx-auto max-w-7xl px-4 py-24 sm:px-6">
-        <motion.div initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} className="mx-auto max-w-2xl text-center">
-          <Badge className="border-gold/40 bg-gold/10 text-clay">From our customers</Badge>
-          <h2 className="mt-4 font-display text-4xl font-semibold text-forest sm:text-5xl">Diaspora, finally at ease</h2>
-        </motion.div>
-        <div className="mt-12 grid gap-6 md:grid-cols-3">
-          {TESTIMONIALS.map((t, i) => (
-            <motion.figure
-              key={t.name}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true, margin: '-60px' }}
-              variants={fadeUp}
-              custom={i}
-              className="flex flex-col rounded-2xl border border-forest/10 bg-white p-7 shadow-sm"
-            >
-              <div className="flex gap-1 text-gold">
-                {Array.from({ length: 5 }).map((_, s) => (
-                  <Star key={s} className="size-4 fill-gold text-gold" />
-                ))}
-              </div>
-              <blockquote className="mt-4 flex-1 text-sm leading-relaxed text-forest/75">&quot;{t.text}&quot;</blockquote>
-              <figcaption className="mt-6 flex items-center gap-3 border-t border-forest/8 pt-5">
-                <span className="flex size-10 items-center justify-center rounded-full bg-forest text-sm font-semibold text-gold-light">
-                  {t.initials}
-                </span>
-                <div>
-                  <p className="text-sm font-semibold text-forest">{t.name}</p>
-                  <p className="text-xs text-forest/50">{t.location}</p>
-                </div>
-              </figcaption>
-            </motion.figure>
-          ))}
         </div>
       </section>
 
