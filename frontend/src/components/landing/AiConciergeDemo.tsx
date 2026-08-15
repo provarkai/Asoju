@@ -8,7 +8,10 @@ import { Button } from '@/components/ui/button';
 
 type UiMsg =
   | { id: number; kind: 'text'; role: 'user' | 'assistant'; text: string; rated?: 'up' | 'down' }
-  | { id: number; kind: 'captured'; role: 'assistant' };
+  | { id: number; kind: 'captured'; role: 'assistant' }
+  | { id: number; kind: 'error'; retryText: string };
+
+const DRAFT_STORAGE_KEY = 'asoju-concierge-draft';
 
 interface DemoTurnResult {
   reply: string;
@@ -61,6 +64,56 @@ export default function AiConciergeDemo({
       .filter((m): m is Extract<UiMsg, { kind: 'text' }> => m.kind === 'text')
       .map((m) => ({ role: m.role, content: m.text }));
 
+  // Sprint 2 "safe draft persistence for the authentication handoff" —
+  // the demo endpoint (AiPublicController, no session) can't create a
+  // real ServiceRequest, so once the conversation is captured we stash
+  // the transcript in sessionStorage. dashboard/new/page.tsx reads this
+  // same key on mount and pre-fills its description step, so a visitor
+  // who signs in right after doesn't have to retype what they already
+  // told the concierge. sessionStorage (not localStorage): this is a
+  // one-shot handoff for the current tab's visit, not a persistent draft
+  // to resurrect on a later, unrelated session.
+  const persistDraft = (msgs: UiMsg[]) => {
+    try {
+      const transcript = msgs
+        .filter((m): m is Extract<UiMsg, { kind: 'text' }> => m.kind === 'text')
+        .map((m) => `${m.role === 'user' ? 'You' : 'Concierge'}: ${m.text}`)
+        .join('\n\n');
+      sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ description: transcript }));
+    } catch {
+      // Storage unavailable (private browsing, quota, disabled) — the
+      // draft handoff is a convenience, never a requirement to continue.
+    }
+  };
+
+  // `next` already includes the outgoing user turn — shared by send()
+  // (which just added it) and retry() (which reuses the one already on
+  // screen, rather than appending a second copy of the same message).
+  const submitTurn = async (next: UiMsg[], content: string) => {
+    setThinking(true);
+    try {
+      const res = await apiFetch<DemoTurnResult>('/ai/concierge/demo-message', {
+        method: 'POST',
+        body: JSON.stringify({ message: content, history: toHistory(next) }),
+      });
+      const replyMsg: UiMsg = { id: nextId(), kind: 'text', role: 'assistant', text: res.reply };
+      const withReply = [...next, replyMsg];
+      setMessages((m) => [...m, replyMsg]);
+      if (res.conversationComplete) {
+        setMessages((m) => [...m, { id: nextId(), kind: 'captured', role: 'assistant' }]);
+        persistDraft(withReply);
+      }
+    } catch (e) {
+      console.error(e);
+      // Retry state (Sprint 2) — re-sends exactly this message rather
+      // than making the visitor retype it; the failed user turn stays
+      // visible in `messages` above this card.
+      setMessages((m) => [...m, { id: nextId(), kind: 'error', retryText: content }]);
+    } finally {
+      setThinking(false);
+    }
+  };
+
   const send = async (text?: string) => {
     const content = (text ?? input).trim();
     if (!content || thinking) return;
@@ -68,30 +121,7 @@ export default function AiConciergeDemo({
     const userMsg: UiMsg = { id: nextId(), kind: 'text', role: 'user', text: content };
     const next = [...messages, userMsg];
     setMessages(next);
-    setThinking(true);
-    try {
-      const res = await apiFetch<DemoTurnResult>('/ai/concierge/demo-message', {
-        method: 'POST',
-        body: JSON.stringify({ message: content, history: toHistory(next) }),
-      });
-      setMessages((m) => [...m, { id: nextId(), kind: 'text', role: 'assistant', text: res.reply }]);
-      if (res.conversationComplete) {
-        setMessages((m) => [...m, { id: nextId(), kind: 'captured', role: 'assistant' }]);
-      }
-    } catch (e) {
-      console.error(e);
-      setMessages((m) => [
-        ...m,
-        {
-          id: nextId(),
-          kind: 'text',
-          role: 'assistant',
-          text: 'Sorry — I hit a snag reaching the concierge. Please try again in a moment.',
-        },
-      ]);
-    } finally {
-      setThinking(false);
-    }
+    await submitTurn(next, content);
   };
 
   // No anonymous feedback endpoint (rating is tied to a real customer —
@@ -105,6 +135,21 @@ export default function AiConciergeDemo({
     setMessages([{ id: nextId(), kind: 'text', role: 'assistant', text: GREETING }]);
     setThinking(false);
     setInput('');
+    // Starting over invalidates any draft from the previous conversation
+    // — otherwise dashboard/new could resurrect a stale, unrelated draft
+    // after the visitor deliberately abandoned this one.
+    try {
+      sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+    } catch {
+      /* storage unavailable — nothing to clean up */
+    }
+  };
+
+  const retry = (msgId: number, retryText: string) => {
+    if (thinking) return;
+    const withoutError = messages.filter((x) => x.id !== msgId);
+    setMessages(withoutError);
+    submitTurn(withoutError, retryText);
   };
 
   const showChips = !thinking && messages.length <= 2;
@@ -136,7 +181,13 @@ export default function AiConciergeDemo({
         <div className="h-[400px] space-y-3 overflow-y-auto bg-ivory/40 px-4 py-5 sm:h-[430px]">
           {messages.map((msg) =>
             msg.kind === 'captured' ? (
-              <CapturedCard key={msg.id} isAuthenticated={isAuthenticated} onSignIn={() => onNavigate('/register')} />
+              <CapturedCard
+                key={msg.id}
+                isAuthenticated={isAuthenticated}
+                onSignIn={() => onNavigate('/register?returnTo=%2Fdashboard%2Fnew')}
+              />
+            ) : msg.kind === 'error' ? (
+              <ErrorCard key={msg.id} onRetry={() => retry(msg.id, msg.retryText)} />
             ) : (
               <Bubble key={msg.id} user={msg.role === 'user'} text={msg.text} />
             ),
@@ -248,6 +299,29 @@ function RatingRow({ rated, onRate }: { rated?: 'up' | 'down'; onRate: (r: 'up' 
         <ThumbsDown className="size-3" />
       </button>
     </div>
+  );
+}
+
+function ErrorCard({ onRetry }: { onRetry: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className="flex justify-start"
+    >
+      <div className="flex max-w-[85%] items-center justify-between gap-3 rounded-2xl rounded-bl-md border border-clay/30 bg-clay/5 px-4 py-2.5 text-[13px] leading-relaxed text-forest/80 shadow-sm">
+        <span>Couldn&apos;t reach the concierge — connection hiccup.</span>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="flex shrink-0 items-center gap-1 rounded-full border border-clay/40 bg-white px-2.5 py-1 text-[11px] font-semibold text-clay transition-colors hover:bg-clay/10"
+        >
+          <RotateCcw className="size-3" />
+          Retry
+        </button>
+      </div>
+    </motion.div>
   );
 }
 
