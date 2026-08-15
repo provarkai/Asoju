@@ -273,7 +273,7 @@ export function ServicePageShell({ service }: { service: ServiceFamily }) {
           <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="font-display text-lg font-semibold text-forest">ASOJU</p>
-              <p className="mt-1 text-xs text-forest/50">Your trusted presence back home.</p>
+              <p className="mt-1 text-xs text-forest/50">Your trusted rep back home.</p>
             </div>
             <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-forest/65" aria-label="Other services">
               {otherServices.map((s) => (

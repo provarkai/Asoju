@@ -355,20 +355,63 @@ section, `#pricing` sits directly before the final CTA). Pricing, in
 exchange, is real, substantial, unaccounted-for-in-the-spec content
 (three-tier subscription cards with real configured prices).
 
-**Deliberately not fixed here.** Writing "Representation" and "Why
-ASOJU" copy from scratch, or a "Diaspora" section, means inventing
-marketing claims about ASOJU no one has approved — the exact governance
-problem the fabricated-testimonials removal (§7) was about, just in the
-other direction (inventing rather than removing). Two real options, both
-needing your call, not a unilateral pick:
-1. Treat this as intentional consolidation — the wireframe's 10 items
-   collapsed into a leaner 8-section build, with "Representation" folded
-   into the Hero copy ("Your trusted presence back home... a verified
-   human on the ground") and "Why ASOJU" folded into the Trust section.
-   Update the sprint plan doc to match reality; no code change.
-2. Treat it as a real gap — write the two missing sections with real
-   copy input from you (what ASOJU's "Representation" pitch and "Why
-   ASOJU" differentiators actually are, beyond what Trust/Hero already
-   say), plus a decision on whether Diaspora content is a section or
-   is intentionally covered by the pricing footnote's Lagos/SW-specific
-   language.
+**Closed (15 Aug 2026, later same day).** You supplied
+`ASOJU_Frontend_Developer_Handoff_v1.0_with_readme.zip` — its `00`–`07`
+folders are byte-identical to what's already in this repo, but it added
+a `99_Supplemental/` (now copied into this directory) containing real,
+already-approved copy for exactly the gap above:
+`ASOJU_Homepage_Build_Blueprint_v1.0.docx` and
+`ASOJU_Homepage_UI_UX_Frontend_Engineering_Spec_v1.0.docx` (near-
+identical to each other, one derived from the other) lock the exact
+headline/body text for Representation, Why ASOJU and Diaspora, plus the
+six real service-card promises and a locked 4-step "How it works" copy.
+`ASOJU_Messaging_Verbal_Identity_Guide_v1.0.docx` separately locks the
+brand's actual primary tagline. Implemented directly from these — no
+copy invented:
+- Added the three missing sections with their locked headline/body text
+  (Representation's visual sequence, Why ASOJU's 4-pillar table, and
+  Diaspora's supporting copy + CTA), in the locked order.
+- **Two more real bugs found auditing against these docs, both fixed:**
+  (a) the "trust bar" below the hero was showing **fabricated stats**
+  ("3,200+ tasks executed", "4.9/5 average rating", "48h median time",
+  "100% evidence-backed") — exactly what the Build Blueprint's own §4.9
+  says not to do ("Do not invent metrics or testimonials"); replaced
+  with the 5 real positioning principles the spec locks for that strip.
+  (b) the Services section was still showing **3 stale, generically-
+  named services** ("Property Inspection & Verification" etc.) with no
+  link to the six real, live service pages Sprint 5/6 already shipped —
+  the homepage had simply never been updated after that work landed.
+  Replaced with the real six `SERVICE_FAMILIES`, each linking to its
+  actual route, using the locked promise text as the card copy.
+- Hero headline/supporting copy/CTA and the Concierge's default quick-
+  prompts/placeholder updated to the locked text (`AiConciergeDemo.tsx`
+  — only its homepage-default props; service pages keep their own
+  service-specific prompts, unaffected).
+- Corrected the brand tagline site-wide: "Your trusted presence back
+  home" (this repo's own prior invented variant) → "Your trusted rep
+  back home" (the Messaging Guide's actual locked primary tagline,
+  "Your Trusted Rep Back Home.") — footer, site header, service-page
+  footer and the `<title>` tag, 5 files.
+- `lib/services.ts`'s six `tagline` fields updated to the locked
+  service-card promise text — same string now drives both the homepage
+  cards and each service page's own H1, per the Master Services spec's
+  "exact locked names everywhere" instruction.
+- Verified: `tsc --noEmit` clean, `next build` clean, Vitest 17/17 green
+  (homepage smoke test extended to assert all six real service names
+  render, and to guard against both fabricated-stats regressions, not
+  just the fabricated-testimonials one it already caught).
+
+**Still genuinely open — confirmed, not resolved by this pass:**
+Arrivals provider/booking availability (§4 above). The zip's
+`99_Supplemental/ASOJU_Arrivals_Service_Page_Blueprint_v1.1.docx`
+supersedes the `07_Service_Pages` v1.0 copy and is far more specific
+about this than the original flag was: transport/accommodation
+"help secure and coordinate" is now the locked positioning, with a
+full arrangement-status state machine required (`requested` → `being
+sourced` → `awaiting confirmation` → `confirmed` → `changed`/
+`cancelled` → `completed`) that must be "backend/provider-authoritative"
+— "the frontend should never imply guaranteed availability before
+confirmation." This is real backend + frontend work (a booking/
+provider-availability model, not yet a line in `backend/prisma/
+schema.prisma`), out of scope for a copy/content pass — flagged here
+rather than attempted speculatively.

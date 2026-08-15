@@ -16,7 +16,7 @@ export function GlobalFooter() {
         <div className="landing-footer__inner">
           <div className="brand">
             ASOJU
-            <small>Your trusted presence back home.</small>
+            <small>Your trusted rep back home.</small>
           </div>
           <nav className="landing-footer__links" aria-label="Services">
             {SERVICE_FAMILIES.map((service) => (

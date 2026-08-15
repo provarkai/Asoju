@@ -26,7 +26,7 @@ export function SiteHeader() {
       <div className="container site-header__inner">
         <Link href="/" className="brand">
           ASOJU
-          <small>Your trusted presence back home</small>
+          <small>Your trusted rep back home</small>
         </Link>
         <nav className="nav">
           {user ? (

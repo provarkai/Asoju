@@ -23,11 +23,14 @@ interface DemoTurnResult {
 const DEFAULT_GREETING =
   "Hi 👋 — I'm the ASOJU AI Concierge. Tell me, in your own words, what you need handled back home: a plot or property to verify, a building site to supervise, family errands, procurement… I'll ask a couple of quick questions to capture the essentials.";
 
+// Locked examples — docs/frontend-handoff-v1.0/99_Supplemental/
+// ASOJU_Homepage_Build_Blueprint_v1.0.docx §4.2 (identical in
+// ASOJU_Homepage_UI_UX_Frontend_Engineering_Spec_v1.0.docx).
 const DEFAULT_QUICK_PROMPTS = [
-  'Verify a plot of land in Ibeju-Lekki before I pay the balance',
-  'Monitor my building project in Abuja',
-  "Check my father's farm in Oyo",
-  'Buy and deliver 10 bags of cement to Enugu',
+  'I need someone to inspect my property in Lagos.',
+  'My parents need help with something in Abuja.',
+  'I need someone to check the progress of my building.',
+  "I'm arriving in Nigeria next month and need help getting settled.",
 ];
 
 // This is a public preview (backend: AiPublicController.sendDemoMessage,
@@ -257,7 +260,7 @@ export default function AiConciergeDemo({
               }
             }}
             disabled={thinking}
-            placeholder="Describe what needs handling back home…"
+            placeholder="What do you need help with in Nigeria? Tell us what you need in your own words…"
             className="h-10 flex-1 rounded-xl border border-forest/15 bg-ivory/50 px-3.5 text-sm text-forest placeholder:text-forest/40 focus:border-forest/40 focus:outline-none focus:ring-2 focus:ring-forest/10 disabled:opacity-60"
           />
           <button

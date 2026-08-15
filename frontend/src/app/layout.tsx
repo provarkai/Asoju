@@ -3,7 +3,7 @@ import { Fraunces, Inter } from 'next/font/google';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'ASOJU — Your trusted presence back home',
+  title: 'ASOJU — Your trusted rep back home',
   description:
     'ASOJU helps Nigerians abroad verify, manage and execute important tasks in Nigeria without being physically present.',
 };

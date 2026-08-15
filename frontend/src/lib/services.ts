@@ -5,6 +5,15 @@
 // nav and the Sprint 5/6 service-page shell don't each redefine this
 // list — see components/service/ServicePageShell.tsx.
 //
+// tagline is the exact locked "promise" from
+// docs/frontend-handoff-v1.0/99_Supplemental/ASOJU_Homepage_Build_
+// Blueprint_v1.0.docx §4.5's service-card table (identical in
+// ASOJU_Homepage_UI_UX_Frontend_Engineering_Spec_v1.0.docx) — the same
+// text used for both the homepage's six service cards and each service
+// page's own hero H1, per the Master Services spec's "service labels
+// must use the exact locked names everywhere" instruction. Not
+// independently reworded per surface.
+//
 // serviceTypes cross-references the real backend ServiceType enum
 // (backend/prisma/schema.prisma) per docs/FRONTEND_HANDOFF_V1_GAP_MAP.md
 // §1 — the mapping is display-only until the Sprint 1 backend ticket
@@ -40,7 +49,7 @@ export const SERVICE_FAMILIES: ServiceFamily[] = [
   {
     slug: 'arrivals',
     name: 'ASOJU Arrivals',
-    tagline: 'Airport pickup, accommodation and pre-arrival coordination.',
+    tagline: 'Arrive in Nigeria with trusted support on the ground.',
     serviceTypes: ['ARRIVAL_SUPPORT'],
     useCases: [
       'Airport pickup and drop-off on arrival',
@@ -69,7 +78,7 @@ export const SERVICE_FAMILIES: ServiceFamily[] = [
   {
     slug: 'inspect',
     name: 'ASOJU Inspect',
-    tagline: 'Property and asset inspection, with dated evidence.',
+    tagline: 'Know what is happening on the ground.',
     serviceTypes: ['PROPERTY_INSPECTION', 'ASSET_INSPECTION'],
     fromNgn: 60000,
     useCases: [
@@ -99,7 +108,7 @@ export const SERVICE_FAMILIES: ServiceFamily[] = [
   {
     slug: 'build',
     name: 'ASOJU Build',
-    tagline: 'Construction and project supervision while you’re away.',
+    tagline: 'Keep your project moving, even from abroad.',
     serviceTypes: ['CONSTRUCTION_SUPERVISION'],
     fromNgn: 125000,
     useCases: [
@@ -129,7 +138,7 @@ export const SERVICE_FAMILIES: ServiceFamily[] = [
   {
     slug: 'care',
     name: 'ASOJU Care',
-    tagline: 'Family and personal matters handled by a trusted local presence.',
+    tagline: "Be there for the people who matter, even when you're far away.",
     serviceTypes: ['FAMILY_SUPPORT', 'BEREAVEMENT_SUPPORT'],
     fromNgn: 45000,
     useCases: [
@@ -159,7 +168,7 @@ export const SERVICE_FAMILIES: ServiceFamily[] = [
   {
     slug: 'verify',
     name: 'ASOJU Verify',
-    tagline: 'Business, vendor and document verification.',
+    tagline: "Know who and what you're dealing with.",
     serviceTypes: ['BUSINESS_VERIFICATION'],
     fromNgn: 90000,
     useCases: [
@@ -189,7 +198,7 @@ export const SERVICE_FAMILIES: ServiceFamily[] = [
   {
     slug: 'assist',
     name: 'ASOJU Assist',
-    tagline: 'Procurement, collection and other supported local tasks.',
+    tagline: 'When something needs to be done in Nigeria, ASOJU can handle it for you.',
     serviceTypes: ['PROCUREMENT', 'INVESTMENT_SUPPORT', 'AGRICULTURE_SUPPORT'],
     fromNgn: 30000,
     useCases: [

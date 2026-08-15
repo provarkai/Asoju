@@ -9,10 +9,14 @@ import {
   Camera,
   CheckCircle2,
   ClipboardCheck,
+  Eye,
   FileText,
+  HandHeart,
   HardHat,
   Home,
+  Lock,
   MessageCircle,
+  Plane,
   PackageSearch,
   PhoneCall,
   ShieldCheck,
@@ -24,6 +28,7 @@ import AiConciergeDemo from '@/components/landing/AiConciergeDemo';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/lib/useAuth';
 import { naira } from '@/lib/format';
+import { SERVICE_FAMILIES } from '@/lib/services';
 
 const fadeUp = {
   hidden: { opacity: 0, y: 24 },
@@ -34,50 +39,66 @@ const fadeUp = {
   }),
 };
 
-const SERVICES = [
-  {
-    icon: Home,
-    title: 'Property Inspection & Verification',
-    copy: "Found a land or property for sale? We go and check it — location, condition, surroundings — and prove what we found with dated photo evidence.",
-    from: 85000,
-    tag: 'Most popular',
-  },
-  {
-    icon: HardHat,
-    title: 'Construction / Project Supervision',
-    copy: "Building in Nigeria while you're abroad? Our representatives make scheduled site visits and send you progress evidence, so no one can tell you one thing and do another.",
-    from: 125000,
-    tag: 'Recurring visits',
-  },
-  {
-    icon: PackageSearch,
-    title: 'Asset / Project Inspection',
-    copy: "A farm, a business, a vehicle, equipment — if you can't be there to check it, we can. Inspection, evidence, report, recommendation.",
-    from: 60000,
-    tag: '',
-  },
-];
+// One icon per locked service family — homepage-card-only concern, kept
+// out of lib/services.ts (display-only per that file's own note) since
+// nothing server-side or route-level needs it.
+const SERVICE_ICONS: Record<string, typeof Home> = {
+  arrivals: Plane,
+  inspect: Eye,
+  build: HardHat,
+  care: HandHeart,
+  verify: ShieldCheck,
+  assist: PackageSearch,
+};
 
+// Locked 4-step copy — docs/frontend-handoff-v1.0/99_Supplemental/
+// ASOJU_Homepage_Build_Blueprint_v1.0.docx §4.7 "How ASOJU works" table
+// (identical in ASOJU_Homepage_UI_UX_Frontend_Engineering_Spec_v1.0.docx).
 const STEPS = [
   {
     icon: MessageCircle,
-    title: 'Tell us what to handle',
-    copy: 'Describe what you need done in Nigeria in plain language — the AI Concierge understands and captures the essentials in minutes, not days.',
+    title: 'Tell us',
+    copy: 'Describe what you need through the ASOJU Concierge.',
   },
   {
     icon: ClipboardCheck,
-    title: 'We verify, quote & schedule',
-    copy: 'A human team confirms scope, sends a transparent line-item quote, and schedules a vetted representative once you accept.',
+    title: 'Define it',
+    copy: 'ASOJU clarifies the request, scope and requirements.',
   },
   {
-    icon: Camera,
-    title: 'A trusted presence executes',
-    copy: 'Your representative physically goes and does the work — inspections, supervision, errands — capturing dated photo, video and note evidence throughout.',
+    icon: UserCheck,
+    title: 'We handle it',
+    copy: 'The right people execute the work on the ground.',
   },
   {
     icon: FileText,
-    title: 'Evidence → QC → your approval',
-    copy: 'Every evidence package passes quality control, becomes a plain-language report, and lands in your portal. You approve — you stay in control.',
+    title: 'You see what happened',
+    copy: 'Receive updates, evidence and the completed report where applicable.',
+  },
+];
+
+// Locked "Why ASOJU" 4-pillar message table — same source docs, §4.8 /
+// §9 respectively, both citing the identical Pillar/Message pairs.
+const WHY_ASOJU_PILLARS = [
+  {
+    icon: UserCheck,
+    title: 'Trusted Representation',
+    copy: 'Someone accountable is handling the matter on the ground.',
+  },
+  {
+    icon: Eye,
+    title: 'Evidence & Visibility',
+    copy: "You don't have to rely on vague updates.",
+  },
+  {
+    icon: ClipboardCheck,
+    title: 'Clear Scope & Costs',
+    copy: "You know what is being handled and what you're paying for.",
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Accountability',
+    copy: 'The work moves through a controlled process rather than informal handoffs.',
   },
 ];
 
@@ -115,6 +136,7 @@ export default function Landing() {
           <nav className="hidden items-center gap-7 text-sm font-medium text-forest/80 md:flex">
             <a href="#services" className="transition-colors hover:text-forest">Services</a>
             <a href="#how" className="transition-colors hover:text-forest">How it works</a>
+            <a href="#why" className="transition-colors hover:text-forest">Why ASOJU</a>
             <a href="#trust" className="transition-colors hover:text-forest">Trust</a>
             <a href="#pricing" className="transition-colors hover:text-forest">Pricing</a>
           </nav>
@@ -147,14 +169,13 @@ export default function Landing() {
               Diaspora Support Platform — serving Nigerians abroad
             </Badge>
             <h1 className="font-display text-5xl font-semibold leading-[1.04] tracking-tight text-forest sm:text-6xl lg:text-[4.2rem]">
-              Your trusted
+              Be there,
               <br />
-              <span className="text-gradient-gold">presence</span> back home.
+              even when you <span className="text-gradient-gold">can&apos;t be there</span>.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-forest/70">
-              You&apos;re in London, Houston or Toronto. Your land, your build, your family&apos;s farm is in Lagos,
-              Abuja, Enugu. ASOJU puts a verified human on the ground — with evidence — so you never have to
-              wonder what&apos;s really happening back home.
+              ASOJU helps you handle important things in Nigeria from wherever you are — with trusted people on
+              the ground, clear scope, evidence and accountability.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Button
@@ -162,7 +183,7 @@ export default function Landing() {
                 className="h-12 bg-forest px-6 text-ivory shadow-lg shadow-forest/25 transition-all hover:-translate-y-0.5 hover:bg-forest-deep hover:shadow-xl"
                 onClick={startRequest}
               >
-                Start a request
+                Start with ASOJU
                 <ArrowRight className="size-4" />
               </Button>
               <Button
@@ -196,24 +217,33 @@ export default function Landing() {
             transition={{ duration: 0.8, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
             className="relative mx-auto w-full max-w-lg"
           >
+            <p className="mb-3 text-center font-display text-lg font-semibold text-forest lg:text-left">
+              Tell ASOJU what you need
+            </p>
             <AiConciergeDemo isAuthenticated={isAuthenticated} onNavigate={go} />
           </motion.div>
         </div>
       </section>
 
-      {/* ------------------------------------------------- TRUST BAR */}
+      {/* --------------------------------------------------- TRUST STRIP */}
+      {/* Positioning/trust statements, not performance metrics — Homepage
+          Build Blueprint §4.4 / Homepage UI/UX Spec §5 are explicit that
+          this strip is not the place for invented counts/ratings; see
+          §10 (Trust/proof) below for where real proof, once it exists,
+          belongs. */}
       <section className="border-y border-forest/8 bg-white/70">
-        <div className="mx-auto grid max-w-7xl grid-cols-2 gap-6 px-4 py-8 sm:px-6 md:grid-cols-4">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-8 gap-y-4 px-4 py-8 sm:px-6">
           {[
-            ['3,200+', 'tasks executed in Nigeria'],
-            ['4.9/5', 'average customer rating'],
-            ['48h', 'median time to first visit'],
-            ['100%', 'evidence-backed reports'],
-          ].map(([num, label]) => (
-            <div key={label} className="text-center">
-              <p className="font-display text-3xl font-semibold text-forest">{num}</p>
-              <p className="mt-1 text-xs text-forest/55">{label}</p>
-            </div>
+            { icon: ShieldCheck, label: 'Trusted representation in Nigeria' },
+            { icon: ClipboardCheck, label: 'Clear scope' },
+            { icon: UserCheck, label: 'Accountable execution' },
+            { icon: Camera, label: 'Evidence-backed updates' },
+            { icon: Lock, label: 'Secure payments' },
+          ].map(({ icon: Icon, label }) => (
+            <span key={label} className="flex items-center gap-2 text-sm font-medium text-forest/70">
+              <Icon className="size-4 text-forest" />
+              {label}
+            </span>
           ))}
         </div>
       </section>
@@ -229,50 +259,88 @@ export default function Landing() {
         >
           <Badge className="border-gold/40 bg-gold/10 text-clay">What we handle</Badge>
           <h2 className="mt-4 font-display text-4xl font-semibold text-forest sm:text-5xl">
-            Whatever matters to you back home
+            Whatever needs someone you trust on the ground.
           </h2>
           <p className="mt-4 text-lg text-forest/65">
-            Three services at launch — each with a published spec: scope, deliverables, evidence and exclusions.
-            No surprises.
+            Six service families, each with a published scope, deliverables and evidence policy. No surprises.
           </p>
         </motion.div>
 
-        <div className="mt-14 grid gap-6 md:grid-cols-3">
-          {SERVICES.map((s, i) => (
-            <motion.div
-              key={s.title}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true, margin: '-60px' }}
-              variants={fadeUp}
-              custom={i}
-              className="group relative overflow-hidden rounded-2xl border border-forest/10 bg-white p-7 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl hover:shadow-forest/10"
-            >
-              {s.tag && (
-                <Badge className="absolute right-5 top-5 bg-gold/15 text-clay border-gold/30">{s.tag}</Badge>
-              )}
-              <div className="flex size-12 items-center justify-center rounded-xl bg-forest text-gold-light transition-transform duration-300 group-hover:scale-110">
-                <s.icon className="size-6" />
-              </div>
-              <h3 className="mt-5 font-display text-xl font-semibold text-forest">{s.title}</h3>
-              <p className="mt-3 text-sm leading-relaxed text-forest/65">{s.copy}</p>
-              <p className="mt-5 text-sm text-forest/50">
-                from <span className="font-semibold text-forest">{naira(s.from)}</span>
-              </p>
-            </motion.div>
-          ))}
+        <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {SERVICE_FAMILIES.map((s, i) => {
+            const Icon = SERVICE_ICONS[s.slug] ?? Home;
+            return (
+              <motion.div
+                key={s.slug}
+                initial="hidden"
+                whileInView="show"
+                viewport={{ once: true, margin: '-60px' }}
+                variants={fadeUp}
+                custom={i}
+                className="group relative overflow-hidden rounded-2xl border border-forest/10 bg-white p-7 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl hover:shadow-forest/10"
+              >
+                <div className="flex size-12 items-center justify-center rounded-xl bg-forest text-gold-light transition-transform duration-300 group-hover:scale-110">
+                  <Icon className="size-6" />
+                </div>
+                <h3 className="mt-5 font-display text-xl font-semibold text-forest">{s.name}</h3>
+                <p className="mt-3 text-sm leading-relaxed text-forest/65">{s.tagline}</p>
+                {s.fromNgn !== undefined && (
+                  <p className="mt-5 text-sm text-forest/50">
+                    from <span className="font-semibold text-forest">{naira(s.fromNgn)}</span>
+                  </p>
+                )}
+                <button
+                  onClick={() => go(`/${s.slug}`)}
+                  className="mt-5 flex items-center gap-1.5 text-sm font-semibold text-forest underline decoration-gold decoration-2 underline-offset-4 hover:decoration-forest"
+                >
+                  Explore {s.name}
+                  <ArrowRight className="size-3.5" />
+                </button>
+              </motion.div>
+            );
+          })}
         </div>
+      </section>
 
-        <div className="mt-8 rounded-2xl border border-dashed border-forest/20 bg-sand/50 p-6 text-center">
-          <p className="text-sm text-forest/70">
-            Family support, procurement, business verification &amp; investment support roll out next.{' '}
-            <button
-              onClick={startRequest}
-              className="font-semibold text-forest underline decoration-gold decoration-2 underline-offset-4 hover:decoration-forest"
-            >
-              Tell us what you need →
-            </button>
-          </p>
+      {/* ------------------------------------------------ REPRESENTATION */}
+      <section className="bg-sand/40 py-24">
+        <div className="mx-auto grid max-w-7xl items-center gap-14 px-4 sm:px-6 lg:grid-cols-2">
+          <motion.div initial="hidden" whileInView="show" viewport={{ once: true, margin: '-80px' }} variants={fadeUp}>
+            <Badge className="border-gold/40 bg-gold/10 text-clay">How representation works</Badge>
+            <h2 className="mt-4 font-display text-4xl font-semibold text-forest sm:text-5xl">
+              Distance shouldn&apos;t mean losing control.
+            </h2>
+            <p className="mt-5 text-lg leading-relaxed text-forest/65">
+              You&apos;re abroad, something needs to happen in Nigeria. ASOJU understands what you need, a trusted
+              person handles it, and you receive updates and evidence — so you stay informed and in control the
+              whole way through.
+            </p>
+          </motion.div>
+          <motion.div
+            initial="hidden"
+            whileInView="show"
+            viewport={{ once: true, margin: '-80px' }}
+            variants={fadeUp}
+            custom={1}
+            className="space-y-3"
+          >
+            {[
+              'You are abroad',
+              'Something needs to happen in Nigeria',
+              'ASOJU understands what you need',
+              'A trusted person handles it',
+              'You receive updates and evidence',
+              'You stay informed and in control',
+            ].map((step, i, arr) => (
+              <div key={step} className="flex items-center gap-4 rounded-xl border border-forest/8 bg-white p-4">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-forest text-xs font-bold text-gold-light">
+                  {i + 1}
+                </span>
+                <p className="text-sm font-medium text-forest/80">{step}</p>
+                {i < arr.length - 1 && <ArrowRight className="ml-auto size-4 shrink-0 text-forest/25" />}
+              </div>
+            ))}
+          </motion.div>
         </div>
       </section>
 
@@ -289,7 +357,7 @@ export default function Landing() {
           >
             <Badge className="border-gold/50 bg-gold/15 text-gold-light">The golden path</Badge>
             <h2 className="mt-4 font-display text-4xl font-semibold sm:text-5xl">
-              From request to report — deterministic, not hopeful
+              From &ldquo;I need someone to handle this&rdquo; to &ldquo;It&apos;s done.&rdquo;
             </h2>
             <p className="mt-4 text-lg text-ivory/70">
               A workflow engine enforces every step. AI may recommend — it never decides for you.
@@ -321,6 +389,53 @@ export default function Landing() {
               </motion.div>
             ))}
           </div>
+
+          <div className="mt-14 text-center">
+            <Button
+              size="lg"
+              className="h-12 bg-gold px-7 font-semibold text-forest-deep shadow-lg shadow-gold/30 transition-all hover:-translate-y-0.5 hover:bg-gold-light"
+              onClick={startRequest}
+            >
+              Start a Request
+              <ArrowRight className="size-4" />
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      {/* --------------------------------------------------- WHY ASOJU */}
+      <section id="why" className="mx-auto max-w-7xl px-4 py-24 sm:px-6">
+        <motion.div
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, margin: '-80px' }}
+          variants={fadeUp}
+          className="mx-auto max-w-2xl text-center"
+        >
+          <Badge className="border-gold/40 bg-gold/10 text-clay">Why ASOJU</Badge>
+          <h2 className="mt-4 font-display text-4xl font-semibold text-forest sm:text-5xl">
+            Because important things deserve more than &ldquo;I&apos;ll check on it.&rdquo;
+          </h2>
+        </motion.div>
+
+        <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {WHY_ASOJU_PILLARS.map((p, i) => (
+            <motion.div
+              key={p.title}
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true, margin: '-60px' }}
+              variants={fadeUp}
+              custom={i}
+              className="rounded-2xl border border-forest/10 bg-white p-6 shadow-sm"
+            >
+              <div className="flex size-11 items-center justify-center rounded-xl bg-forest/8 text-forest">
+                <p.icon className="size-5" />
+              </div>
+              <h3 className="mt-4 font-display text-lg font-semibold text-forest">{p.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-forest/65">{p.copy}</p>
+            </motion.div>
+          ))}
         </div>
       </section>
 
@@ -330,7 +445,7 @@ export default function Landing() {
           <motion.div initial="hidden" whileInView="show" viewport={{ once: true, margin: '-80px' }} variants={fadeUp}>
             <Badge className="border-gold/40 bg-gold/10 text-clay">Trust &amp; evidence</Badge>
             <h2 className="mt-4 font-display text-4xl font-semibold text-forest sm:text-5xl">
-              We never say just &quot;verified&quot;
+              You don&apos;t have to take our word for it.
             </h2>
             <p className="mt-5 text-lg leading-relaxed text-forest/65">
               Every claim in every report carries a label that says where it came from and how we know. Evidence
@@ -540,6 +655,30 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* --------------------------------------------------- DIASPORA */}
+      <section className="bg-forest py-24 text-ivory">
+        <div className="mx-auto max-w-3xl px-4 text-center sm:px-6">
+          <Badge className="border-gold/50 bg-gold/15 text-gold-light">Wherever you are</Badge>
+          <h2 className="mt-4 font-display text-4xl font-semibold sm:text-5xl">
+            You may live abroad. Your responsibilities don&apos;t.
+          </h2>
+          <p className="mx-auto mt-5 max-w-xl text-lg leading-relaxed text-ivory/70">
+            Your family, property, projects and important decisions are still happening in Nigeria. ASOJU gives
+            you a trusted way to stay represented, informed and involved — without having to be physically
+            present for everything.
+          </p>
+          <Button
+            size="lg"
+            variant="outline"
+            className="mt-8 h-12 border-gold/40 bg-transparent px-7 text-gold-light hover:bg-ivory/10"
+            onClick={() => document.getElementById('services')?.scrollIntoView({ behavior: 'smooth' })}
+          >
+            See How ASOJU Can Help
+            <ArrowRight className="size-4" />
+          </Button>
+        </div>
+      </section>
+
       {/* ----------------------------------------------------------- CTA */}
       <section className="px-4 pb-24 sm:px-6">
         <motion.div
@@ -552,18 +691,15 @@ export default function Landing() {
           <div className="absolute inset-0 pattern-grid-dark" />
           <div className="pointer-events-none absolute -top-24 left-1/2 size-96 -translate-x-1/2 rounded-full bg-gold/20 blur-3xl" />
           <div className="relative">
-            <h2 className="font-display text-4xl font-semibold sm:text-5xl">What needs handling back home?</h2>
-            <p className="mx-auto mt-4 max-w-xl text-lg text-ivory/70">
-              Tell us in plain words. We&apos;ll get eyes, hands and evidence on it — and you&apos;ll approve the
-              result before we call it done.
-            </p>
+            <h2 className="font-display text-4xl font-semibold sm:text-5xl">Something needs to be handled in Nigeria?</h2>
+            <p className="mx-auto mt-4 max-w-xl text-lg text-ivory/70">Tell ASOJU what you need.</p>
             <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
               <Button
                 size="lg"
                 className="h-12 bg-gold px-7 font-semibold text-forest-deep shadow-lg shadow-gold/30 transition-all hover:-translate-y-0.5 hover:bg-gold-light"
                 onClick={startRequest}
               >
-                Start a request
+                Start with the ASOJU Concierge
                 <ArrowRight className="size-4" />
               </Button>
               <Button
@@ -590,12 +726,13 @@ export default function Landing() {
               </span>
               <div>
                 <p className="font-display text-lg font-semibold text-forest">ASOJU</p>
-                <p className="text-xs text-forest/50">Your trusted presence back home.</p>
+                <p className="text-xs text-forest/50">Your trusted rep back home.</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-forest/60">
               <a href="#services" className="hover:text-forest">Services</a>
               <a href="#how" className="hover:text-forest">How it works</a>
+              <a href="#why" className="hover:text-forest">Why ASOJU</a>
               <a href="#trust" className="hover:text-forest">Trust &amp; evidence</a>
               <a href="#pricing" className="hover:text-forest">Pricing</a>
             </div>
