@@ -19,7 +19,7 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -74,7 +74,7 @@ jobs:
       AUTH_THROTTLE_LIMIT: "1000"
       AUTH_THROTTLE_TTL_MS: "60000"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -89,7 +89,7 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -107,7 +107,7 @@ jobs:
     needs: [backend, backend-e2e, frontend]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Railway CLI
         run: npm install -g @railway/cli
       # Each service's Root Directory is set in the Railway dashboard
