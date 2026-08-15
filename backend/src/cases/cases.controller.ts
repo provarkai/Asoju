@@ -15,6 +15,7 @@ import { AssignOwnerDto } from './dto/assign-owner.dto';
 import { SetNextActionDto } from './dto/set-next-action.dto';
 import { HoldCaseDto } from './dto/hold-case.dto';
 import { ResumeCaseDto } from './dto/resume-case.dto';
+import { SendMessageDto } from './dto/send-message.dto';
 import { RaiseDisputeDto } from './dto/raise-dispute.dto';
 
 const STAFF_TRIAGE_ROLES = [Role.CASE_MANAGER, Role.RELATIONSHIP_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
@@ -194,5 +195,23 @@ export class CasesController {
     @Body() dto: ResumeCaseDto,
   ) {
     return this.casesService.resolveDispute(user, caseId, dto.reason);
+  }
+
+  // -------------------------------------------------------------------
+  // Case messaging — any role CaseAccessGuard already lets onto the case
+  // (customer, staff collaborator, or bypass-eligible admin) can read and
+  // post; there's no separate messaging-specific role restriction.
+  // -------------------------------------------------------------------
+
+  @UseGuards(CaseAccessGuard)
+  @Get('cases/:caseId/messages')
+  listMessages(@Param('caseId') caseId: string) {
+    return this.casesService.listMessages(caseId);
+  }
+
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/messages')
+  sendMessage(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Body() dto: SendMessageDto) {
+    return this.casesService.sendMessage(user, caseId, dto.body);
   }
 }

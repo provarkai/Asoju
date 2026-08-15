@@ -1,113 +1,18 @@
 :root {
   --asoju-ink: #12221c;
   --asoju-green: #0f5132;
-  --asoju-green-deep: #0a3a24;
   --asoju-green-light: #e8f3ec;
   --asoju-gold: #b8860b;
-  --asoju-gold-light: #e9c869;
-  --asoju-clay: #a2632f;
-  --asoju-clay-deep: #824e24;
-  --asoju-sand: #f3ede0;
   --asoju-bg: #fbfaf7;
   --asoju-card: #ffffff;
   --asoju-border: #e3e0d8;
   --asoju-muted: #6b6a63;
   --asoju-danger: #a4262c;
   --radius: 10px;
-
-  /* -------------------------------------------------------------------
-     Design-system foundation tokens (Sprint 1 — docs/frontend-handoff-
-     v1.0/03_Design_System). Extends the palette above rather than
-     replacing it, per that spec's own "use the repository's existing
-     token system if present" rule. Status/semantic colors reuse the
-     existing --asoju-* palette so success/warning/info/danger stay
-     visually consistent with everything already shipped.
-     ------------------------------------------------------------------- */
-
-  /* Status semantics — mapped to real backend states in Badge/Status
-     (CaseStatus/PaymentStatus per docs/FRONTEND_HANDOFF_V1_GAP_MAP.md §3),
-     not invented per-screen. */
-  --asoju-success: var(--asoju-green);
-  --asoju-success-bg: var(--asoju-green-light);
-  --asoju-warning: var(--asoju-clay-deep);
-  --asoju-warning-bg: color-mix(in srgb, var(--asoju-gold) 16%, transparent);
-  --asoju-danger-bg: color-mix(in srgb, var(--asoju-danger) 14%, transparent);
-  --asoju-info: #2b5e8c;
-  --asoju-info-bg: color-mix(in srgb, #2b5e8c 12%, transparent);
-  --asoju-neutral-bg: color-mix(in srgb, var(--asoju-muted) 14%, transparent);
-
-  /* Type scale — the sizes already in use across the app/landing page,
-     named so components reference a scale instead of magic numbers. */
-  --font-size-xs: 0.75rem;
-  --font-size-sm: 0.85rem;
-  --font-size-base: 1rem;
-  --font-size-md: 1.1rem;
-  --font-size-lg: 1.25rem;
-  --font-size-xl: 1.5rem;
-  --font-size-2xl: 2rem;
-  --font-size-3xl: 2.5rem;
-  --font-size-hero: 3.2rem;
-
-  /* Spacing scale (4px base) — for new components; existing hand-tuned
-     rem values elsewhere are left as-is rather than churned. */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.25rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
-  --space-10: 2.5rem;
-  --space-12: 3rem;
-
-  /* Layout */
-  --container-max: 880px;
-  --container-wide-max: 1180px;
-  --header-height: 4rem;
-
-  /* Focus & motion */
-  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--asoju-green) 35%, transparent);
-  --focus-ring-on-dark: 0 0 0 3px color-mix(in srgb, var(--asoju-gold-light) 45%, transparent);
-  --transition-fast: 150ms ease;
-  --transition-base: 220ms ease;
-
-  /* z-index scale — so overlays/toasts/header stacking is centralized
-     instead of ad hoc per component. */
-  --z-header: 100;
-  --z-overlay: 200;
-  --z-modal: 210;
-  --z-toast: 300;
 }
 
 * {
   box-sizing: border-box;
-}
-
-/* Accessible focus — visible for keyboard users, silent for mouse/touch.
-   Design-system spec §19 "visible focus states" / §21 "accessibility is
-   part of the component contract". */
-:focus {
-  outline: none;
-}
-
-:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.landing-section--dark :focus-visible,
-[data-on-dark] :focus-visible {
-  box-shadow: var(--focus-ring-on-dark);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
 }
 
 html,
@@ -172,135 +77,6 @@ a {
   font-size: 0.9rem;
 }
 
-/* GlobalHeader responsive nav (Sprint 1) — SiteHeader.tsx */
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.site-header__inner {
-  gap: var(--space-4);
-}
-
-.nav-trigger {
-  display: none;
-  background: transparent;
-  border: 1px solid var(--asoju-border);
-  border-radius: 8px;
-  padding: 0.4rem 0.65rem;
-  font-size: 1.1rem;
-  line-height: 1;
-}
-
-.services-menu {
-  position: relative;
-}
-
-.services-menu summary {
-  list-style: none;
-  cursor: pointer;
-  font-size: 0.9rem;
-  color: var(--asoju-ink);
-  padding: 0.3rem 0;
-}
-
-.services-menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.services-menu summary::after {
-  content: '▾';
-  margin-left: 0.3rem;
-  font-size: 0.7rem;
-  color: var(--asoju-muted);
-}
-
-.services-menu[open] summary::after {
-  content: '▴';
-}
-
-.services-menu__panel {
-  position: absolute;
-  top: calc(100% + 0.6rem);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: var(--z-header);
-  display: grid;
-  gap: 0.25rem;
-  min-width: 20rem;
-  background: var(--asoju-card);
-  border: 1px solid var(--asoju-border);
-  border-radius: 0.85rem;
-  padding: 0.6rem;
-  box-shadow: 0 24px 50px -24px rgb(18 34 28 / 0.35);
-}
-
-.services-menu__panel a {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: 0.6rem;
-  color: var(--asoju-ink);
-  text-decoration: none;
-}
-
-.services-menu__panel a:hover,
-.services-menu__panel a:focus-visible {
-  background: var(--asoju-green-light);
-}
-
-.services-menu__panel .muted {
-  font-size: 0.78rem;
-}
-
-.mobile-nav {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.mobile-nav a {
-  color: var(--asoju-ink);
-  text-decoration: none;
-  font-weight: 600;
-  padding: 0.3rem 0;
-}
-
-.mobile-nav__heading {
-  margin: 0;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--asoju-muted);
-}
-
-.mobile-nav__divider {
-  border: none;
-  border-top: 1px solid var(--asoju-border);
-  margin: var(--space-2) 0;
-}
-
-@media (max-width: 860px) {
-  .nav--desktop {
-    display: none;
-  }
-  .nav-trigger {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-}
-
 main {
   padding: 2.5rem 0 4rem;
 }
@@ -337,20 +113,6 @@ label {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-/* Input/Textarea (frontend/src/components/ui/Field.tsx) — the wrapping
-   element is a <div>, not <label>, so this doesn't inherit the bare
-   `label` rule above; see that file's comment for why. */
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.field label {
   font-size: 0.9rem;
   font-weight: 600;
 }
@@ -517,826 +279,154 @@ button {
 }
 
 /* ---------------------------------------------------------------------
-   Landing page (signed-out home) — full-bleed marketing sections that
-   break out of the app's 880px .container so hero/band sections can run
-   edge to edge, with their own inner max-width.
-   ------------------------------------------------------------------- */
-
-.full-bleed {
-  width: 100vw;
-  position: relative;
-  left: 50%;
-  right: 50%;
-  margin-left: -50vw;
-  margin-right: -50vw;
-}
-
-.landing-inner {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 0 1.5rem;
-}
-
-.landing-section {
-  padding: 4.5rem 0;
-}
-
-.landing-section--tight {
-  padding: 2.5rem 0;
-}
-
-.landing-section--dark {
-  background: var(--asoju-green-deep);
-  color: #f5f1e6;
-}
-
-.landing-section--sand {
-  background: var(--asoju-sand);
-}
-
-.landing-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.75rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  background: color-mix(in srgb, var(--asoju-gold) 14%, transparent);
-  color: var(--asoju-clay-deep);
-}
-
-.landing-section--dark .landing-eyebrow {
-  background: color-mix(in srgb, var(--asoju-gold-light) 20%, transparent);
-  color: var(--asoju-gold-light);
-}
-
-.landing-heading {
-  font-size: 2.5rem;
-  line-height: 1.08;
-  margin: 0.75rem 0 0;
-  letter-spacing: -0.01em;
-}
-
-.landing-heading--hero {
-  font-size: 3.2rem;
-}
-
-.landing-lede {
-  color: var(--asoju-muted);
-  font-size: 1.1rem;
-  line-height: 1.6;
-  max-width: 38rem;
-  margin-top: 1rem;
-}
-
-.landing-section--dark .landing-lede {
-  color: color-mix(in srgb, #f5f1e6 72%, transparent);
-}
-
-.landing-centered {
-  text-align: center;
-  max-width: 42rem;
-  margin: 0 auto;
-}
-
-.landing-hero-grid {
-  display: grid;
-  gap: 3rem;
-  grid-template-columns: 1.1fr 1fr;
-  align-items: center;
-  padding: 3rem 0 3.5rem;
-}
-
-@media (max-width: 860px) {
-  .landing-hero-grid {
-    grid-template-columns: 1fr;
-  }
-  .landing-heading--hero {
-    font-size: 2.4rem;
-  }
-}
-
-.landing-trust-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.75rem;
-  margin-top: 2rem;
-  font-size: 0.85rem;
-  color: var(--asoju-muted);
-}
-
-.landing-trust-row span {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.landing-stat-bar {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1.5rem;
-  text-align: center;
-}
-
-@media (min-width: 640px) {
-  .landing-stat-bar {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-.landing-stat-bar strong {
-  display: block;
-  font-size: 1.75rem;
-  color: var(--asoju-green);
-}
-
-.landing-stat-bar span {
-  display: block;
-  margin-top: 0.25rem;
-  font-size: 0.75rem;
-  color: var(--asoju-muted);
-}
-
-.landing-trust-grid {
-  display: grid;
-  gap: 2.5rem;
-  grid-template-columns: 1fr;
-}
-
-@media (min-width: 860px) {
-  .landing-trust-grid {
-    grid-template-columns: 1.05fr 1fr;
-    align-items: start;
-  }
-}
-
-.landing-grid-3 {
-  display: grid;
-  gap: 1.5rem;
-  margin-top: 2.5rem;
-}
-
-@media (min-width: 720px) {
-  .landing-grid-3 {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-.landing-grid-4 {
-  display: grid;
-  gap: 2rem;
-  margin-top: 3rem;
-}
-
-@media (min-width: 720px) {
-  .landing-grid-4 {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-.landing-card {
-  position: relative;
-  background: var(--asoju-card);
-  border: 1px solid var(--asoju-border);
-  border-radius: 1rem;
-  padding: 1.75rem;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.landing-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 12px 28px -12px rgb(18 34 28 / 0.18);
-}
-
-.landing-section--dark .landing-card {
-  background: color-mix(in srgb, var(--asoju-gold-light) 8%, transparent);
-  border-color: color-mix(in srgb, var(--asoju-gold-light) 25%, transparent);
-}
-
-.landing-card__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 0.75rem;
-  background: var(--asoju-green);
-  color: var(--asoju-gold-light);
-  font-size: 1.25rem;
-}
-
-.landing-card__tag {
-  position: absolute;
-  top: 1.25rem;
-  right: 1.25rem;
-}
-
-.landing-card h3 {
-  margin: 1.1rem 0 0.5rem;
-  font-size: 1.15rem;
-}
-
-.landing-card p {
-  color: var(--asoju-muted);
-  font-size: 0.92rem;
-  line-height: 1.55;
-  margin: 0;
-}
-
-.landing-section--dark .landing-card p {
-  color: color-mix(in srgb, #f5f1e6 75%, transparent);
-}
-
-.landing-card__price {
-  margin-top: 0.75rem;
-  font-size: 0.85rem;
-  color: var(--asoju-muted);
-}
-
-.landing-step {
-  position: relative;
-}
-
-.landing-step__num {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 3.25rem;
-  height: 3.25rem;
-  border-radius: 1rem;
-  border: 1px solid color-mix(in srgb, var(--asoju-gold-light) 40%, transparent);
-  background: color-mix(in srgb, var(--asoju-gold-light) 12%, transparent);
-  color: var(--asoju-gold-light);
-  font-weight: 700;
-}
-
-.landing-step h3 {
-  margin: 1rem 0 0.4rem;
-  font-size: 1.1rem;
-}
-
-.landing-step p {
-  color: color-mix(in srgb, #f5f1e6 75%, transparent);
-  font-size: 0.9rem;
-  line-height: 1.55;
-}
-
-.landing-trust-list {
-  list-style: none;
-  margin: 1.75rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.landing-trust-list li {
-  display: flex;
-  gap: 0.75rem;
-  padding: 0.85rem;
-  border: 1px solid var(--asoju-border);
-  border-radius: 0.75rem;
-  background: var(--asoju-card);
-}
-
-.landing-trust-list strong {
-  display: block;
-  font-size: 0.9rem;
-}
-
-.landing-trust-list span {
-  font-size: 0.8rem;
-  color: var(--asoju-muted);
-}
-
-.landing-confidence-card {
-  border: 1px solid var(--asoju-border);
-  border-radius: 1.25rem;
-  background: var(--asoju-card);
-  padding: 1.75rem;
-  box-shadow: 0 20px 45px -24px rgb(18 34 28 / 0.25);
-}
-
-.landing-confidence-row {
-  margin-top: 1.1rem;
-}
-
-.landing-confidence-row .landing-confidence-row__label {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.85rem;
-  margin-bottom: 0.35rem;
-}
-
-.landing-confidence-track {
-  height: 0.5rem;
-  border-radius: 999px;
-  background: var(--asoju-green-light);
-  overflow: hidden;
-}
-
-.landing-confidence-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--asoju-green), var(--asoju-gold));
-}
-
-.landing-confidence-footer {
-  margin-top: 1.5rem;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.75rem;
-  border-top: 1px solid var(--asoju-border);
-  padding-top: 1.25rem;
-  text-align: center;
-}
-
-.landing-confidence-footer strong {
-  display: block;
-  font-size: 1.15rem;
-}
-
-.landing-confidence-footer span {
-  font-size: 0.7rem;
-  color: var(--asoju-muted);
-}
-
-.landing-nonneg {
-  margin-top: 1.25rem;
-  border: 1px solid color-mix(in srgb, var(--asoju-gold) 35%, transparent);
-  background: var(--asoju-green-deep);
-  color: #f5f1e6;
-  border-radius: 0.85rem;
-  padding: 0.85rem 1.1rem;
-  font-size: 0.8rem;
-  text-align: center;
-}
-
-.landing-pricing-card--featured {
-  border-color: var(--asoju-gold);
-  box-shadow: 0 16px 36px -18px rgb(184 134 11 / 0.35);
-}
-
-.landing-pricing-card--dark {
-  background: var(--asoju-green-deep);
-  color: #f5f1e6;
-  border: none;
-}
-
-.landing-pricing-card--dark p,
-.landing-pricing-card--dark .landing-card__price {
-  color: color-mix(in srgb, #f5f1e6 75%, transparent);
-}
-
-.landing-pricing-list {
-  list-style: none;
-  margin: 1.25rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-  font-size: 0.88rem;
-}
-
-.landing-pricing-list li {
-  display: flex;
-  gap: 0.5rem;
-  align-items: flex-start;
-}
-
-.landing-price {
-  margin-top: 0.75rem;
-  font-size: 1.9rem;
-  font-weight: 700;
-}
-
-.landing-price small {
-  font-size: 0.85rem;
-  font-weight: 400;
-  color: var(--asoju-muted);
-}
-
-.landing-testimonial {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.landing-testimonial blockquote {
-  margin: 1rem 0;
-  flex: 1;
-  font-size: 0.92rem;
-  line-height: 1.6;
-  color: var(--asoju-ink);
-}
-
-.landing-testimonial__stars {
-  color: var(--asoju-gold);
-  font-size: 0.9rem;
-  letter-spacing: 0.1em;
-}
-
-.landing-testimonial__who {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  border-top: 1px solid var(--asoju-border);
-  padding-top: 1rem;
-}
-
-.landing-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 50%;
-  background: var(--asoju-green);
-  color: var(--asoju-gold-light);
-  font-weight: 700;
-  font-size: 0.85rem;
-  flex-shrink: 0;
-}
-
-.landing-cta-band {
-  border-radius: 1.5rem;
-  background: var(--asoju-green-deep);
-  color: #f5f1e6;
-  text-align: center;
-  padding: 3.5rem 1.5rem;
-}
-
-.landing-footer {
-  border-top: 1px solid var(--asoju-border);
-  padding: 2.5rem 0;
-}
-
-.landing-footer__inner {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.5rem;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.landing-footer__links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.25rem;
-  font-size: 0.85rem;
-}
-
-.landing-footer__disclaimer {
-  margin-top: 2rem;
-  text-align: center;
-  font-size: 0.75rem;
-  color: var(--asoju-muted);
-}
-
-.landing-fade-up {
-  animation: landing-fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@keyframes landing-fade-up {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .landing-fade-up {
-    animation: none;
-  }
-}
-
-/* Concierge demo widget (landing hero) */
-
-.concierge-demo {
-  border: 1px solid var(--asoju-border);
-  border-radius: 1.25rem;
-  background: var(--asoju-card);
-  box-shadow: 0 24px 60px -28px rgb(18 34 28 / 0.35);
-  overflow: hidden;
-}
-
-.concierge-demo__header {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.9rem 1.1rem;
-  background: var(--asoju-green-deep);
-  color: #f5f1e6;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.concierge-demo__dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: #4ade80;
-}
-
-.concierge-demo__body {
-  padding: 1.1rem;
-  min-height: 20rem;
-}
-
-.concierge-demo__prompts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0 1.1rem 1.1rem;
-}
-
-.concierge-demo__prompt {
-  font-size: 0.78rem;
-  padding: 0.4rem 0.7rem;
-  border-radius: 999px;
-  border: 1px solid var(--asoju-border);
-  background: var(--asoju-bg);
-  color: var(--asoju-ink);
-}
-
-.concierge-demo__quote {
-  border: 1px solid var(--asoju-border);
-  border-radius: 0.85rem;
-  padding: 0.9rem;
-  background: var(--asoju-bg);
-  font-size: 0.85rem;
-}
-
-.concierge-demo__quote-line {
-  display: flex;
-  justify-content: space-between;
-  padding: 0.25rem 0;
-  border-bottom: 1px dashed var(--asoju-border);
+ * Tailwind v4 + shadcn/ui — added for the asoju-app-main-derived pages
+ * (Landing, Auth, Dashboard, Cases, Profile, Team, Vault, Billing).
+ *
+ * Deliberately importing theme.css + utilities.css directly instead of
+ * the bundled `@import "tailwindcss"` (which also pulls in Preflight,
+ * Tailwind's base reset). Preflight zeroes out browser-default heading
+ * sizes/margins and form-element styling — everything above this comment
+ * (the ops/field/partner/beneficiary pages, SiteHeader, NotificationBell,
+ * every page not part of this conversion) relies on those browser
+ * defaults for raw <h1>/<h2>/<form> elements with no Tailwind classes.
+ * Skipping Preflight keeps all of that pixel-identical; Tailwind utility
+ * classes still work fine on the new pages regardless (their specificity
+ * already beats the plain element selectors above).
+ * --------------------------------------------------------------------- */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--shadcn-background);
+  --color-foreground: var(--shadcn-foreground);
+  --color-card: var(--shadcn-card);
+  --color-card-foreground: var(--shadcn-card-foreground);
+  --color-popover: var(--shadcn-popover);
+  --color-popover-foreground: var(--shadcn-popover-foreground);
+  --color-primary: var(--shadcn-primary);
+  --color-primary-foreground: var(--shadcn-primary-foreground);
+  --color-secondary: var(--shadcn-secondary);
+  --color-secondary-foreground: var(--shadcn-secondary-foreground);
+  --color-muted: var(--shadcn-muted);
+  --color-muted-foreground: var(--shadcn-muted-foreground);
+  --color-accent: var(--shadcn-accent);
+  --color-accent-foreground: var(--shadcn-accent-foreground);
+  --color-destructive: var(--shadcn-destructive);
+  --color-border: var(--shadcn-border);
+  --color-input: var(--shadcn-input);
+  --color-ring: var(--shadcn-ring);
+  --radius-sm: calc(var(--shadcn-radius) - 4px);
+  --radius-md: calc(var(--shadcn-radius) - 2px);
+  --radius-lg: var(--shadcn-radius);
+  --radius-xl: calc(var(--shadcn-radius) + 4px);
+}
+
+/* Namespaced --shadcn-* (not bare --background/--border/etc.) so nothing
+ * here collides with the --asoju-* variables above — --radius already
+ * exists above at 10px for the old pages' .card/.case-row/etc.; shadcn
+ * components read --shadcn-radius instead, kept close to the ASOJU brand
+ * green rather than shadcn's stock near-black neutral palette. */
+:root {
+  --shadcn-radius: 0.625rem;
+  --shadcn-background: #ffffff;
+  --shadcn-foreground: var(--asoju-ink);
+  --shadcn-card: var(--asoju-card);
+  --shadcn-card-foreground: var(--asoju-ink);
+  --shadcn-popover: #ffffff;
+  --shadcn-popover-foreground: var(--asoju-ink);
+  --shadcn-primary: var(--asoju-green);
+  --shadcn-primary-foreground: #ffffff;
+  --shadcn-secondary: var(--asoju-green-light);
+  --shadcn-secondary-foreground: var(--asoju-green);
+  --shadcn-muted: #f4f3ef;
+  --shadcn-muted-foreground: var(--asoju-muted);
+  --shadcn-accent: var(--asoju-green-light);
+  --shadcn-accent-foreground: var(--asoju-green);
+  --shadcn-destructive: var(--asoju-danger);
+  --shadcn-border: var(--asoju-border);
+  --shadcn-input: var(--asoju-border);
+  --shadcn-ring: var(--asoju-green);
 }
 
 /* ---------------------------------------------------------------------
-   Design-system primitives (Sprint 1) — Button loading state, Card
-   interactive variant, Modal/Drawer overlay, Accordion, Toast, Skeleton.
-   Components: frontend/src/components/ui/*
-   ------------------------------------------------------------------- */
-
-.btn {
-  position: relative;
+ * asoju-app-main brand palette — additive Tailwind color/font tokens
+ * (bg-forest, text-gold, font-display, etc.) used only by pages ported
+ * from that prototype. Defining these is inert on its own: no rule here
+ * applies to any element until a page's JSX opts in with the matching
+ * class, so nothing changes for pages that don't use them.
+ * --------------------------------------------------------------------- */
+@theme {
+  --font-display: var(--font-display-fraunces), ui-serif, Georgia, serif;
+  --font-sans-aam: var(--font-sans-inter), ui-sans-serif, system-ui, sans-serif;
+  --color-gold: #c9962e;
+  --color-gold-light: #e3b94e;
+  --color-forest: #0e3b2e;
+  --color-forest-deep: #092a21;
+  --color-ivory: #faf6ee;
+  --color-sand: #f1ead9;
+  --color-clay: #a5532a;
+  --color-clay-deep: #7d3f1f;
 }
 
-.btn__spinner {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn__spinner-dot {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 50%;
-  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
-  border-top-color: currentColor;
-  animation: btn-spin 0.7s linear infinite;
-}
-
-@keyframes btn-spin {
-  to {
-    transform: rotate(360deg);
+@layer utilities {
+  .text-gradient-gold {
+    background: linear-gradient(100deg, #e3b94e 0%, #f4d98a 45%, #c9962e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .bg-grain {
+    background-image: radial-gradient(rgba(12, 52, 40, 0.055) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .pattern-grid-dark {
+    background-image:
+      linear-gradient(rgba(250, 246, 238, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(250, 246, 238, 0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
   }
 }
 
-.card--interactive {
-  cursor: pointer;
-  transition: transform var(--transition-base), box-shadow var(--transition-base);
+/* Scoped heading font for asoju-app-main-derived pages only — every
+ * converted page's root wraps its content in .aam-page. Deliberately
+ * NOT a bare `h1, h2, h3 { ... }` rule (that's what the prototype's own
+ * globals.css did) since this app has dozens of pages outside this
+ * conversion whose headings rely on the browser default font. */
+.aam-page {
+  font-family: var(--font-sans-aam);
 }
 
-.card--interactive:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 28px -16px rgb(18 34 28 / 0.22);
+/* Skipping Preflight (see the big comment above) also skips its
+ * `button { background-color: transparent }` reset — every browser's
+ * default UA stylesheet gives <button> a light gray/white face
+ * otherwise. Every button across the old pages already sets its own
+ * background via .btn/.btn--ghost, so this never mattered there; the
+ * new pages lean on raw <button> elements and shadcn Button's "ghost"/
+ * "link" variants (button.tsx — deliberately no base bg, same
+ * assumption Preflight normally covers), so without this they render
+ * with a visible white box around light-colored text. Scoped to
+ * .aam-page so it can never affect anything outside these pages;
+ * explicit bg-* utilities (higher specificity than this bare `button`
+ * selector) still win wherever a button sets one. */
+.aam-page button {
+  background-color: transparent;
 }
 
-/* Modal / Drawer overlay */
-
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-overlay);
-  background: color-mix(in srgb, var(--asoju-ink) 55%, transparent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-4);
-}
-
-.modal-panel {
-  position: relative;
-  z-index: var(--z-modal);
-  background: var(--asoju-card);
-  border-radius: 1rem;
-  width: 100%;
-  max-width: 32rem;
-  max-height: calc(100vh - 2 * var(--space-4));
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 30px 70px -30px rgb(18 34 28 / 0.45);
-}
-
-.modal-panel--drawer {
-  margin-left: auto;
-  margin-right: 0;
-  max-width: 26rem;
-  height: 100%;
-  max-height: 100vh;
-  border-radius: 0;
-}
-
-@media (max-width: 640px) {
-  .modal-overlay {
-    padding: 0;
-  }
-  .modal-panel,
-  .modal-panel--drawer {
-    max-width: 100%;
-    height: 100%;
-    max-height: 100vh;
-    border-radius: 0;
-  }
-}
-
-.modal-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-5) var(--space-5) var(--space-4);
-  border-bottom: 1px solid var(--asoju-border);
-}
-
-.modal-panel__title {
-  margin: 0;
-  font-size: var(--font-size-md);
-}
-
-.modal-panel__close {
-  background: transparent;
-  border: none;
-  font-size: 1rem;
-  color: var(--asoju-muted);
-  padding: 0.25rem 0.5rem;
-  border-radius: 6px;
-}
-
-.modal-panel__close:hover {
-  background: var(--asoju-sand);
-}
-
-.modal-panel__body {
-  padding: var(--space-5);
-  overflow-y: auto;
-}
-
-.modal-panel__footer {
-  padding: var(--space-4) var(--space-5);
-  border-top: 1px solid var(--asoju-border);
-  display: flex;
-  gap: var(--space-3);
-  justify-content: flex-end;
-}
-
-/* Accordion */
-
-.accordion {
-  display: flex;
-  flex-direction: column;
-}
-
-.accordion__item {
-  border-bottom: 1px solid var(--asoju-border);
-}
-
-.accordion__heading {
-  margin: 0;
-}
-
-.accordion__trigger {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  background: transparent;
-  border: none;
-  padding: var(--space-4) 0;
-  font-weight: 600;
-  font-size: var(--font-size-base);
-  text-align: left;
-  color: var(--asoju-ink);
-}
-
-.accordion__icon {
-  color: var(--asoju-green);
-  font-size: 1.1rem;
-  flex-shrink: 0;
-}
-
-.accordion__panel {
-  padding: 0 0 var(--space-4);
-  color: var(--asoju-muted);
-  line-height: 1.6;
-}
-
-.accordion__panel[hidden] {
-  display: none;
-}
-
-/* Toast */
-
-.toast-stack {
-  position: fixed;
-  bottom: var(--space-5);
-  right: var(--space-5);
-  z-index: var(--z-toast);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  max-width: min(24rem, calc(100vw - 2 * var(--space-5)));
-}
-
-.toast {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: 0.75rem;
-  background: var(--asoju-ink);
-  color: #fff;
-  box-shadow: 0 16px 40px -20px rgb(18 34 28 / 0.5);
-  font-size: var(--font-size-sm);
-  animation: toast-in var(--transition-base);
-}
-
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.toast--success {
-  background: var(--asoju-green-deep);
-}
-
-.toast--danger {
-  background: var(--asoju-danger);
-}
-
-.toast__close {
-  background: transparent;
-  border: none;
+/* Same story as the button fix above, for the old globals.css's own
+ * `a { color: var(--asoju-green) }` rule (near the top of this file) —
+ * a real declared rule beats plain inheritance, so any <a> here that
+ * relies on a parent's text-forest/text-ivory color (nav links, footer
+ * links) instead of setting its own would show ASOJU green instead. */
+.aam-page a {
   color: inherit;
-  opacity: 0.7;
-  padding: 0;
-  margin-left: auto;
 }
 
-.toast__close:hover {
-  opacity: 1;
-}
-
-/* Skeleton */
-
-.skeleton {
-  display: inline-block;
-  background: linear-gradient(
-    90deg,
-    var(--asoju-border) 25%,
-    color-mix(in srgb, var(--asoju-border) 50%, white) 37%,
-    var(--asoju-border) 63%
-  );
-  background-size: 400% 100%;
-  animation: skeleton-shimmer 1.4s ease infinite;
-}
-
-@keyframes skeleton-shimmer {
-  0% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0 50%;
-  }
-}
-
-.concierge-demo__quote-line:last-child {
-  border-bottom: none;
+.aam-page h1,
+.aam-page h2,
+.aam-page h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
 }

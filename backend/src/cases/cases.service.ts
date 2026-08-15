@@ -958,4 +958,34 @@ export class CasesService {
     if (!customer) throw new NotFoundException('No customer profile for this user');
     return customer;
   }
+
+  // ---------------------------------------------------------------------
+  // Case messaging — CaseAccessGuard on the controller already establishes
+  // the caller can see this case; this is just the Message model's CRUD.
+  // ---------------------------------------------------------------------
+
+  async listMessages(caseId: string) {
+    return this.prisma.message.findMany({
+      where: { caseId },
+      orderBy: { createdAt: 'asc' },
+      include: { sender: { select: { id: true, email: true, role: true } } },
+    });
+  }
+
+  async sendMessage(actor: AuthenticatedUser, caseId: string, body: string) {
+    const message = await this.prisma.message.create({
+      data: { caseId, senderId: actor.id, channel: 'web', body },
+      include: { sender: { select: { id: true, email: true, role: true } } },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.message_sent',
+      metadata: { messageId: message.id },
+    });
+
+    return message;
+  }
 }

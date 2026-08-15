@@ -22,6 +22,9 @@ npm-debug.log*
 
 # Prisma
 backend/prisma/migrations/dev.db
+fieldforce/prisma/db/
+fieldforce/mini-services/*/data/
+fieldforce/mini-services/*/uploads/
 
 # OS
 .DS_Store
@@ -29,7 +32,17 @@ backend/prisma/migrations/dev.db
 # IDE
 .vscode/
 .idea/
+.claude/
+
+# Local dev infrastructure (native Postgres binaries + data dir — see
+# .infra/pgsql, .infra/pgdata; never commit a live database)
+.infra/
 
 # Testing
 coverage/
 *.tsbuildinfo
+
+# Explicit ignore for committed build artifacts
+/backend/dist/
+/frontend/.next/
+/fieldforce/.next/
