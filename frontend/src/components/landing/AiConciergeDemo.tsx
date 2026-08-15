@@ -19,10 +19,10 @@ interface DemoTurnResult {
   conversationComplete: boolean;
 }
 
-const GREETING =
+const DEFAULT_GREETING =
   "Hi 👋 — I'm the ASOJU AI Concierge. Tell me, in your own words, what you need handled back home: a plot or property to verify, a building site to supervise, family errands, procurement… I'll ask a couple of quick questions to capture the essentials.";
 
-const QUICK_PROMPTS = [
+const DEFAULT_QUICK_PROMPTS = [
   'Verify a plot of land in Ibeju-Lekki before I pay the balance',
   'Monitor my building project in Abuja',
   "Check my father's farm in Oyo",
@@ -38,15 +38,24 @@ const QUICK_PROMPTS = [
 // create my case" quote card would have contradicted that, so completion
 // here routes to sign-in instead, same as every other "do something
 // real" action in this app.
+//
+// greeting/quickPrompts are optional overrides — the shared service-page
+// shell (Sprint 5/6) passes service-specific ones so the same widget
+// feels tailored per page without a second implementation; both default
+// to the general landing-page copy above when omitted.
 export default function AiConciergeDemo({
   isAuthenticated,
   onNavigate,
+  greeting = DEFAULT_GREETING,
+  quickPrompts = DEFAULT_QUICK_PROMPTS,
 }: {
   isAuthenticated: boolean;
   onNavigate: (path: string) => void;
+  greeting?: string;
+  quickPrompts?: string[];
 }) {
   const [messages, setMessages] = useState<UiMsg[]>([
-    { id: 0, kind: 'text', role: 'assistant', text: GREETING },
+    { id: 0, kind: 'text', role: 'assistant', text: greeting },
   ]);
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
@@ -132,7 +141,7 @@ export default function AiConciergeDemo({
   };
 
   const reset = () => {
-    setMessages([{ id: nextId(), kind: 'text', role: 'assistant', text: GREETING }]);
+    setMessages([{ id: nextId(), kind: 'text', role: 'assistant', text: greeting }]);
     setThinking(false);
     setInput('');
     // Starting over invalidates any draft from the previous conversation
@@ -193,7 +202,7 @@ export default function AiConciergeDemo({
             ),
           )}
           {messages.map((msg) =>
-            msg.kind === 'text' && msg.role === 'assistant' && msg.text !== GREETING && !thinking ? (
+            msg.kind === 'text' && msg.role === 'assistant' && msg.text !== greeting && !thinking ? (
               <RatingRow key={`r-${msg.id}`} rated={msg.rated} onRate={(r) => rateReply(msg.id, r)} />
             ) : null,
           )}
@@ -203,7 +212,7 @@ export default function AiConciergeDemo({
 
         {showChips && (
           <div className="flex flex-wrap gap-2 border-t border-forest/8 bg-white px-4 pt-3">
-            {QUICK_PROMPTS.map((p) => (
+            {quickPrompts.map((p) => (
               <button
                 key={p}
                 type="button"
