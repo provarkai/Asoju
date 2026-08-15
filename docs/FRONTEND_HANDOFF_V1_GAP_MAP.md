@@ -207,11 +207,13 @@ worth recording here:
   `ESCALATE` / `UNSUPPORTED` / `BLOCKED`), a deterministic `PriceBook`/
   `PriceRule`/`MultiplierRule`/`ExternalCostRule` pricing engine, and a
   standalone `Escalation` entity — none of which exist in the current
-  backend. This is a genuine new scope decision (how it relates to the
-  existing manual `service-requests` → staff `convert` → case flow;
-  whether it replaces or sits alongside today's quote/pricing logic in
-  `CommerceService`) that needs your direction before any of it gets
-  built, not something to infer from the doc alone.
+  backend. Fully scoped in `docs/AUTOMATION_PRICING_ENGINE_SCOPE.md`:
+  what already exists to build on, why the pricing and automation pieces
+  should ship as two separable tracks (pricing engine first, standalone
+  and useful to staff on its own; automation eligibility second, built on
+  top of a pricing engine that's already trustworthy), a five-phase
+  breakdown, and five open decisions that need your direction before
+  Phase 1 gets a real ticket.
 
 ## 6. Recommended next step
 
