@@ -350,3 +350,58 @@ button {
   --shadcn-input: var(--asoju-border);
   --shadcn-ring: var(--asoju-green);
 }
+
+/* ---------------------------------------------------------------------
+ * asoju-app-main brand palette — additive Tailwind color/font tokens
+ * (bg-forest, text-gold, font-display, etc.) used only by pages ported
+ * from that prototype. Defining these is inert on its own: no rule here
+ * applies to any element until a page's JSX opts in with the matching
+ * class, so nothing changes for pages that don't use them.
+ * --------------------------------------------------------------------- */
+@theme {
+  --font-display: var(--font-display-fraunces), ui-serif, Georgia, serif;
+  --font-sans-aam: var(--font-sans-inter), ui-sans-serif, system-ui, sans-serif;
+  --color-gold: #c9962e;
+  --color-gold-light: #e3b94e;
+  --color-forest: #0e3b2e;
+  --color-forest-deep: #092a21;
+  --color-ivory: #faf6ee;
+  --color-sand: #f1ead9;
+  --color-clay: #a5532a;
+  --color-clay-deep: #7d3f1f;
+}
+
+@layer utilities {
+  .text-gradient-gold {
+    background: linear-gradient(100deg, #e3b94e 0%, #f4d98a 45%, #c9962e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .bg-grain {
+    background-image: radial-gradient(rgba(12, 52, 40, 0.055) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .pattern-grid-dark {
+    background-image:
+      linear-gradient(rgba(250, 246, 238, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(250, 246, 238, 0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+}
+
+/* Scoped heading font for asoju-app-main-derived pages only — every
+ * converted page's root wraps its content in .aam-page. Deliberately
+ * NOT a bare `h1, h2, h3 { ... }` rule (that's what the prototype's own
+ * globals.css did) since this app has dozens of pages outside this
+ * conversion whose headings rely on the browser default font. */
+.aam-page {
+  font-family: var(--font-sans-aam);
+}
+
+.aam-page h1,
+.aam-page h2,
+.aam-page h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
