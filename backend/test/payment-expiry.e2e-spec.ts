@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { PaymentStatus, Role } from '@prisma/client';
 
@@ -84,18 +84,28 @@ describe('Payment expiry sweep', () => {
   }
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, admin, finance] = await Promise.all([
-      createCustomer('pay-expiry'),
-      createStaff('pay-expiry-admin', Role.ADMIN),
-      createStaff('pay-expiry-finance', Role.FINANCE),
-    ]);
-    [customerToken, adminToken, financeToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, admin.email),
-      login(app, finance.email),
-    ]);
+      [customer, admin, finance] = await Promise.all([
+        createCustomer('pay-expiry'),
+        createStaff('pay-expiry-admin', Role.ADMIN),
+        createStaff('pay-expiry-finance', Role.FINANCE),
+      ]);
+      [customerToken, adminToken, financeToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, admin.email),
+        login(app, finance.email),
+      ]);
+
+    });
+  });
+
+  // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a
+  // wedged shared `app` before the next test runs instead of letting a
+  // mid-file connection reset poison every later test in this file.
+  beforeEach(async () => {
+    app = await ensureHealthyApp(app);
   });
 
   afterAll(async () => {

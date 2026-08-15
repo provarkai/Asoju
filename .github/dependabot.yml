@@ -1,0 +1,32 @@
+# Security checklist — "Integrate Automated Vulnerability Scanning".
+# GitHub-native, zero external accounts/tokens needed (unlike Snyk). Opens
+# a PR per outdated/vulnerable dependency, grouped weekly rather than one
+# PR per package so this doesn't flood the repo. Covers every npm
+# workspace in this monorepo (backend, frontend) plus the standalone
+# fieldforce app, and the workflow files themselves.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      npm-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "npm"
+    directory: "/fieldforce"
+    schedule:
+      interval: "weekly"
+    groups:
+      npm-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

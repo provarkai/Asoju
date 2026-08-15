@@ -28,6 +28,19 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { RiskEngineModule } from './risk/risk-engine.module';
 import { PartnersModule } from './partners/partners.module';
+import { VaultModule } from './vault/vault.module';
+import { ArrivalModule } from './arrival/arrival.module';
+import { BeneficiaryRelayModule } from './beneficiary-relay/beneficiary-relay.module';
+import { AgentTieringModule } from './agent-tiering/agent-tiering.module';
+import { PredictiveCostingModule } from './predictive-costing/predictive-costing.module';
+import { PricingEngineModule } from './pricing-engine/pricing-engine.module';
+import { TrackingModule } from './tracking/tracking.module';
+import { AgentTrustScoreModule } from './agent-trust-score/agent-trust-score.module';
+import { AgentWalletModule } from './agent-wallet/agent-wallet.module';
+import { AgentFinancialPlanningModule } from './agent-financial-planning/agent-financial-planning.module';
+import { AgentSosModule } from './agent-sos/agent-sos.module';
+import { CaseReportPdfModule } from './case-report-pdf/case-report-pdf.module';
+import { EscalationModule } from './escalation/escalation.module';
 
 @Module({
   imports: [
@@ -59,6 +72,19 @@ import { PartnersModule } from './partners/partners.module';
     AccountsModule,
     RiskEngineModule,
     PartnersModule,
+    VaultModule,
+    ArrivalModule,
+    BeneficiaryRelayModule,
+    AgentTieringModule,
+    PredictiveCostingModule,
+    PricingEngineModule,
+    TrackingModule,
+    AgentTrustScoreModule,
+    AgentWalletModule,
+    AgentFinancialPlanningModule,
+    AgentSosModule,
+    CaseReportPdfModule,
+    EscalationModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

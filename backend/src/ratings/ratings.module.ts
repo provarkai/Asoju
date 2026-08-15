@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { RatingsService } from './ratings.service';
 import { RatingsController } from './ratings.controller';
 import { CaseAccessGuard } from '../common/guards/case-access.guard';
+import { AgentTieringModule } from '../agent-tiering/agent-tiering.module';
 
 @Module({
+  imports: [AgentTieringModule],
   providers: [RatingsService, CaseAccessGuard],
   controllers: [RatingsController],
   exports: [RatingsService],

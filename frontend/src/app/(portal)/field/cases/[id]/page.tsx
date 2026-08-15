@@ -7,6 +7,7 @@ import { uploadFile } from '@/lib/upload';
 import { useFieldGuard } from '@/lib/useFieldGuard';
 import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
 import { enqueue, flushQueue, getQueue, isNetworkFailure, QueuedAction } from '@/lib/offlineQueue';
+import { MilestoneProgress } from '@/components/MilestoneProgress';
 
 interface AssignmentDetail {
   id: string;
@@ -18,6 +19,7 @@ interface TaskItem {
   id: string;
   label: string;
   isComplete: boolean;
+  milestoneGroup: string | null;
 }
 
 interface EvidenceItem {
@@ -329,6 +331,8 @@ export default function FieldJobDetailPage() {
           )}
         </div>
       )}
+
+      {detail.serviceType === 'CONSTRUCTION_SUPERVISION' && <MilestoneProgress tasks={detail.tasks} />}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Checklist</h2>

@@ -24,7 +24,14 @@ export async function uploadFile(kind: 'evidence' | 'documents', caseId: string,
   });
 
   if (!uploadUrl.startsWith('dry-run://')) {
-    const res = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+    // 'x-amz-server-side-encryption' must match what the backend signed
+    // into the presigned URL (storage.service.ts#getUploadUrl) or S3
+    // rejects the signature — see that file's comment.
+    const res = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type, 'x-amz-server-side-encryption': 'AES256' },
+      body: file,
+    });
     if (!res.ok) throw new Error('Upload to storage failed — please try again.');
   }
 

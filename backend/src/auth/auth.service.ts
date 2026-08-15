@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'crypto';
@@ -11,6 +11,8 @@ import { generateUniqueReferralCode } from '../common/referral-code';
 import { generateTotpSecret, otpAuthUrl, verifyTotpCode } from './totp';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { PROVISIONABLE_STAFF_ROLES } from './dto/admin-provision-account.dto';
 
 export interface TokenPair {
   accessToken: string;
@@ -316,6 +318,128 @@ export class AuthService {
     ]);
 
     await this.audit.record({ actorId: stored.userId, actorType: 'user', action: 'user.password_reset_completed' });
+  }
+
+  /**
+   * Section 5.7 "Admin Console" — the one self-service gap the README
+   * called out: staff/partner accounts previously needed raw Prisma/psql.
+   * Creates a User with no usable password and immediately issues it a
+   * password-reset-style setup link (same PasswordResetToken model,
+   * same email/dry-run/devToken shape as forgotPassword) rather than
+   * generating a password the admin would have to relay insecurely —
+   * the new account owner sets their own via the existing
+   * POST /auth/reset-password. Returns the created user (and the setup
+   * token outside production, for local dev/testing without a mail
+   * provider configured — same convention as forgotPassword's devToken).
+   */
+  async adminProvisionAccount(actor: AuthenticatedUser, email: string, role: Role) {
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) throw new ConflictException('An account with this email already exists');
+
+    // Never a real, usable credential — argon2-hashing random bytes the
+    // account holder never sees means there is no password to guess or
+    // leak before they complete setup via the reset-password link below.
+    const passwordHash = await argon2.hash(randomBytes(32).toString('hex'));
+    const user = await this.prisma.user.create({ data: { email, passwordHash, role } });
+
+    await this.audit.record({
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'user.admin_provisioned',
+      metadata: { userId: user.id, email, role },
+    });
+
+    const token = randomBytes(32).toString('hex');
+    await this.prisma.passwordResetToken.create({
+      data: { userId: user.id, tokenHash: this.hashToken(token), expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS) },
+    });
+
+    const setupLink = `${this.frontendUrl()}/reset-password?token=${token}`;
+    const sendResult = await this.email.sendEmail(
+      email,
+      'Set up your ASOJU account',
+      `<p>An ASOJU administrator created a ${role} account for you. Use the link below to set your password. It expires in 30 minutes.</p>` +
+        `<p><a href="${setupLink}">${setupLink}</a></p>`,
+    );
+    if (sendResult.dryRun) {
+      this.logger.warn(`[dry-run] Account provisioned for ${email} (${role}) — no email provider configured. Setup token: ${token}`);
+    }
+
+    const publicUser = this.toPublicUser(user);
+    return process.env.NODE_ENV !== 'production' ? { user: publicUser, devToken: token } : { user: publicUser };
+  }
+
+  /** Security checklist gap ("Admin Access Audit") — adminProvisionAccount
+   * could create staff accounts but there was no way to see who actually
+   * holds one. Lists every account in PROVISIONABLE_STAFF_ROLES with
+   * exactly the fields an access review needs (role, active/MFA state,
+   * last login) — never the password hash or MFA secret. */
+  async listStaffAccounts() {
+    return this.prisma.user.findMany({
+      where: { role: { in: [...PROVISIONABLE_STAFF_ROLES] } },
+      select: { id: true, email: true, role: true, isActive: true, mfaEnabled: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /** Security checklist gap ("Employee Offboarding") — disabling isActive
+   * alone (already enforced at login/refresh/MFA-verify, see above) still
+   * leaves any *existing* session usable until its short-lived access
+   * token expires. This is the other half: an already-compromised or
+   * departing staff member's sessions need to die immediately, not in up
+   * to 15 minutes — same "something may be compromised, revoke
+   * everything" treatment as resetPassword(). Deliberately a separate,
+   * explicit admin action, never implicit — deactivating one account must
+   * never be reachable from a route that only *looks* like it targets
+   * that account. */
+  async deactivateStaffAccount(actor: AuthenticatedUser, userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Account not found');
+    if (!PROVISIONABLE_STAFF_ROLES.includes(user.role as (typeof PROVISIONABLE_STAFF_ROLES)[number])) {
+      throw new BadRequestException('This endpoint only manages staff accounts');
+    }
+    if (user.id === actor.id) {
+      throw new BadRequestException('Cannot deactivate your own account');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { isActive: false } }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    await this.audit.record({
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'user.staff_deactivated',
+      metadata: { userId, email: user.email, role: user.role },
+    });
+
+    return { deactivated: true };
+  }
+
+  /** Counterpart to deactivateStaffAccount — returning staff after a
+   * false-positive offboarding or a leave of absence. Does not restore
+   * sessions (correct: they re-authenticate, same as any first login). */
+  async reactivateStaffAccount(actor: AuthenticatedUser, userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Account not found');
+    if (!PROVISIONABLE_STAFF_ROLES.includes(user.role as (typeof PROVISIONABLE_STAFF_ROLES)[number])) {
+      throw new BadRequestException('This endpoint only manages staff accounts');
+    }
+
+    await this.prisma.user.update({ where: { id: userId }, data: { isActive: true } });
+
+    await this.audit.record({
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'user.staff_reactivated',
+      metadata: { userId, email: user.email, role: user.role },
+    });
+
+    return { reactivated: true };
   }
 
   /**

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { CircuitBreaker } from '../common/resilience/circuit-breaker';
 
 export interface InitializeTransactionParams {
   email: string;
@@ -40,6 +41,17 @@ export interface RefundTransactionResult {
 export class PaystackService {
   private readonly logger = new Logger(PaystackService.name);
 
+  /** Ported from fieldforce/src/lib/circuit-breaker.ts's preconfigured
+   * `paystackBreaker` (same threshold/timeouts — same provider, same
+   * failure profile). Unlike WhatsApp/Email, these methods already throw
+   * on failure rather than swallowing it into a `{sent:false}` shape, so
+   * wrapping just means a CircuitBreakerError propagates the same way a
+   * fetch/parse error already did — no behavioural change beyond "stop
+   * hammering Paystack once it's clearly down." */
+  private readonly breaker = CircuitBreaker.register(
+    new CircuitBreaker({ name: 'paystack', failureThreshold: 3, resetTimeoutMs: 30_000, timeoutMs: 15_000 }),
+  );
+
   private get secretKey(): string | undefined {
     return process.env.PAYSTACK_SECRET_KEY || undefined;
   }
@@ -59,31 +71,33 @@ export class PaystackService {
       };
     }
 
-    const res = await fetch('https://api.paystack.co/transaction/initialize', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.secretKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ email, amount: amountKobo, reference, currency, metadata }),
+    return this.breaker.execute(async () => {
+      const res = await fetch('https://api.paystack.co/transaction/initialize', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.secretKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, amount: amountKobo, reference, currency, metadata }),
+      });
+
+      const body = (await res.json().catch(() => ({}))) as {
+        status?: boolean;
+        message?: string;
+        data?: { authorization_url: string; access_code: string; reference: string };
+      };
+
+      if (!res.ok || !body.status || !body.data) {
+        throw new Error(`Paystack initialize failed: ${body.message ?? res.statusText}`);
+      }
+
+      return {
+        authorizationUrl: body.data.authorization_url,
+        accessCode: body.data.access_code,
+        reference: body.data.reference,
+        dryRun: false,
+      };
     });
-
-    const body = (await res.json().catch(() => ({}))) as {
-      status?: boolean;
-      message?: string;
-      data?: { authorization_url: string; access_code: string; reference: string };
-    };
-
-    if (!res.ok || !body.status || !body.data) {
-      throw new Error(`Paystack initialize failed: ${body.message ?? res.statusText}`);
-    }
-
-    return {
-      authorizationUrl: body.data.authorization_url,
-      accessCode: body.data.access_code,
-      reference: body.data.reference,
-      dryRun: false,
-    };
   }
 
   /**
@@ -103,21 +117,23 @@ export class PaystackService {
       return { dryRun: true };
     }
 
-    const res = await fetch('https://api.paystack.co/refund', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.secretKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ transaction: providerReference, amount: amountKobo }),
+    return this.breaker.execute(async () => {
+      const res = await fetch('https://api.paystack.co/refund', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.secretKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ transaction: providerReference, amount: amountKobo }),
+      });
+
+      const body = (await res.json().catch(() => ({}))) as { status?: boolean; message?: string };
+      if (!res.ok || !body.status) {
+        throw new Error(`Paystack refund failed: ${body.message ?? res.statusText}`);
+      }
+
+      return { dryRun: false };
     });
-
-    const body = (await res.json().catch(() => ({}))) as { status?: boolean; message?: string };
-    if (!res.ok || !body.status) {
-      throw new Error(`Paystack refund failed: ${body.message ?? res.statusText}`);
-    }
-
-    return { dryRun: false };
   }
 
   /** HMAC-SHA512 over the raw request body — Paystack's `x-paystack-signature` scheme. */

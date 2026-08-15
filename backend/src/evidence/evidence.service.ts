@@ -7,6 +7,10 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CasesService } from '../cases/cases.service';
 import { RiskEngineService } from '../risk/risk-engine.service';
 import { StorageService } from '../storage/storage.service';
+import { AgentTieringService } from '../agent-tiering/agent-tiering.service';
+import { WhatsappSenderService } from '../whatsapp/whatsapp-sender.service';
+import { buildCaseApprovalButtons } from '../whatsapp/case-approval-buttons';
+import { VoiceTranscriptionService } from '../voice-transcription/voice-transcription.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateEvidenceDto } from './dto/create-evidence.dto';
 import { PerformQcDto } from './dto/perform-qc.dto';
@@ -28,6 +32,9 @@ export class EvidenceService {
     private readonly casesService: CasesService,
     private readonly riskEngine: RiskEngineService,
     private readonly storage: StorageService,
+    private readonly agentTiering: AgentTieringService,
+    private readonly whatsappSender: WhatsappSenderService,
+    private readonly voiceTranscription: VoiceTranscriptionService,
   ) {}
 
   /** Step one of a real upload: mints a case-scoped key and a short-lived
@@ -94,6 +101,7 @@ export class EvidenceService {
         integrityHash,
         capturedAt: new Date(),
         clientRequestId: dto.clientRequestId,
+        languageHint: dto.type === 'VOICE' ? dto.languageHint : undefined,
       },
     });
 
@@ -104,6 +112,17 @@ export class EvidenceService {
       action: 'evidence.submitted',
       metadata: { evidenceId: evidence.id, type: dto.type },
     });
+
+    // #42 — Voice + Auto-Translation. Awaited (not fire-and-forget) so
+    // the response the field agent's app gets back already reflects the
+    // transcription outcome, same as every other real integration here
+    // being a synchronous call rather than a queued job. Never blocks
+    // evidence submission on a bad/unconfigured transcription —
+    // VoiceTranscriptionService.transcribeEvidence never throws.
+    if (dto.type === 'VOICE') {
+      await this.voiceTranscription.transcribeEvidence(evidence.id);
+      return this.prisma.evidence.findUniqueOrThrow({ where: { id: evidence.id } });
+    }
 
     return evidence;
   }
@@ -193,7 +212,7 @@ export class EvidenceService {
   async performQc(actor: AuthenticatedUser, caseId: string, dto: PerformQcDto) {
     const serviceCase = await this.prisma.serviceCase.findUnique({
       where: { id: caseId },
-      include: { customer: true },
+      include: { customer: { include: { user: true } } },
     });
     if (!serviceCase) throw new NotFoundException('Case not found');
     const qcEligibleStatuses: CaseStatus[] = [CaseStatus.EVIDENCE_SUBMITTED, CaseStatus.QUALITY_CONTROL];
@@ -212,6 +231,15 @@ export class EvidenceService {
       action: 'case.qc_performed',
       metadata: { outcome: dto.outcome, note: dto.note },
     });
+
+    // Platform Expansion PRD §5.1 — logged unconditionally (every outcome,
+    // not just the ones that produce a Report) so AgentTieringService has
+    // a real QC-pass-rate signal, then recomputed immediately for whoever
+    // worked the case rather than waiting on the nightly cron sweep.
+    await this.prisma.qcReview.create({
+      data: { caseId, outcome: dto.outcome, reviewedById: actor.id },
+    });
+    await this.agentTiering.recomputeAgentsForCase(caseId);
 
     if (dto.outcome === QcOutcome.APPROVED || dto.outcome === QcOutcome.PASS_WITH_LIMITATION) {
       if (!dto.summary) throw new BadRequestException('summary is required to approve and issue a report');
@@ -239,6 +267,21 @@ export class EvidenceService {
           ? `The report for ${serviceCase.caseNumber} is ready for your review — it includes a noted limitation, see the report for details.`
           : `The report for ${serviceCase.caseNumber} is ready for your review — approve it or let us know if something needs another look.`,
       );
+
+      // Platform Expansion PRD §6.1 "Deeper WhatsApp-first case approval"
+      // — on top of the in-app/channel-fanout notification above, a
+      // customer who's on WhatsApp (same signal NotificationsService
+      // already uses) gets tappable Approve/Request-changes buttons
+      // wired to CasesService.recordApproval via WhatsappService.
+      const customerUser = serviceCase.customer.user;
+      if (customerUser.preferredChannel === 'whatsapp' && customerUser.phone && this.whatsappSender.isConfigured()) {
+        await this.whatsappSender.sendApprovalRequest(
+          customerUser.phone,
+          serviceCase.caseNumber,
+          buildCaseApprovalButtons(caseId),
+        );
+      }
+
       return { outcome: dto.outcome, report };
     }
 

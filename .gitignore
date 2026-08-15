@@ -2,10 +2,12 @@
 node_modules/
 
 # Build output
+# NOTE: no blanket "build/"/"out/" here — this monorepo's real build
+# output is backend/dist (NestJS) and frontend/.next (Next.js), both
+# covered below. A blanket "build/" also silently swallowed the locked
+# ASOJU Build service route (frontend/src/app/build/) added in Sprint 1.
 dist/
-build/
 .next/
-out/
 
 # Env
 .env

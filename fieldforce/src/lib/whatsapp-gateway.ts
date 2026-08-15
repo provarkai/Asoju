@@ -126,8 +126,16 @@ export const WHATSAPP_TEMPLATES: Record<string, WhatsAppTemplate> = {
     id: 'mission_arrived',
     name: 'Mission Arrived',
     category: 'UTILITY',
-    body: 'Your field agent has arrived at the service location.',
-    parameters: [],
+    body: 'Your field agent {{agent_name}} has arrived at the service location.',
+    parameters: ['agent_name'],
+    hasMedia: false,
+  },
+  MISSION_WORK_STARTED: {
+    id: 'mission_work_started',
+    name: 'Mission Work Started',
+    category: 'UTILITY',
+    body: '{{agent_name}} has begun work on {{service_title}}. We’ll notify you again the moment it’s complete.',
+    parameters: ['agent_name', 'service_title'],
     hasMedia: false,
   },
 }
@@ -460,6 +468,110 @@ export async function sendServiceCompleteNotification(caseId: string) {
     messageText,
     entityType: 'CASE',
     entityId: caseId,
+    caseId,
+  })
+}
+
+// ─── Convenience: Send Mission Arrived Notification ─────────────────────────
+// "Family Connect" milestone 1 of 3 (arrives / begins work / completes) —
+// fired from the GPS check-in route the instant a geofence-validated
+// check-in lands (EN_ROUTE → ON_SITE).
+
+export async function sendMissionArrivedNotification(caseId: string) {
+  const mission = await db.mission.findFirst({
+    where: { caseId },
+    include: {
+      agent: { select: { displayName: true, firstName: true, lastName: true } },
+      case: {
+        select: {
+          customerId: true,
+          title: true,
+          serviceCode: true,
+          customer: { select: { phone: true, displayName: true } },
+        },
+      },
+    },
+  })
+
+  if (!mission) {
+    throw new Error(`Mission not found for case ${caseId}`)
+  }
+
+  const customer = mission.case.customer
+  if (!customer?.phone) {
+    throw new Error(`Customer phone not found for case ${caseId}`)
+  }
+
+  const agentName =
+    mission.agent?.displayName ||
+    `${mission.agent?.firstName || ''} ${mission.agent?.lastName || ''}`.trim() ||
+    'Agent'
+
+  const template = WHATSAPP_TEMPLATES.MISSION_ARRIVED
+  const messageText = template.body.replace('{{agent_name}}', agentName)
+
+  return sendWhatsAppMessage({
+    recipientPhone: customer.phone,
+    recipientName: customer.displayName || undefined,
+    recipientRole: 'CUSTOMER',
+    templateId: template.id,
+    templateParams: [agentName],
+    messageText,
+    entityType: 'MISSION',
+    entityId: mission.id,
+    caseId,
+  })
+}
+
+// ─── Convenience: Send Work Started Notification ────────────────────────────
+// "Family Connect" milestone 2 of 3 — fired when the agent begins
+// execution on-site (ON_SITE → EXECUTING).
+
+export async function sendWorkStartedNotification(caseId: string) {
+  const mission = await db.mission.findFirst({
+    where: { caseId },
+    include: {
+      agent: { select: { displayName: true, firstName: true, lastName: true } },
+      case: {
+        select: {
+          customerId: true,
+          title: true,
+          serviceCode: true,
+          customer: { select: { phone: true, displayName: true } },
+        },
+      },
+    },
+  })
+
+  if (!mission) {
+    throw new Error(`Mission not found for case ${caseId}`)
+  }
+
+  const customer = mission.case.customer
+  if (!customer?.phone) {
+    throw new Error(`Customer phone not found for case ${caseId}`)
+  }
+
+  const agentName =
+    mission.agent?.displayName ||
+    `${mission.agent?.firstName || ''} ${mission.agent?.lastName || ''}`.trim() ||
+    'Agent'
+  const serviceTitle = mission.case.title || mission.serviceCode
+
+  const template = WHATSAPP_TEMPLATES.MISSION_WORK_STARTED
+  const messageText = template.body
+    .replace('{{agent_name}}', agentName)
+    .replace('{{service_title}}', serviceTitle)
+
+  return sendWhatsAppMessage({
+    recipientPhone: customer.phone,
+    recipientName: customer.displayName || undefined,
+    recipientRole: 'CUSTOMER',
+    templateId: template.id,
+    templateParams: [agentName, serviceTitle],
+    messageText,
+    entityType: 'MISSION',
+    entityId: mission.id,
     caseId,
   })
 }

@@ -11,6 +11,7 @@ import {
   type TransitionResult,
   TERMINAL_STATES,
 } from '@/lib/mission-state-machine';
+import { sendMissionArrivedNotification } from '@/lib/whatsapp-gateway';
 
 // ─── POST /api/missions/checkin ────────────────────────────────────────
 // GPS Check-in with full P0.4 validation → P0.3 state machine transition → ON_SITE
@@ -238,6 +239,14 @@ export async function POST(request: NextRequest) {
         correlationId: caseId,
       },
     });
+
+    // Family Connect milestone 1/3: "agent arrives" — best-effort, must
+    // never fail the check-in itself if the notification queue hiccups.
+    try {
+      await sendMissionArrivedNotification(caseId);
+    } catch (notifyError) {
+      console.warn(`[Checkin] Could not send arrival notification for case ${caseId}:`, notifyError);
+    }
 
     return NextResponse.json({
       success: true,

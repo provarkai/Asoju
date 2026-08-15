@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ProfileService } from './profile.service';
-import { ProfileController, AdminConciergeFeedbackController } from './profile.controller';
+import { ProfileController } from './profile.controller';
 import { CustomerResourcesController } from './customer-resources.controller';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { ConciergeModule } from '../concierge/concierge.module';
@@ -13,7 +13,7 @@ import { ConciergeModule } from '../concierge/concierge.module';
   // imports PaymentsModule.
   imports: [WhatsappModule, ConciergeModule],
   providers: [ProfileService],
-  controllers: [ProfileController, CustomerResourcesController, AdminConciergeFeedbackController],
+  controllers: [ProfileController, CustomerResourcesController],
   exports: [ProfileService],
 })
 export class ProfileModule {}

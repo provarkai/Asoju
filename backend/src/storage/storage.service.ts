@@ -63,16 +63,54 @@ export class StorageService {
     return `${prefix}/${randomUUID()}${ext}`;
   }
 
+  /** Security checklist ("Encrypt All Sensitive Customer Data") — every
+   * object this app writes requests SSE-S3 explicitly rather than relying
+   * solely on the bucket's own default-encryption setting; a bucket
+   * misconfigured to skip default encryption would otherwise silently
+   * store evidence/documents in the clear. Signing ServerSideEncryption
+   * into the presigned command means the client's actual PUT must send
+   * the matching `x-amz-server-side-encryption: AES256` header or S3
+   * rejects the signature — see upload.ts/VaultSection.tsx on the
+   * frontend, which set it. */
   async getUploadUrl(key: string, contentType: string): Promise<{ url: string; expiresInSeconds: number }> {
     if (!this.client || !this.bucket) {
       return { url: `${DRY_RUN_PREFIX}${key}`, expiresInSeconds: UPLOAD_URL_TTL_SECONDS };
     }
     const url = await getSignedUrl(
       this.client,
-      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType }),
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType, ServerSideEncryption: 'AES256' }),
       { expiresIn: UPLOAD_URL_TTL_SECONDS },
     );
     return { url, expiresInSeconds: UPLOAD_URL_TTL_SECONDS };
+  }
+
+  /** The one write path that's server-generated rather than client-
+   * uploaded (#41 — case report PDFs, rendered from data this app already
+   * has, never from anything a caller supplies): every other write above
+   * hands out a presigned PUT URL for the *client* to upload to. Same
+   * dry-run shape as everywhere else — with no bucket configured this
+   * logs and returns without touching a network. */
+  async putBuffer(key: string, body: Buffer, contentType: string): Promise<void> {
+    if (!this.client || !this.bucket) {
+      this.logger.warn(`Object storage not configured (dry run) — would have stored ${body.length} bytes at ${key}`);
+      return;
+    }
+    await this.client.send(
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ServerSideEncryption: 'AES256' }),
+    );
+  }
+
+  /** The one server-side *read* path (#42 — voice evidence transcription
+   * needs the actual audio bytes to hand to Whisper, not a link a human
+   * clicks). Dry-run returns null rather than fabricating bytes — callers
+   * must treat that the same as "no real object exists here yet". */
+  async getBuffer(key: string): Promise<Buffer | null> {
+    if (!this.client || !this.bucket) return null;
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    if (!res.Body) return null;
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of res.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+    return Buffer.concat(chunks);
   }
 
   /** Never a predictable public URL (Section 11.2) — always short-lived and

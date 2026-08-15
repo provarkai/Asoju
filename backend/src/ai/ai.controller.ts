@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -7,6 +7,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { AiService } from './ai.service';
 import { ConciergeMessageDto } from './dto/concierge-message.dto';
+import { ConciergeFeedbackDto } from './dto/concierge-feedback.dto';
+import { ConciergeAnalyticsEventDto } from './dto/concierge-analytics-event.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('ai/concierge')
@@ -17,6 +19,12 @@ export class AiController {
   @Post('message')
   sendMessage(@CurrentUser() user: AuthenticatedUser, @Body() dto: ConciergeMessageDto) {
     return this.aiService.converse(user, dto);
+  }
+
+  @Roles(Role.CUSTOMER)
+  @Post('feedback')
+  recordFeedback(@CurrentUser() user: AuthenticatedUser, @Body() dto: ConciergeFeedbackDto) {
+    return this.aiService.recordConciergeFeedback(user, dto);
   }
 }
 
@@ -29,6 +37,17 @@ const AI_DEMO_THROTTLE = {
   default: {
     limit: parseInt(process.env.AI_DEMO_THROTTLE_LIMIT ?? '8', 10),
     ttl: parseInt(process.env.AI_DEMO_THROTTLE_TTL_MS ?? '60000', 10),
+  },
+};
+
+// Its own (more generous) bucket, not AI_DEMO_THROTTLE's — an analytics
+// event is a cheap DB write, not an LLM call, and one visit legitimately
+// fires several (open, a couple of quick-prompt clicks, a send or two)
+// well within a minute. This still exists to bound abuse, not spend.
+const AI_ANALYTICS_THROTTLE = {
+  default: {
+    limit: parseInt(process.env.AI_ANALYTICS_THROTTLE_LIMIT ?? '30', 10),
+    ttl: parseInt(process.env.AI_ANALYTICS_THROTTLE_TTL_MS ?? '60000', 10),
   },
 };
 
@@ -46,6 +65,15 @@ export class AiPublicController {
   @Post('demo-message')
   sendDemoMessage(@Body() dto: ConciergeMessageDto) {
     return this.aiService.demoConverse(dto);
+  }
+
+  // First-party usage analytics (see ConciergeAnalyticsEvent's schema
+  // comment) — anonymous by design, so no guard, same as demo-message.
+  @Throttle(AI_ANALYTICS_THROTTLE)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('analytics-event')
+  async recordAnalyticsEvent(@Body() dto: ConciergeAnalyticsEventDto): Promise<void> {
+    await this.aiService.recordAnalyticsEvent(dto);
   }
 }
 

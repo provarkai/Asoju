@@ -70,4 +70,23 @@ describe('EmailService — Resend integration', () => {
 
     expect(result).toEqual({ sent: false, dryRun: false });
   });
+
+  describe('circuit breaker — protects against a cascading Resend outage', () => {
+    it('short-circuits after repeated failures, without calling fetch again', async () => {
+      process.env.RESEND_API_KEY = 're_test_abc123';
+      fetchMock.mockResolvedValue({ ok: false, status: 500, text: async () => 'internal error' });
+      const service = new EmailService();
+
+      // failureThreshold is 5 for the resend-email breaker.
+      for (let i = 0; i < 5; i++) {
+        const result = await service.sendEmail('customer@example.com', 'Subject', '<p>Body</p>');
+        expect(result).toEqual({ sent: false, dryRun: false });
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+
+      const blocked = await service.sendEmail('customer@example.com', 'Subject', '<p>Body</p>');
+      expect(blocked).toEqual({ sent: false, dryRun: false });
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+    });
+  });
 });

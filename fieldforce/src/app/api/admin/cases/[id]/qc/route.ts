@@ -13,6 +13,8 @@ import {
   type MissionAction,
 } from '@/lib/mission-state-machine';
 import { postEarnings, postQcEarningsRelease, seedChartOfAccounts } from '@/lib/ledger';
+import { generateServiceReport } from '@/lib/service-report';
+import { sendServiceCompleteNotification } from '@/lib/whatsapp-gateway';
 
 // ─── GET /api/admin/cases/[id]/qc ──────────────────────────────────────
 // Get QC review history for a case/mission
@@ -347,6 +349,17 @@ export async function POST(
             completedAt: new Date(),
           },
         });
+      }
+
+      // Family Connect milestone 3/3: "service complete" — generate the
+      // structured report (photos/GPS/timestamps, already modeled on
+      // ServiceReport) and notify the customer. Best-effort: a failure
+      // here must never undo the QC approval that already landed above.
+      try {
+        await generateServiceReport(mission.id);
+        await sendServiceCompleteNotification(id);
+      } catch (reportError) {
+        console.warn(`[QC] Could not generate/send completion report for case ${id}:`, reportError);
       }
     } else if (action === 'REQUEST_REWORK') {
       missionAction = 'REQUEST_REWORK';

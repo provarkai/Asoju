@@ -4,6 +4,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { db } from '@/lib/db';
+import { renderServiceReportPdf } from '@/lib/service-report-pdf';
+import { saveServiceReportPdf } from '@/lib/service-report-storage';
 
 // ─── Report Outcome Types ──────────────────────────────────────────────────
 
@@ -240,7 +242,24 @@ export async function generateServiceReport(
     },
   });
 
-  return report as unknown as ServiceReportRecord;
+  // ── Render + persist PDF ──────────────────────────────────────────────────
+  // Runs after the upsert since the PDF footer/URL both need the report's id.
+  // Never lets a render failure fail report generation itself — the report
+  // record (and its text summary, already usable for WhatsApp/SMS delivery)
+  // is the primary artifact; the PDF is an enhancement on top of it.
+  let reportPdfUrl: string | null = report.reportPdfUrl;
+  try {
+    const pdfBytes = await renderServiceReportPdf(report as unknown as ServiceReportRecord);
+    reportPdfUrl = await saveServiceReportPdf(case_.id, report.id, pdfBytes);
+    await db.serviceReport.update({
+      where: { id: report.id },
+      data: { reportPdfUrl },
+    });
+  } catch (error) {
+    console.error('[SERVICE REPORT] PDF render/save failed', error);
+  }
+
+  return { ...report, reportPdfUrl } as unknown as ServiceReportRecord;
 }
 
 // ─── Deliver Service Report ───────────────────────────────────────────────

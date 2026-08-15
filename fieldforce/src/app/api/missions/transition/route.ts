@@ -7,6 +7,7 @@ import {
   type TransitionResult,
   TERMINAL_STATES,
 } from '@/lib/mission-state-machine';
+import { sendWorkStartedNotification } from '@/lib/whatsapp-gateway';
 
 // ─── POST /api/missions/transition ──────────────────────────────────────
 // Server-authoritative mission state transitions (P0.3)
@@ -172,6 +173,17 @@ export async function POST(request: NextRequest) {
         correlationId: caseId,
       },
     });
+
+    // Family Connect milestone 2/3: "agent begins work" — best-effort,
+    // must never fail the transition itself if the notification queue
+    // hiccups.
+    if (action === 'BEGIN_EXECUTION' && validation.newState === 'EXECUTING') {
+      try {
+        await sendWorkStartedNotification(caseId);
+      } catch (notifyError) {
+        console.warn(`[Transition] Could not send work-started notification for case ${caseId}:`, notifyError);
+      }
+    }
 
     // Auto-transition to QC_REVIEW when SUBMITTED
     if (validation.newState === 'SUBMITTED') {

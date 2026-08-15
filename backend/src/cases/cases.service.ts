@@ -2,12 +2,16 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { randomUUID } from 'crypto';
 import {
   ApprovalAction,
+  AssignmentRole,
   AssignmentStatus,
   CasePriority,
   CaseStatus,
   CollaboratorRole,
+  DisputeStatus,
+  IdempotencyOperation,
   Role,
   ServiceType,
+  VaultCategory,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -19,7 +23,11 @@ import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { filterDocumentsForFieldActor } from '../documents/document-visibility';
 import { redactCustomerName } from '../common/pii-restricted-roles';
 import { StorageService } from '../storage/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { RaiseDisputeDto } from './dto/raise-dispute.dto';
 import { BENEFICIARY_CASE_SELECT, toBeneficiaryCaseDetail } from './beneficiary-case-view';
+import { slaHoursForCase } from './regional-sla';
+import { IdempotencyService } from '../common/idempotency/idempotency.service';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
 
@@ -44,6 +52,15 @@ const SERVICE_TYPE_DEFAULT_PRIORITY: Partial<Record<ServiceType, CasePriority>> 
   [ServiceType.BEREAVEMENT_SUPPORT]: CasePriority.URGENT,
 };
 
+/** Platform Expansion PRD §4.2 "Power of Attorney (PoA) Repository &
+ * Verification" — "Introduces a VERIFIED_POA_REQUIRED guard on specific
+ * service types." Scoped to the one service on the current catalogue
+ * that's actually about acting on the customer's behalf at a government
+ * registry (§6.2's Legal/Document Services vertical) — every other
+ * service stays ungated rather than guessing PoA relevance for services
+ * where it isn't the PRD's own stated use case. */
+const VERIFIED_POA_REQUIRED_SERVICE_TYPES: ServiceType[] = [ServiceType.LEGAL_DOCUMENT_SERVICES];
+
 function slaHoursForPriority(priority: CasePriority): number {
   const envVar = `SLA_HOURS_${priority}`;
   const configured = process.env[envVar];
@@ -67,11 +84,40 @@ export class CasesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly storage: StorageService,
+    private readonly notifications: NotificationsService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   // -- Service requests (pre-case intake) ------------------------------
 
-  async createServiceRequest(user: AuthenticatedUser, dto: CreateServiceRequestDto) {
+  /// docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 2 — idempotencyKey is
+  /// optional; omitting it (every client before this existed) creates a
+  /// request exactly as before. A client that supplies one and retries
+  /// after e.g. a network timeout gets the original request back instead
+  /// of a duplicate.
+  async createServiceRequest(user: AuthenticatedUser, dto: CreateServiceRequestDto, idempotencyKey?: string) {
+    if (idempotencyKey) {
+      const check = await this.idempotency.begin(IdempotencyOperation.SERVICE_REQUEST_CREATE, idempotencyKey, user.id);
+      if (!check.shouldProceed) {
+        return this.prisma.serviceRequest.findUniqueOrThrow({ where: { id: check.resultReference! } });
+      }
+    }
+
+    try {
+      const created = await this.doCreateServiceRequest(user, dto);
+      if (idempotencyKey) {
+        await this.idempotency.complete(IdempotencyOperation.SERVICE_REQUEST_CREATE, idempotencyKey, user.id, created.id);
+      }
+      return created;
+    } catch (err) {
+      if (idempotencyKey) {
+        await this.idempotency.fail(IdempotencyOperation.SERVICE_REQUEST_CREATE, idempotencyKey, user.id);
+      }
+      throw err;
+    }
+  }
+
+  private async doCreateServiceRequest(user: AuthenticatedUser, dto: CreateServiceRequestDto) {
     const customer = await this.requireCustomerProfile(user.id);
 
     const request = await this.prisma.serviceRequest.create({
@@ -143,6 +189,22 @@ export class CasesService {
       }
     }
 
+    // Platform Expansion PRD §4.2 — VERIFIED_POA_REQUIRED guard. A
+    // reusable, once-verified PoA (VaultModule's verifiedAsset.verify) is
+    // the point — this only checks one already exists on file, it never
+    // re-verifies or consumes it, so the same PoA covers every future
+    // case of this type.
+    if (VERIFIED_POA_REQUIRED_SERVICE_TYPES.includes(dto.serviceType)) {
+      const verifiedPoa = await this.prisma.verifiedAsset.findFirst({
+        where: { customerId: request.customerId, type: VaultCategory.POWER_OF_ATTORNEY, verified: true },
+      });
+      if (!verifiedPoa) {
+        throw new BadRequestException(
+          'This service requires a verified Power of Attorney on file — the customer must submit one to their vault and have staff verify it before this case can be created',
+        );
+      }
+    }
+
     // Section 12 P1 "Concierge workflow" — a Concierge subscriber's cases
     // default to that tier unless staff explicitly override it.
     let tier = dto.tier;
@@ -176,7 +238,7 @@ export class CasesService {
         assetId: dto.assetId,
         status: CaseStatus.DRAFT,
         originRequest: { connect: { id: request.id } },
-        slaTargetAt: new Date(Date.now() + slaHoursForPriority(priority) * 60 * 60 * 1000),
+        slaTargetAt: new Date(Date.now() + slaHoursForCase(slaHoursForPriority(priority), dto.location) * 60 * 60 * 1000),
       },
     });
 
@@ -191,7 +253,12 @@ export class CasesService {
     // Field Agent App always has one to execute against.
     const checklist = CHECKLIST_TEMPLATES[dto.serviceType];
     await this.prisma.caseTask.createMany({
-      data: checklist.map((label, index) => ({ caseId: serviceCase.id, label, sortOrder: index })),
+      data: checklist.map((item, index) => ({
+        caseId: serviceCase.id,
+        label: item.label,
+        milestoneGroup: item.milestoneGroup,
+        sortOrder: index,
+      })),
     });
 
     await this.prisma.caseStatusHistory.create({
@@ -248,7 +315,9 @@ export class CasesService {
         assetId: schedule.assetId,
         status: CaseStatus.DRAFT,
         spawnedFromScheduleId: schedule.id,
-        slaTargetAt: new Date(Date.now() + slaHoursForPriority(CasePriority.STANDARD) * 60 * 60 * 1000),
+        slaTargetAt: new Date(
+          Date.now() + slaHoursForCase(slaHoursForPriority(CasePriority.STANDARD), schedule.location) * 60 * 60 * 1000,
+        ),
       },
     });
 
@@ -260,7 +329,12 @@ export class CasesService {
 
     const checklist = CHECKLIST_TEMPLATES[schedule.serviceType];
     await this.prisma.caseTask.createMany({
-      data: checklist.map((label, index) => ({ caseId: serviceCase.id, label, sortOrder: index })),
+      data: checklist.map((item, index) => ({
+        caseId: serviceCase.id,
+        label: item.label,
+        milestoneGroup: item.milestoneGroup,
+        sortOrder: index,
+      })),
     });
 
     await this.prisma.caseStatusHistory.create({
@@ -741,6 +815,144 @@ export class CasesService {
     return updated;
   }
 
+  /** Section 3.1 — customer rejects the delivered report. Only reachable
+   * from CUSTOMER_REVIEW (the report must actually be in front of them),
+   * and — like holdCase/resumeCase — bypasses the static TRANSITIONS map
+   * since DISPUTED is a side-status, not a normal forward step. Creates a
+   * standalone Dispute record (structured reasons + its own resolution
+   * lifecycle) rather than reusing Approval, which has no "team resolves
+   * this later" concept. */
+  async raiseDispute(actor: AuthenticatedUser, caseId: string, dto: RaiseDisputeDto) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+    if (serviceCase.status !== CaseStatus.CUSTOMER_REVIEW) {
+      throw new BadRequestException('Disputes can only be raised once a report is ready for your review');
+    }
+
+    // Structured gap form: every disputed item must actually be one of
+    // this case's checklist tasks — no disputing tasks from another
+    // case, no free-floating ids.
+    const disputedTasks = await this.prisma.caseTask.findMany({
+      where: { id: { in: dto.disputedTaskIds }, caseId },
+      select: { id: true },
+    });
+    if (disputedTasks.length !== dto.disputedTaskIds.length) {
+      throw new BadRequestException('One or more disputed items are not checklist tasks on this case');
+    }
+
+    const customer = await this.requireCustomerProfile(actor.id);
+    const dispute = await this.prisma.dispute.create({
+      data: {
+        caseId,
+        customerId: customer.id,
+        disputedTaskIds: dto.disputedTaskIds,
+        reasons: dto.reasons ?? [],
+        notes: dto.notes,
+      },
+    });
+
+    // Auto-generated rework: reopen exactly the disputed checklist items.
+    // The existing checklist is the rework task the field agent already
+    // works from — nothing else on the case is touched, so completed
+    // items the customer didn't flag stay completed.
+    await this.prisma.caseTask.updateMany({
+      where: { id: { in: dto.disputedTaskIds }, caseId },
+      data: { isComplete: false, completedAt: null },
+    });
+
+    await this.prisma.serviceCase.update({ where: { id: caseId }, data: { status: CaseStatus.DISPUTED } });
+    await this.prisma.caseStatusHistory.create({
+      data: {
+        caseId,
+        fromStatus: CaseStatus.CUSTOMER_REVIEW,
+        toStatus: CaseStatus.DISPUTED,
+        changedById: actor.id,
+        reason: `Customer disputed ${dto.disputedTaskIds.length} checklist item(s)${dto.reasons?.length ? `: ${dto.reasons.join(', ')}` : ''}`,
+      },
+    });
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.dispute_raised',
+      metadata: { disputeId: dispute.id, disputedTaskIds: dto.disputedTaskIds, reasons: dto.reasons ?? [] },
+    });
+    await this.notifications.notify(
+      actor.id,
+      'Dispute filed',
+      'The report has been locked and a rework on the disputed items has been scheduled.',
+    );
+
+    // Notify the originally-assigned field agent directly — they're the
+    // one whose checklist just reopened, not just the ops queue.
+    const fieldAssignment = await this.prisma.assignment.findFirst({
+      where: { caseId, role: AssignmentRole.FIELD_AGENT, agentId: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      include: { agent: { select: { userId: true } } },
+    });
+    if (fieldAssignment?.agent) {
+      await this.notifications.notify(
+        fieldAssignment.agent.userId,
+        'Rework needed — customer disputed part of your report',
+        `${dto.disputedTaskIds.length} checklist item(s) were reopened for rework on case ${serviceCase.caseNumber}.`,
+      );
+    }
+
+    return dispute;
+  }
+
+  /** Staff-side resolution — accepts the dispute and sends the case back
+   * for rework. Only one OPEN dispute is expected per case at a time
+   * (raiseDispute requires CUSTOMER_REVIEW, which a case can't re-enter
+   * while DISPUTED), but this resolves the oldest open one defensively
+   * rather than assuming exactly one exists. */
+  async resolveDispute(actor: AuthenticatedUser, caseId: string, note?: string) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({
+      where: { id: caseId },
+      include: { customer: true },
+    });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+    if (serviceCase.status !== CaseStatus.DISPUTED) {
+      throw new BadRequestException('Case is not disputed');
+    }
+
+    const dispute = await this.prisma.dispute.findFirst({
+      where: { caseId, status: DisputeStatus.OPEN },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (dispute) {
+      await this.prisma.dispute.update({
+        where: { id: dispute.id },
+        data: { status: DisputeStatus.RESOLVED, resolvedAt: new Date(), resolvedById: actor.id },
+      });
+    }
+
+    await this.prisma.serviceCase.update({ where: { id: caseId }, data: { status: CaseStatus.ADDITIONAL_WORK } });
+    await this.prisma.caseStatusHistory.create({
+      data: {
+        caseId,
+        fromStatus: CaseStatus.DISPUTED,
+        toStatus: CaseStatus.ADDITIONAL_WORK,
+        changedById: actor.id,
+        reason: note ?? 'Dispute accepted — rework scheduled on disputed items',
+      },
+    });
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case.dispute_resolved',
+      metadata: { disputeId: dispute?.id, note },
+    });
+    await this.notifications.notify(
+      serviceCase.customer.userId,
+      'Dispute accepted — rework underway',
+      "We've accepted your dispute and scheduled rework on the disputed items.",
+    );
+
+    return { ok: true };
+  }
+
   private async requireCustomerProfile(userId: string) {
     const customer = await this.prisma.customer.findUnique({ where: { userId } });
     if (!customer) throw new NotFoundException('No customer profile for this user');
@@ -775,54 +987,5 @@ export class CasesService {
     });
 
     return message;
-  }
-
-  // ---------------------------------------------------------------------
-  // Disputes (Complaint model) — raised by the customer against their own
-  // case, resolved by staff. Deliberately minimal: no state machine, just
-  // open (resolvedAt null) / resolved (resolvedAt set), same shape the
-  // Complaint model already had sitting unused.
-  // ---------------------------------------------------------------------
-
-  async raiseDispute(actor: AuthenticatedUser, caseId: string, subject: string, detail: string) {
-    const customer = await this.requireCustomerProfile(actor.id);
-    const dispute = await this.prisma.complaint.create({
-      data: { caseId, customerId: customer.id, subject, detail },
-    });
-
-    await this.audit.record({
-      caseId,
-      actorId: actor.id,
-      actorType: 'user',
-      action: 'case.dispute_raised',
-      metadata: { disputeId: dispute.id, subject },
-    });
-
-    return dispute;
-  }
-
-  async listDisputes(caseId: string) {
-    return this.prisma.complaint.findMany({ where: { caseId }, orderBy: { createdAt: 'desc' } });
-  }
-
-  async resolveDispute(actor: AuthenticatedUser, caseId: string, disputeId: string) {
-    const dispute = await this.prisma.complaint.findUnique({ where: { id: disputeId } });
-    if (!dispute || dispute.caseId !== caseId) throw new NotFoundException('Dispute not found');
-    if (dispute.resolvedAt) throw new BadRequestException('Dispute is already resolved');
-
-    const updated = await this.prisma.complaint.update({
-      where: { id: disputeId },
-      data: { resolvedAt: new Date() },
-    });
-
-    await this.audit.record({
-      caseId,
-      actorId: actor.id,
-      actorType: 'user',
-      action: 'case.dispute_resolved',
-      metadata: { disputeId },
-    });
-
-    return updated;
   }
 }
