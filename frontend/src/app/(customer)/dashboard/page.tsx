@@ -17,6 +17,13 @@ interface Portfolio {
   totalSpendByCurrency: Record<string, number>;
 }
 
+interface ServiceRequestSummary {
+  id: string;
+  rawDescription: string;
+  convertedCaseId: string | null;
+  createdAt: string;
+}
+
 interface NotificationItem {
   id: string;
   title: string;
@@ -42,6 +49,7 @@ export default function DashboardHome() {
   const [cases, setCases] = useState<CaseSummary[] | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<ServiceRequestSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -49,11 +57,13 @@ export default function DashboardHome() {
       apiFetch<CaseSummary[]>('/cases'),
       apiFetch<Portfolio>('/me/portfolio'),
       apiFetch<NotificationItem[]>('/notifications'),
+      apiFetch<ServiceRequestSummary[]>('/service-requests'),
     ])
-      .then(([c, p, n]) => {
+      .then(([c, p, n, r]) => {
         setCases(c);
         setPortfolio(p);
         setNotifications(n);
+        setPendingRequests(r.filter((req) => !req.convertedCaseId));
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load your dashboard'));
   }, []);
@@ -133,6 +143,30 @@ export default function DashboardHome() {
                 </div>
                 <StatusPill status={k.status} className="shrink-0" />
               </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Pending review — submitted but not yet triaged into a case
+          (ServiceRequest with convertedCaseId still null). Not part of
+          the prototype's own HomeView (its Convex schema doesn't
+          separate request-vs-case the way this backend deliberately
+          does — see dashboard/new/page.tsx), restored from what the
+          pre-conversion dashboard already showed here. */}
+      {pendingRequests.length > 0 && (
+        <section className="rounded-2xl border border-forest/10 bg-white p-5 shadow-sm">
+          <h2 className="font-display text-lg font-semibold text-forest">Pending review</h2>
+          <p className="mt-1 text-sm text-forest/60">
+            These requests are with our team and haven&apos;t become a case yet — no action needed from you right
+            now.
+          </p>
+          <div className="mt-3 space-y-2.5">
+            {pendingRequests.map((r) => (
+              <div key={r.id} className="rounded-xl border border-forest/8 bg-ivory/50 p-3.5">
+                <p className="line-clamp-2 whitespace-pre-line text-sm text-forest/80">{r.rawDescription}</p>
+                <p className="mt-1.5 text-[11px] text-forest/45">Submitted {new Date(r.createdAt).toLocaleDateString()}</p>
+              </div>
             ))}
           </div>
         </section>

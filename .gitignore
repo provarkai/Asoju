@@ -39,3 +39,8 @@ fieldforce/mini-services/*/uploads/
 # Testing
 coverage/
 *.tsbuildinfo
+
+# Explicit ignore for committed build artifacts
+/backend/dist/
+/frontend/.next/
+/fieldforce/.next/

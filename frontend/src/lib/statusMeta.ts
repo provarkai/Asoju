@@ -89,3 +89,7 @@ export function timeAgo(ts: string | number | Date): string {
 export function formatDate(ts: string | number | Date): string {
   return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
+
+export function formatDateTime(ts: string | number | Date): string {
+  return new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
