@@ -37,7 +37,7 @@
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.0.5",
-    "jsdom": "^30.0.1",
+    "jsdom": "^29.1.1",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.5",
     "typescript": "^5.5.4",
