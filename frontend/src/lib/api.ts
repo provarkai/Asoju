@@ -114,5 +114,15 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, _isRe
   }
 
   if (res.status === 204) return undefined as T;
-  return res.json();
+
+  // A controller returning `null` (e.g. "no active subscription") sends a
+  // genuinely empty body with Content-Length: 0 — not the 4-byte text
+  // "null" — so res.json() throws "Unexpected end of JSON input" on it.
+  // Reading as text first and checking for emptiness handles that the
+  // same way the 204 branch above handles an explicitly-empty response,
+  // just for a 200 that happens to have nothing in it. Whatever *is*
+  // there still goes through JSON.parse, same as res.json() would do.
+  const text = await res.text();
+  if (!text) return null as T;
+  return JSON.parse(text) as T;
 }
