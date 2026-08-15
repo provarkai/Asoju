@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -32,6 +32,13 @@ describe('Customer document vault', () => {
       login(app, customerB.email),
       login(app, caseManager.email),
     ]);
+  });
+
+  // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a
+  // wedged shared `app` before the next test runs instead of letting a
+  // mid-file connection reset poison every later test in this file.
+  beforeEach(async () => {
+    app = await ensureHealthyApp(app);
   });
 
   afterAll(async () => {

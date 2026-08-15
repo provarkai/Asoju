@@ -9,6 +9,7 @@
 import 'dotenv/config';
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 
 /**
@@ -31,4 +32,32 @@ export async function createTestApp(): Promise<INestApplication> {
   app.setGlobalPrefix('api');
   await app.init();
   return app;
+}
+
+/**
+ * CI-observed flakiness (see test/jest-e2e.setup.ts) root cause, now
+ * actually fixed rather than just retried: `app`/its Prisma pools are
+ * created once per spec file in `beforeAll`. If a connection reset wedges
+ * that shared instance mid-file, `jest.retryTimes` re-runs the failing
+ * assertion against the same already-broken instance — every retry, and
+ * every later test in the file, fails identically. This is the "larger,
+ * all-spec-files change" that comment names and defers, now applied:
+ * every spec file's `beforeEach` calls this before each test. A live app
+ * answers instantly and this is a no-op; a wedged one gets closed
+ * (best-effort — it may already be unusable) and rebuilt fresh, so a
+ * connection reset costs at most the one test it happened during, not
+ * the rest of the file.
+ */
+export async function ensureHealthyApp(app: INestApplication): Promise<INestApplication> {
+  try {
+    await request(app.getHttpServer()).get('/api/health').timeout(3000);
+    return app;
+  } catch {
+    try {
+      await app.close();
+    } catch {
+      // Already broken in a way close() can't clean up — nothing more to do.
+    }
+    return createTestApp();
+  }
 }

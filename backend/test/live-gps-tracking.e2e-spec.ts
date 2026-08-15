@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Role } from '@prisma/client';
-import { createTestApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 
 /**
@@ -27,6 +27,13 @@ describe('Live GPS tracking — continuous location pings on an active assignmen
     app = await createTestApp();
     admin = await createStaff('tracking-admin', Role.ADMIN);
     adminToken = await login(app, admin.email);
+  });
+
+  // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a
+  // wedged shared `app` before the next test runs instead of letting a
+  // mid-file connection reset poison every later test in this file.
+  beforeEach(async () => {
+    app = await ensureHealthyApp(app);
   });
 
   afterAll(async () => {
