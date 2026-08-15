@@ -441,14 +441,19 @@ export default function Landing() {
           >
             <Badge className="border-gold/40 bg-gold/10 text-clay">Pricing</Badge>
             <h2 className="mt-4 font-display text-4xl font-semibold text-forest sm:text-5xl">
-              Essential or Concierge — your call
+              Pay as you go, or go Priority — your call
             </h2>
             <p className="mt-4 text-lg text-forest/65">
               Transparent, line-item quotes. External costs are never hidden inside service fees.
             </p>
           </motion.div>
 
-          <div className="mx-auto mt-14 grid max-w-6xl gap-6 md:grid-cols-2 xl:grid-cols-4">
+          {/* Three cards, not four — the real MembershipPlan enum only
+              has PRIORITY and PREMIUM (schema.prisma), no subscribable
+              "Essential" tier. Dropped rather than link to a Subscribe
+              button that would 400 on a plan value that doesn't exist;
+              see dashboard/billing/page.tsx's comment for the full story. */}
+          <div className="mx-auto mt-14 grid max-w-5xl gap-6 md:grid-cols-3">
             <motion.div initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} className="rounded-3xl border border-forest/10 bg-white p-8">
               <div className="flex items-center gap-2.5">
                 <span className="flex size-10 items-center justify-center rounded-xl bg-forest/8 text-forest">
@@ -473,31 +478,7 @@ export default function Landing() {
               </Button>
             </motion.div>
 
-            <motion.div initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} custom={1} className="rounded-3xl border border-forest/10 bg-white p-8">
-              <div className="flex items-center gap-2.5">
-                <span className="flex size-10 items-center justify-center rounded-xl bg-gold/15 text-clay">
-                  <Sparkles className="size-5" />
-                </span>
-                <div>
-                  <h3 className="font-display text-xl font-semibold text-forest">Essential</h3>
-                  <p className="text-xs text-forest/50">Subscription + SC voucher</p>
-                </div>
-              </div>
-              <p className="mt-4 font-display text-3xl font-semibold text-forest">
-                $49<span className="text-sm font-normal text-forest/50"> /mo</span>
-              </p>
-              <ul className="mt-6 space-y-3 text-sm text-forest/70">
-                <li className="flex gap-2.5"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" /> Everything in Pay As You Go</li>
-                <li className="flex gap-2.5"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" /> $30 Special Credit (SC) every month</li>
-                <li className="flex gap-2.5"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" /> 5% off out-of-pocket overages</li>
-                <li className="flex gap-2.5"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" /> Priority scheduling &amp; dedicated queue</li>
-              </ul>
-              <Button className="mt-8 w-full bg-clay text-ivory hover:bg-clay-deep" onClick={openBilling}>
-                Subscribe to Essential
-              </Button>
-            </motion.div>
-
-            <motion.div initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} custom={2} className="relative overflow-hidden rounded-3xl border border-gold/40 bg-white p-8 shadow-xl shadow-gold/10">
+            <motion.div initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} custom={1} className="relative overflow-hidden rounded-3xl border border-gold/40 bg-white p-8 shadow-xl shadow-gold/10">
               <Badge className="absolute right-6 top-6 border-gold/40 bg-gold/10 text-clay">Best value</Badge>
               <div className="flex items-center gap-2.5">
                 <span className="flex size-10 items-center justify-center rounded-xl bg-gold/15 text-clay">
@@ -512,7 +493,7 @@ export default function Landing() {
                 $99<span className="text-sm font-normal text-forest/50"> /mo</span>
               </p>
               <ul className="mt-6 space-y-3 text-sm text-forest/70">
-                <li className="flex gap-2.5"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" /> Everything in Essential</li>
+                <li className="flex gap-2.5"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" /> Everything in Pay As You Go</li>
                 <li className="flex gap-2.5"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" /> $60 Special Credit (SC) every month</li>
                 <li className="flex gap-2.5"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" /> 12% off out-of-pocket overages</li>
                 <li className="flex gap-2.5"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" /> Gold-agent assignment + recurring visits</li>
@@ -522,7 +503,7 @@ export default function Landing() {
               </Button>
             </motion.div>
 
-            <motion.div initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} custom={3} className="relative overflow-hidden rounded-3xl bg-forest p-8 text-ivory shadow-2xl shadow-forest/30">
+            <motion.div initial="hidden" whileInView="show" viewport={{ once: true }} variants={fadeUp} custom={2} className="relative overflow-hidden rounded-3xl bg-forest p-8 text-ivory shadow-2xl shadow-forest/30">
               <div className="absolute inset-0 pattern-grid-dark" />
               <div className="relative">
                 <div className="flex items-center gap-2.5">

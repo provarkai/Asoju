@@ -177,27 +177,43 @@ export class ProfileService {
   // -- Notification preferences (Section 5.1 P1) --------------------------
 
   async getPreferences(user: AuthenticatedUser) {
-    return this.prisma.user.findUniqueOrThrow({
-      where: { id: user.id },
-      select: { preferredChannel: true },
-    });
+    const [userRow, customer] = await Promise.all([
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+        select: { preferredChannel: true, phone: true, countryOfResidence: true },
+      }),
+      this.prisma.customer.findUnique({ where: { userId: user.id }, select: { fullName: true } }),
+    ]);
+    return { ...userRow, fullName: customer?.fullName ?? null };
   }
 
   async updatePreferences(user: AuthenticatedUser, dto: UpdatePreferencesDto) {
-    const updated = await this.prisma.user.update({
-      where: { id: user.id },
-      data: { preferredChannel: dto.preferredChannel },
-      select: { preferredChannel: true },
+    const userData: Record<string, string> = {};
+    if (dto.preferredChannel !== undefined) userData.preferredChannel = dto.preferredChannel;
+    if (dto.countryOfResidence !== undefined) userData.countryOfResidence = dto.countryOfResidence;
+    if (dto.phone !== undefined) userData.phone = dto.phone;
+
+    const [userRow] = await this.prisma.$transaction(async (tx) => {
+      const updatedUser = await tx.user.update({
+        where: { id: user.id },
+        data: userData,
+        select: { preferredChannel: true, phone: true, countryOfResidence: true },
+      });
+      if (dto.fullName !== undefined) {
+        await tx.customer.update({ where: { userId: user.id }, data: { fullName: dto.fullName } });
+      }
+      return [updatedUser];
     });
 
     await this.audit.record({
       actorId: user.id,
       actorType: 'user',
       action: 'user.preferences_updated',
-      metadata: { preferredChannel: dto.preferredChannel },
+      metadata: { ...dto },
     });
 
-    return updated;
+    const customer = await this.prisma.customer.findUnique({ where: { userId: user.id }, select: { fullName: true } });
+    return { ...userRow, fullName: customer?.fullName ?? null };
   }
 
   // -- Referrals (Section 12 P1) -----------------------------------------

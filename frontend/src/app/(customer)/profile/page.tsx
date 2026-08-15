@@ -1,423 +1,361 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
-import { apiFetch } from '@/lib/api';
-import { useAuthGuard } from '@/lib/useAuthGuard';
-import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
-import { SecuritySettings } from '@/components/SecuritySettings';
+import { useEffect, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Heart, Home, Loader2, MapPin, Phone, Plus, Save, ShieldCheck, UserRound } from 'lucide-react';
+import { apiFetch, getSessionUser } from '@/lib/api';
+import { cn } from '@/lib/utils';
 
-interface Beneficiary { id: string; fullName: string; relationship: string | null; phone: string | null; userId: string | null }
-interface Property { id: string; address: string; city: string | null; state: string | null }
-interface Asset { id: string; assetType: string; description: string | null; location: string | null }
-interface ReferralSummary { code: string; referredCount: number }
-interface SubscriptionSummary {
-  status: string;
-  tier: string;
-  startedAt: string;
-  plan: 'PRIORITY' | 'PREMIUM';
-  planConfig: { priceUsd: number; scGrantUsd: number; discountPercent: number; eligibleRequestsPerMonth: number };
-  scBalanceUsd: number;
-  eligibleUsedThisPeriod: number;
-  eligibleRemainingThisPeriod: number;
+const CHANNELS = [
+  { key: 'whatsapp', label: 'WhatsApp' },
+  { key: 'email', label: 'Email' },
+  { key: 'sms', label: 'SMS' },
+];
+
+const COUNTRIES = ['United Kingdom', 'United States', 'Canada', 'Germany', 'Other'];
+
+interface Preferences {
+  fullName: string | null;
+  phone: string | null;
+  countryOfResidence: string | null;
+  preferredChannel: string | null;
 }
-interface AccountCaseSummary { id: string; caseNumber: string; serviceType: string; status: string; createdAt: string }
-interface AccountMember { id: string; fullName: string; email: string | null; cases: AccountCaseSummary[] }
-interface MyAccount { account: { id: string; name: string; type: string }; members: AccountMember[] }
-interface SubscriptionInvoice { id: string; periodStart: string; periodEnd: string; amount: string; currency: string; status: string }
-interface PlanConfig { plan: 'PRIORITY' | 'PREMIUM'; priceUsd: number; scGrantUsd: number; discountPercent: number; eligibleRequestsPerMonth: number }
 
-// Section 5.1 P1 — "saved properties/assets, multiple beneficiaries".
+interface Property {
+  id: string;
+  address: string;
+  city: string | null;
+  state: string | null;
+  description: string | null;
+}
+
+interface Beneficiary {
+  id: string;
+  fullName: string;
+  relationship: string | null;
+  phone: string | null;
+  notes: string | null;
+  userId: string | null;
+}
+
+// Ported from asoju-app-main's ProfileView. One real backend extension
+// needed: /me/preferences previously only updated preferredChannel —
+// register.dto.ts captures fullName/countryOfResidence/phone at signup
+// but nothing let a customer edit them afterward. Unlike the other gaps
+// found this session (AI quoting, hold/resume, subscription tiers),
+// this wasn't a deliberate business-rule boundary, just missing CRUD —
+// extended UpdatePreferencesDto rather than dropping the fields from
+// this page.
 export default function ProfilePage() {
-  const { ready } = useAuthGuard();
-  const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([]);
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [referral, setReferral] = useState<ReferralSummary | null>(null);
-  const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
-  const [planConfigs, setPlanConfigs] = useState<PlanConfig[]>([]);
-  const [myAccount, setMyAccount] = useState<MyAccount | null>(null);
-  const [mfaEnabled, setMfaEnabled] = useState(false);
-  const [invoices, setInvoices] = useState<SubscriptionInvoice[]>([]);
-  const [subscribing, setSubscribing] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState<'PRIORITY' | 'PREMIUM'>('PRIORITY');
-  const [copied, setCopied] = useState(false);
+  const sessionUser = getSessionUser();
+  const [prefs, setPrefs] = useState<Preferences | null>(null);
+  const [properties, setProperties] = useState<Property[] | null>(null);
+  const [beneficiaries, setBeneficiaries] = useState<Beneficiary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [preferredChannel, setPreferredChannel] = useState('whatsapp');
-  const [savingPreference, setSavingPreference] = useState(false);
 
-  const [beneficiaryName, setBeneficiaryName] = useState('');
-  const [beneficiaryRelationship, setBeneficiaryRelationship] = useState('');
-  const [invitingId, setInvitingId] = useState<string | null>(null);
-  const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
-  const [propertyAddress, setPropertyAddress] = useState('');
-  const [propertyCity, setPropertyCity] = useState('');
-  const [assetType, setAssetType] = useState('');
-  const [assetLocation, setAssetLocation] = useState('');
+  const [name, setName] = useState<string | null>(null);
+  const [country, setCountry] = useState<string | null>(null);
+  const [phone, setPhone] = useState<string | null>(null);
+  const [channel, setChannel] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  function load() {
-    apiFetch<Beneficiary[]>('/me/beneficiaries').then(setBeneficiaries).catch((e) => setError(e.message));
-    apiFetch<Property[]>('/me/properties').then(setProperties).catch((e) => setError(e.message));
-    apiFetch<Asset[]>('/me/assets').then(setAssets).catch((e) => setError(e.message));
-    apiFetch<ReferralSummary>('/me/referral').then(setReferral).catch((e) => setError(e.message));
-    apiFetch<SubscriptionSummary | null>('/me/subscription').then(setSubscription).catch((e) => setError(e.message));
-    apiFetch<PlanConfig[]>('/membership-plans').then(setPlanConfigs).catch(() => {});
-    apiFetch<MyAccount | null>('/me/account').then(setMyAccount).catch((e) => setError(e.message));
-    apiFetch<SubscriptionInvoice[]>('/me/subscription/invoices').then(setInvoices).catch(() => {});
-    apiFetch<{ mfaEnabled: boolean }>('/auth/me').then((me) => setMfaEnabled(me.mfaEnabled)).catch(() => {});
-    apiFetch<{ preferredChannel: string | null }>('/me/preferences')
-      .then((p) => setPreferredChannel(p.preferredChannel ?? 'whatsapp'))
-      .catch((e) => setError(e.message));
+  const [propForm, setPropForm] = useState({ address: '', city: '', state: '', description: '' });
+  const [benForm, setBenForm] = useState({ fullName: '', relationship: '', phone: '', notes: '' });
+  const [adding, setAdding] = useState<string | null>(null);
+
+  const load = () => {
+    Promise.all([apiFetch<Preferences>('/me/preferences'), apiFetch<Property[]>('/me/properties'), apiFetch<Beneficiary[]>('/me/beneficiaries')])
+      .then(([p, props, bens]) => {
+        setPrefs(p);
+        setProperties(props);
+        setBeneficiaries(bens);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load your profile'));
+  };
+
+  useEffect(load, []);
+
+  if (error) return <p className="error-text">{error}</p>;
+  if (!prefs || !properties || !beneficiaries) {
+    return <div className="h-64 animate-pulse rounded-3xl bg-forest/5" />;
   }
 
-  async function savePreference(channel: string) {
-    setPreferredChannel(channel);
-    setSavingPreference(true);
-    try {
-      await apiFetch('/me/preferences', { method: 'PATCH', body: JSON.stringify({ preferredChannel: channel }) });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save preference');
-    } finally {
-      setSavingPreference(false);
-    }
-  }
+  const dirty =
+    (name !== null && name !== (prefs.fullName ?? '')) ||
+    (country !== null && country !== (prefs.countryOfResidence ?? '')) ||
+    (phone !== null && phone !== (prefs.phone ?? '')) ||
+    (channel !== null && channel !== (prefs.preferredChannel ?? ''));
 
-  async function subscribeConcierge() {
-    setSubscribing(true);
-    try {
-      await apiFetch('/me/subscription', { method: 'POST', body: JSON.stringify({ plan: selectedPlan }) });
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to subscribe');
-    } finally {
-      setSubscribing(false);
-    }
-  }
-
-  async function cancelConcierge() {
-    setSubscribing(true);
-    try {
-      await apiFetch('/me/subscription/cancel', { method: 'POST' });
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to cancel');
-    } finally {
-      setSubscribing(false);
-    }
-  }
-
-  function copyReferralLink() {
-    if (!referral) return;
-    const link = `${window.location.origin}/register?ref=${referral.code}`;
-    navigator.clipboard.writeText(link).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
-
-  useEffect(() => {
-    if (ready) load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
-
-  async function addBeneficiary(e: FormEvent) {
-    e.preventDefault();
-    await apiFetch('/me/beneficiaries', {
-      method: 'POST',
-      body: JSON.stringify({ fullName: beneficiaryName, relationship: beneficiaryRelationship || undefined }),
-    });
-    setBeneficiaryName('');
-    setBeneficiaryRelationship('');
-    load();
-  }
-
-  async function addProperty(e: FormEvent) {
-    e.preventDefault();
-    await apiFetch('/me/properties', {
-      method: 'POST',
-      body: JSON.stringify({ address: propertyAddress, city: propertyCity || undefined }),
-    });
-    setPropertyAddress('');
-    setPropertyCity('');
-    load();
-  }
-
-  async function addAsset(e: FormEvent) {
-    e.preventDefault();
-    await apiFetch('/me/assets', {
-      method: 'POST',
-      body: JSON.stringify({ assetType, location: assetLocation || undefined }),
-    });
-    setAssetType('');
-    setAssetLocation('');
-    load();
-  }
-
-  async function remove(kind: 'beneficiaries' | 'properties' | 'assets', id: string) {
-    await apiFetch(`/me/${kind}/${id}`, { method: 'DELETE' });
-    load();
-  }
-
-  // "Who is a Beneficiary" (portal access) — sends the beneficiary their
-  // own read-only sign-in link. devInviteLink only comes back outside
-  // production (ProfileService.inviteBeneficiary), surfaced here the same
-  // way other dev-only flows in this portal expose test links.
-  async function inviteBeneficiary(id: string) {
-    setInvitingId(id);
+  const saveProfile = async () => {
+    setSaving(true);
     setError(null);
     try {
-      const result = await apiFetch<{ message: string; devInviteLink?: string }>(`/me/beneficiaries/${id}/invite`, {
-        method: 'POST',
+      await apiFetch('/me/preferences', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ...(name !== null ? { fullName: name } : {}),
+          ...(country !== null ? { countryOfResidence: country } : {}),
+          ...(phone !== null ? { phone } : {}),
+          ...(channel !== null ? { preferredChannel: channel } : {}),
+        }),
       });
-      if (result.devInviteLink) {
-        setInviteLinks((links) => ({ ...links, [id]: result.devInviteLink! }));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send invite');
+      setName(null);
+      setCountry(null);
+      setPhone(null);
+      setChannel(null);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save');
     } finally {
-      setInvitingId(null);
+      setSaving(false);
     }
-  }
+  };
 
-  if (!ready) return null;
+  const submitProperty = async () => {
+    if (!propForm.address.trim()) return;
+    setAdding('property');
+    setError(null);
+    try {
+      await apiFetch('/me/properties', {
+        method: 'POST',
+        body: JSON.stringify({
+          address: propForm.address.trim(),
+          city: propForm.city.trim() || undefined,
+          state: propForm.state.trim() || undefined,
+          description: propForm.description.trim() || undefined,
+        }),
+      });
+      setPropForm({ address: '', city: '', state: '', description: '' });
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setAdding(null);
+    }
+  };
+
+  const submitBeneficiary = async () => {
+    if (!benForm.fullName.trim()) return;
+    setAdding('beneficiary');
+    setError(null);
+    try {
+      await apiFetch('/me/beneficiaries', {
+        method: 'POST',
+        body: JSON.stringify({
+          fullName: benForm.fullName.trim(),
+          relationship: benForm.relationship.trim() || undefined,
+          phone: benForm.phone.trim() || undefined,
+          notes: benForm.notes.trim() || undefined,
+        }),
+      });
+      setBenForm({ fullName: '', relationship: '', phone: '', notes: '' });
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setAdding(null);
+    }
+  };
+
+  const displayName = prefs.fullName ?? 'ASOJU customer';
+  const initials =
+    displayName
+      .split(' ')
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase())
+      .join('') || 'A';
 
   return (
-    <div>
-      <div className="hero">
-        <h1>My Nigeria</h1>
-        <p>Save the people and places you look after so you never have to re-describe them.</p>
+    <div className="space-y-8">
+      <div>
+        <p className="text-sm font-semibold text-clay">Your account</p>
+        <h1 className="mt-1 font-display text-3xl font-semibold text-forest">Profile</h1>
+        <p className="mt-1.5 text-sm text-forest/60">How we know you, and how we reach you about your cases.</p>
       </div>
 
       {error && <p className="error-text">{error}</p>}
 
-      <SecuritySettings mfaEnabled={mfaEnabled} />
-
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>ASOJU Concierge — Membership</h2>
-        {subscription?.status === 'ACTIVE' ? (
-          <>
-            <p>
-              You&apos;re on <strong>{subscription.plan === 'PREMIUM' ? 'Premium' : 'Priority'}</strong> since{' '}
-              {new Date(subscription.startedAt).toLocaleDateString()} — new cases default to
-              relationship-managed service.
-            </p>
-            <div className="actions-row" style={{ flexWrap: 'wrap', marginBottom: '1rem' }}>
-              <div className="card" style={{ flex: '1 1 10rem' }}>
-                <div className="muted" style={{ fontSize: '0.8rem' }}>SC balance</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>${subscription.scBalanceUsd.toFixed(2)}</div>
-              </div>
-              <div className="card" style={{ flex: '1 1 10rem' }}>
-                <div className="muted" style={{ fontSize: '0.8rem' }}>Discount on eligible fees</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>{subscription.planConfig.discountPercent}%</div>
-              </div>
-              <div className="card" style={{ flex: '1 1 10rem' }}>
-                <div className="muted" style={{ fontSize: '0.8rem' }}>Eligible requests this month</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-                  {subscription.eligibleRemainingThisPeriod} / {subscription.planConfig.eligibleRequestsPerMonth} left
-                </div>
-              </div>
-            </div>
-            <p className="muted" style={{ fontSize: '0.85rem' }}>
-              SC never becomes cash — it's automatically applied to your next eligible Concierge quote,
-              up to what's available. Discount and SC are calculated for you; nothing to redeem manually.
-            </p>
-            <button className="btn btn--ghost" disabled={subscribing} onClick={cancelConcierge}>
-              {subscribing ? 'Cancelling…' : 'Cancel Concierge'}
-            </button>
-          </>
-        ) : (
-          <>
-            <p className="muted">
-              Essential is pay-per-service. Concierge adds a dedicated relationship manager, an SC
-              credit, and a discount on eligible fees.
-            </p>
-            <div className="actions-row" style={{ flexWrap: 'wrap', marginBottom: '1rem' }}>
-              {planConfigs.map((p) => (
-                <label
-                  key={p.plan}
-                  className="card"
-                  style={{
-                    flex: '1 1 12rem',
-                    cursor: 'pointer',
-                    borderColor: selectedPlan === p.plan ? 'var(--asoju-green)' : undefined,
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="membershipPlan"
-                    checked={selectedPlan === p.plan}
-                    onChange={() => setSelectedPlan(p.plan)}
-                    style={{ marginRight: '0.5rem' }}
-                  />
-                  <strong>{p.plan === 'PREMIUM' ? 'Premium' : 'Priority'}</strong>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>${p.priceUsd}/mo</div>
-                  <div className="muted" style={{ fontSize: '0.85rem' }}>
-                    ${p.scGrantUsd} SC · {p.discountPercent}% off eligible fees · up to {p.eligibleRequestsPerMonth} eligible requests/mo
-                  </div>
-                </label>
-              ))}
-            </div>
-            <button className="btn" disabled={subscribing} onClick={subscribeConcierge}>
-              {subscribing ? 'Subscribing…' : `Subscribe to ${selectedPlan === 'PREMIUM' ? 'Premium' : 'Priority'}`}
-            </button>
-          </>
-        )}
-        {invoices.length > 0 && (
-          <div style={{ marginTop: '1rem' }}>
-            <strong>Billing history</strong>
-            {invoices.map((inv) => (
-              <div key={inv.id} className="case-row">
-                <span className="muted">
-                  {new Date(inv.periodStart).toLocaleDateString()} – {new Date(inv.periodEnd).toLocaleDateString()}
-                </span>
-                <span>{inv.currency} {Number(inv.amount).toLocaleString()}</span>
-                <span className={inv.status === 'FAILED' ? 'error-text' : 'badge'}>
-                  {inv.status === 'PAID' ? 'Paid' : inv.status === 'FAILED' ? 'Payment failed' : 'Awaiting payment'}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>Notification preferences</h2>
-        <p className="muted">How we reach you when something on a case needs your attention.</p>
-        <label>
-          Preferred channel
-          <select value={preferredChannel} onChange={(e) => savePreference(e.target.value)} disabled={savingPreference}>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="email">Email</option>
-            <option value="sms">SMS</option>
-          </select>
-        </label>
-      </div>
-
-      {referral && (
-        <div className="card">
-          <h2 style={{ marginTop: 0 }}>Invite someone</h2>
-          <p className="muted">
-            Share your code and we&apos;ll know to thank you — {referral.referredCount} friend
-            {referral.referredCount === 1 ? ' has' : 's have'} joined so far.
-          </p>
-          <div className="actions-row">
-            <span className="badge" style={{ fontSize: '1rem' }}>{referral.code}</span>
-            <button className="btn btn--secondary" onClick={copyReferralLink}>
-              {copied ? 'Link copied!' : 'Copy invite link'}
-            </button>
+      <section className="rounded-3xl border border-forest/10 bg-white p-6 shadow-sm sm:p-7">
+        <div className="flex items-start gap-4">
+          <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-forest font-display text-xl font-bold text-gold-light">{initials}</span>
+          <div>
+            <p className="font-display text-xl font-semibold text-forest">{displayName}</p>
+            <p className="text-sm text-forest/55">{sessionUser?.email ?? ''}</p>
+            <Badge className="mt-2 border-forest/10 bg-forest/5 text-forest/70">
+              <ShieldCheck className="size-3" />
+              Customer · case-scoped access
+            </Badge>
           </div>
         </div>
-      )}
 
-      {myAccount && (
-        <div className="card">
-          <h2 style={{ marginTop: 0 }}>{myAccount.account.name}</h2>
-          <p className="muted">
-            {myAccount.account.type === 'CORPORATE' ? 'Corporate account' : 'Family account'} —
-            what&apos;s being handled for everyone sharing this account. Opening a case still
-            requires being that case&apos;s own customer or an assigned collaborator.
-          </p>
-          {myAccount.members.map((member) => (
-            <div key={member.id} style={{ marginTop: '0.75rem' }}>
-              <strong>{member.fullName}</strong>{' '}
-              <span className="muted">{member.cases.length} case{member.cases.length === 1 ? '' : 's'}</span>
-              {member.cases.map((c) => (
-                <div key={c.id} className="case-row">
-                  <span className="muted">
-                    {c.caseNumber} · {humanServiceType(c.serviceType)}
-                  </span>
-                  <span className="badge">{humanCaseStatus(c.status)}</span>
-                </div>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-forest/50">Full name</label>
+            <input
+              defaultValue={prefs.fullName ?? ''}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Your name"
+              className="w-full rounded-xl border border-forest/15 bg-ivory/50 px-4 py-2.5 text-sm outline-none focus:border-forest/40 focus:bg-white"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-forest/50">Country of residence</label>
+            <select
+              defaultValue={prefs.countryOfResidence ?? 'United Kingdom'}
+              onChange={(e) => setCountry(e.target.value)}
+              className="w-full rounded-xl border border-forest/15 bg-ivory/50 px-3.5 py-2.5 text-sm outline-none focus:border-forest/40 focus:bg-white"
+            >
+              {COUNTRIES.map((c) => (
+                <option key={c}>{c}</option>
               ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-forest/50">Phone</label>
+            <input
+              defaultValue={prefs.phone ?? ''}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="+44 …"
+              className="w-full rounded-xl border border-forest/15 bg-ivory/50 px-4 py-2.5 text-sm outline-none focus:border-forest/40 focus:bg-white"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-forest/50">Preferred channel</label>
+            <div className="flex gap-2">
+              {CHANNELS.map((c) => (
+                <button
+                  key={c.key}
+                  onClick={() => setChannel(c.key)}
+                  className={cn(
+                    'flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all',
+                    (channel ?? prefs.preferredChannel) === c.key ? 'border-forest bg-forest text-ivory' : 'border-forest/15 bg-ivory/50 text-forest/70 hover:border-forest/30',
+                  )}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 flex justify-end">
+          <Button className="bg-forest text-ivory hover:bg-forest-deep" disabled={!dirty || saving} onClick={saveProfile}>
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            Save changes
+          </Button>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="mb-3 flex items-center gap-2 font-display text-xl font-semibold text-forest">
+          <Home className="size-5 text-clay" />
+          Saved properties
+        </h2>
+        <div className="grid gap-4 md:grid-cols-2">
+          {properties.map((prop) => (
+            <div key={prop.id} className="rounded-2xl border border-forest/10 bg-white p-5 shadow-sm">
+              <p className="text-sm font-semibold text-forest">{prop.address}</p>
+              <p className="mt-1 flex items-center gap-1.5 text-xs text-forest/55">
+                <MapPin className="size-3.5" />
+                {[prop.city, prop.state].filter(Boolean).join(', ') || 'Nigeria'}
+              </p>
+              {prop.description && <p className="mt-2 text-xs text-forest/60">{prop.description}</p>}
             </div>
           ))}
         </div>
-      )}
+        <div className="mt-4 rounded-2xl border border-dashed border-forest/25 bg-white/60 p-5">
+          <p className="text-sm font-semibold text-forest">Add a property</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <input
+              value={propForm.address}
+              onChange={(e) => setPropForm({ ...propForm, address: e.target.value })}
+              placeholder="Address / description (e.g. Farm plot, Awe)"
+              className="w-full rounded-xl border border-forest/15 bg-ivory/50 px-4 py-2.5 text-sm outline-none focus:border-forest/40 focus:bg-white sm:col-span-2"
+            />
+            <input
+              value={propForm.city}
+              onChange={(e) => setPropForm({ ...propForm, city: e.target.value })}
+              placeholder="City"
+              className="w-full rounded-xl border border-forest/15 bg-ivory/50 px-4 py-2.5 text-sm outline-none focus:border-forest/40 focus:bg-white"
+            />
+            <input
+              value={propForm.state}
+              onChange={(e) => setPropForm({ ...propForm, state: e.target.value })}
+              placeholder="State"
+              className="w-full rounded-xl border border-forest/15 bg-ivory/50 px-4 py-2.5 text-sm outline-none focus:border-forest/40 focus:bg-white"
+            />
+          </div>
+          <Button variant="outline" className="mt-3 border-forest/20 text-forest hover:bg-forest hover:text-ivory" disabled={adding === 'property' || !propForm.address.trim()} onClick={submitProperty}>
+            {adding === 'property' ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+            Add property
+          </Button>
+        </div>
+      </section>
 
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>Beneficiaries</h2>
-        <p className="muted">Family or others you&apos;re handling things for.</p>
-        {beneficiaries.map((b) => (
-          <div key={b.id}>
-            <div className="case-row">
-              <span>{b.fullName}{b.relationship ? ` (${b.relationship})` : ''}</span>
-              <div className="actions-row" style={{ gap: '0.5rem' }}>
-                {b.userId ? (
-                  <span className="badge">Has portal access</span>
-                ) : (
-                  <button
-                    className="btn btn--secondary"
-                    disabled={invitingId === b.id}
-                    onClick={() => inviteBeneficiary(b.id)}
-                  >
-                    {invitingId === b.id ? 'Sending…' : 'Invite to portal'}
-                  </button>
-                )}
-                <button className="btn btn--ghost" onClick={() => remove('beneficiaries', b.id)}>Remove</button>
+      <section>
+        <h2 className="mb-3 flex items-center gap-2 font-display text-xl font-semibold text-forest">
+          <Heart className="size-5 text-clay" />
+          Beneficiaries
+        </h2>
+        <div className="grid gap-4 md:grid-cols-2">
+          {beneficiaries.map((b) => (
+            <div key={b.id} className="rounded-2xl border border-forest/10 bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-forest">{b.fullName}</p>
+                <Badge className="border-forest/10 bg-forest/5 text-[10px] text-forest/60">{b.userId ? 'Portal access' : 'Contact only'}</Badge>
               </div>
+              <div className="mt-2 space-y-1 text-xs text-forest/55">
+                {b.relationship && (
+                  <p className="flex items-center gap-1.5">
+                    <UserRound className="size-3.5" /> {b.relationship}
+                  </p>
+                )}
+                {b.phone && (
+                  <p className="flex items-center gap-1.5">
+                    <Phone className="size-3.5" /> {b.phone}
+                  </p>
+                )}
+              </div>
+              {b.notes && <p className="mt-2 text-xs text-forest/60">{b.notes}</p>}
             </div>
-            {inviteLinks[b.id] && (
-              <p className="muted" style={{ marginTop: '-0.5rem' }}>
-                Test mode — no WhatsApp provider configured. Invite link:{' '}
-                <a href={inviteLinks[b.id]}>{inviteLinks[b.id]}</a>
-              </p>
-            )}
+          ))}
+        </div>
+        <div className="mt-4 rounded-2xl border border-dashed border-forest/25 bg-white/60 p-5">
+          <p className="text-sm font-semibold text-forest">Add a beneficiary</p>
+          <p className="mt-1 text-xs text-forest/55">Someone in Nigeria connected to your cases — e.g. a family member on the ground.</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <input
+              value={benForm.fullName}
+              onChange={(e) => setBenForm({ ...benForm, fullName: e.target.value })}
+              placeholder="Full name"
+              className="w-full rounded-xl border border-forest/15 bg-ivory/50 px-4 py-2.5 text-sm outline-none focus:border-forest/40 focus:bg-white"
+            />
+            <input
+              value={benForm.relationship}
+              onChange={(e) => setBenForm({ ...benForm, relationship: e.target.value })}
+              placeholder="Relationship (e.g. Mother)"
+              className="w-full rounded-xl border border-forest/15 bg-ivory/50 px-4 py-2.5 text-sm outline-none focus:border-forest/40 focus:bg-white"
+            />
+            <input
+              value={benForm.phone}
+              onChange={(e) => setBenForm({ ...benForm, phone: e.target.value })}
+              placeholder="Phone"
+              className="w-full rounded-xl border border-forest/15 bg-ivory/50 px-4 py-2.5 text-sm outline-none focus:border-forest/40 focus:bg-white"
+            />
+            <input
+              value={benForm.notes}
+              onChange={(e) => setBenForm({ ...benForm, notes: e.target.value })}
+              placeholder="Notes"
+              className="w-full rounded-xl border border-forest/15 bg-ivory/50 px-4 py-2.5 text-sm outline-none focus:border-forest/40 focus:bg-white"
+            />
           </div>
-        ))}
-        <form onSubmit={addBeneficiary} style={{ marginTop: '1rem' }}>
-          <label>
-            Full name
-            <input value={beneficiaryName} onChange={(e) => setBeneficiaryName(e.target.value)} required />
-          </label>
-          <label>
-            Relationship
-            <input value={beneficiaryRelationship} onChange={(e) => setBeneficiaryRelationship(e.target.value)} placeholder="e.g. Mother" />
-          </label>
-          <button className="btn" type="submit">Add beneficiary</button>
-        </form>
-      </div>
-
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>Properties</h2>
-        {properties.map((p) => (
-          <div key={p.id} className="case-row">
-            <span>{p.address}{p.city ? `, ${p.city}` : ''}</span>
-            <button className="btn btn--ghost" onClick={() => remove('properties', p.id)}>Remove</button>
-          </div>
-        ))}
-        <form onSubmit={addProperty} style={{ marginTop: '1rem' }}>
-          <label>
-            Address
-            <input value={propertyAddress} onChange={(e) => setPropertyAddress(e.target.value)} required />
-          </label>
-          <label>
-            City
-            <input value={propertyCity} onChange={(e) => setPropertyCity(e.target.value)} />
-          </label>
-          <button className="btn" type="submit">Add property</button>
-        </form>
-      </div>
-
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>Assets</h2>
-        <p className="muted">Farm, business premises, equipment, vehicle — anything else you need looked after.</p>
-        {assets.map((a) => (
-          <div key={a.id} className="case-row">
-            <span>{a.assetType}{a.location ? ` — ${a.location}` : ''}</span>
-            <button className="btn btn--ghost" onClick={() => remove('assets', a.id)}>Remove</button>
-          </div>
-        ))}
-        <form onSubmit={addAsset} style={{ marginTop: '1rem' }}>
-          <label>
-            Asset type
-            <input value={assetType} onChange={(e) => setAssetType(e.target.value)} placeholder="e.g. Farm" required />
-          </label>
-          <label>
-            Location
-            <input value={assetLocation} onChange={(e) => setAssetLocation(e.target.value)} />
-          </label>
-          <button className="btn" type="submit">Add asset</button>
-        </form>
-      </div>
+          <Button variant="outline" className="mt-3 border-forest/20 text-forest hover:bg-forest hover:text-ivory" disabled={adding === 'beneficiary' || !benForm.fullName.trim()} onClick={submitBeneficiary}>
+            {adding === 'beneficiary' ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+            Add beneficiary
+          </Button>
+        </div>
+      </section>
     </div>
   );
 }
