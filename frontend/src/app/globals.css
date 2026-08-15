@@ -399,6 +399,31 @@ button {
   font-family: var(--font-sans-aam);
 }
 
+/* Skipping Preflight (see the big comment above) also skips its
+ * `button { background-color: transparent }` reset — every browser's
+ * default UA stylesheet gives <button> a light gray/white face
+ * otherwise. Every button across the old pages already sets its own
+ * background via .btn/.btn--ghost, so this never mattered there; the
+ * new pages lean on raw <button> elements and shadcn Button's "ghost"/
+ * "link" variants (button.tsx — deliberately no base bg, same
+ * assumption Preflight normally covers), so without this they render
+ * with a visible white box around light-colored text. Scoped to
+ * .aam-page so it can never affect anything outside these pages;
+ * explicit bg-* utilities (higher specificity than this bare `button`
+ * selector) still win wherever a button sets one. */
+.aam-page button {
+  background-color: transparent;
+}
+
+/* Same story as the button fix above, for the old globals.css's own
+ * `a { color: var(--asoju-green) }` rule (near the top of this file) —
+ * a real declared rule beats plain inheritance, so any <a> here that
+ * relies on a parent's text-forest/text-ivory color (nav links, footer
+ * links) instead of setting its own would show ASOJU green instead. */
+.aam-page a {
+  color: inherit;
+}
+
 .aam-page h1,
 .aam-page h2,
 .aam-page h3 {
