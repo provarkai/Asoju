@@ -309,9 +309,6 @@ the same governance principle above.
   wired into `ci.yml`'s `frontend` job ahead of the build step.
 
 **Still open, smaller items:**
-- Sprint 4's exact locked section list ("Representation", "Why ASOJU")
-  isn't 1:1 with the homepage's current section names — content review,
-  not a rebuild.
 - Sprint 2's analytics events remain open: privacy-filtering scope (what's
   safe to log from a Concierge conversation) still needs a decision from
   outside this repo audit before any event ships.
@@ -319,3 +316,46 @@ the same governance principle above.
   success/error tests, and no browser-level E2E framework (Playwright/
   Cypress) yet — the restored baseline covers presentational components
   only, same scope the original pre-merge baseline had.
+
+## 8. Sprint 4 content review — homepage section list vs. the locked order
+
+`05_Implementation`'s locked order (10 items): Hero (Concierge-dominant) →
+Trust strip → Six-service cards → **Representation section** → How It
+Works → **Why ASOJU** → Trust/proof (approved data only) → **Diaspora
+section** → Final Concierge CTA → Footer.
+
+`page.tsx`'s actual section list, read straight from the file rather than
+assumed: NAV → Hero (`#services`-linked, Concierge embedded — matches)
+→ Trust strip (matches) → Services (`#services`, matches) → How It Works
+(`#how`, matches) → Trust (`#trust` — "We never say just 'verified'",
+QC/evidence claims only, no invented stats; this is the locked
+"Trust/proof" item content-wise) → **Pricing** (`#pricing` — not in the
+locked list at all) → Final CTA (matches) → Footer (matches).
+
+Net, checked against the file rather than the earlier "isn't 1:1"
+shorthand: **three locked items have no distinct section in the current
+build** — Representation, Why ASOJU, and Diaspora aren't separate
+sections; nothing under those names or that content exists anywhere on
+the page (the earlier revision of this doc listed "→ pricing → diaspora
+→" from memory, not from re-reading the file — there is no diaspora
+section, `#pricing` sits directly before the final CTA). Pricing, in
+exchange, is real, substantial, unaccounted-for-in-the-spec content
+(three-tier subscription cards with real configured prices).
+
+**Deliberately not fixed here.** Writing "Representation" and "Why
+ASOJU" copy from scratch, or a "Diaspora" section, means inventing
+marketing claims about ASOJU no one has approved — the exact governance
+problem the fabricated-testimonials removal (§7) was about, just in the
+other direction (inventing rather than removing). Two real options, both
+needing your call, not a unilateral pick:
+1. Treat this as intentional consolidation — the wireframe's 10 items
+   collapsed into a leaner 8-section build, with "Representation" folded
+   into the Hero copy ("Your trusted presence back home... a verified
+   human on the ground") and "Why ASOJU" folded into the Trust section.
+   Update the sprint plan doc to match reality; no code change.
+2. Treat it as a real gap — write the two missing sections with real
+   copy input from you (what ASOJU's "Representation" pitch and "Why
+   ASOJU" differentiators actually are, beyond what Trust/Hero already
+   say), plus a decision on whether Diaspora content is a section or
+   is intentionally covered by the pricing footnote's Lagos/SW-specific
+   language.
