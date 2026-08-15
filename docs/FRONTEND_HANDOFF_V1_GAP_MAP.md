@@ -271,12 +271,32 @@ checklists (not just skimmed) rather than assumed:
   and the case-messaging thread (the feature folded in from `main` during
   the merge) — all present.
 
-**Confirmed NOT done — the one real, large gap:**
-- **Sprints 5 & 6 (Service-page framework + the six service pages)** —
-  every one of `/arrivals`, `/inspect`, `/build`, `/care`, `/verify`,
-  `/assist` is still the literal `ServiceComingSoon` placeholder from
-  this branch's original Sprint 1 work. No shared service-page shell,
-  no service-specific Concierge prompt configuration, no use-case cards,
-  no How-It-Works/Trust/Outcome/FAQ sections exist for any of the six
-  services. This is a real, well-specified, unstarted sprint — not
-  something the inherited rewrite touched at all.
+**Sprints 5 & 6 (Service-page framework + the six service pages) — ✅ done
+same session (commit `4a5fd94`):** every one of `/arrivals`, `/inspect`,
+`/build`, `/care`, `/verify`, `/assist` now renders through one shared
+`ServicePageShell` (hero with a per-service Concierge embed, use-case
+cards, the homepage's own How-It-Works/Trust sections reused verbatim,
+per-service outcome + FAQ, closing CTA), configured entirely by
+`lib/services.ts` — no page-specific markup, no fabricated pricing/
+stats (Sprint 4's "Trust/proof ... using only approved data" governance
+extended to these pages: `fromNgn` reuses the real prices already live
+in `dashboard/new/page.tsx`, left undefined rather than guessed where
+no real price exists yet). `ServiceComingSoon.tsx` removed as dead code.
+
+**Also found and fixed this session, not a Sprint item but worth
+recording:** `main`'s homepage carried a "From our customers"
+testimonials section — three named people, cities and specific dollar
+claims, presented as genuine reviews with no real customer data behind
+them. Removed entirely (commit `7e8ee14`) rather than relabelled, per
+the same governance principle above.
+
+**Still open, smaller items:**
+- `useAuthGuard`'s redirect to `/login` doesn't carry a `returnTo`, so a
+  direct deep link to a protected page loses its destination after
+  sign-in (§7 above, Sprint 3).
+- Sprint 4's exact locked section list ("Representation", "Why ASOJU")
+  isn't 1:1 with the homepage's current section names — content review,
+  not a rebuild.
+- Sprint 2's analytics events (privacy-filtering scope undecided) and
+  component/state-transition tests (no test framework exists post-merge)
+  remain open, per §7 above.
