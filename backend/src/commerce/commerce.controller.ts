@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, UseGuards, Req } from '@nestjs/common';
 import { Role, RefundRequestStatus } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -85,8 +85,12 @@ export class CommerceController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.CUSTOMER)
   @Post('invoices/:invoiceId/pay')
-  initiatePayment(@CurrentUser() user: AuthenticatedUser, @Param('invoiceId') invoiceId: string) {
-    return this.commerceService.initiatePayment(user, invoiceId);
+  initiatePayment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('invoiceId') invoiceId: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.commerceService.initiatePayment(user, invoiceId, idempotencyKey);
   }
 
   /** P0 Technical Build Spec Section 20/21 "Payment Architecture" —

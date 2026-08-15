@@ -377,6 +377,7 @@ model User {
   refundRequestsDecided                RefundRequest[]           @relation("RefundDecidedBy")
   beneficiaryProfile                   Beneficiary?              @relation("BeneficiaryUser")
   disputesResolved                     Dispute[]
+  escalationsAssigned                  Escalation[]
   beneficiaryRelayMessagesSent         BeneficiaryRelayMessage[] @relation("BeneficiaryRelaySender")
   beneficiaryRelayMessagesAcknowledged BeneficiaryRelayMessage[] @relation("BeneficiaryRelayAcknowledgedBy")
 
@@ -623,6 +624,8 @@ model ServiceRequest {
   convertedCase   ServiceCase?   @relation("RequestToCase", fields: [convertedCaseId], references: [id])
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
+
+  escalations Escalation[]
 }
 
 /// THE CENTRAL OBJECT. Every request, regardless of vertical, becomes a
@@ -694,6 +697,7 @@ model ServiceCase {
   aiInteractions           AiInteraction[]
   rating                   Rating?
   disputes                 Dispute[]
+  escalations              Escalation[]
   arrivalProfile           ArrivalProfile?
   beneficiaryRelayMessages BeneficiaryRelayMessage[]
   qcReviews                QcReview[]
@@ -1938,6 +1942,116 @@ model Dispute {
   createdAt       DateTime      @default(now())
 
   @@index([caseId])
+}
+
+/// docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 2 — a first-class,
+/// assignable staff-handoff record for "this doesn't fit the normal
+/// flow," useful today for ad-hoc staff-raised exceptions and, later, the
+/// landing spot for Phase 3's automated eligibility decisions that come
+/// back ESCALATE/UNSUPPORTED/BLOCKED. Deliberately distinct from
+/// AiEscalation (a narrower, conversation-level signal on a single
+/// AiInteraction — VIP/frustration/legal-question-in-chat) — this is a
+/// trackable entity with its own lifecycle and assignment, not per-message
+/// metadata.
+enum EscalationReasonCategory {
+  MISSING_INFORMATION
+  PRICING_UNAVAILABLE
+  NON_STANDARD_SCOPE
+  PROVIDER_AVAILABILITY
+  POLICY_RISK
+  TECHNICAL_FAILURE
+  /// Staff raised this by hand — doesn't trace back to an automated
+  /// decision at all. The "also immediately useful today" case Phase 2
+  /// is scoped to cover, not just a placeholder for future automation.
+  MANUAL
+}
+
+enum EscalationStatus {
+  REQUIRED
+  REVIEWING
+  RESOLVED
+  CANCELLED
+}
+
+model Escalation {
+  id     String       @id @default(uuid())
+  caseId String
+  case   ServiceCase  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  /// Nullable, forward-compatible with Phase 3 — a StructuredRequest can
+  /// escalate before it's ever converted to a Case (per decision #1 in
+  /// the scope doc, that's an enriched ServiceRequest, not a new model).
+  /// Not used by anything yet; caseId above is required today because
+  /// every current escalation source (manual, or a future automation
+  /// decision on an already-converted case) has one.
+  serviceRequestId String?
+  serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id], onDelete: SetNull)
+
+  reasonCategory EscalationReasonCategory
+  /// Restricted, staff-only — never returned on the customer-facing
+  /// GET /cases/:caseId/escalations endpoint. The real operational detail
+  /// (e.g. "predictive cost 3x the regional base rate, flagged for
+  /// review") that customerMessage below deliberately does not expose.
+  internalReason String?
+  /// Structured staff handoff (source spec §23 "Human Escalation Handoff
+  /// Package") — flexible JSON, same convention as CaseScope.tasks/
+  /// deliverables, rather than a fixed column per optional field
+  /// (confirmed scope, missing information, pricing inputs unresolved,
+  /// provider issue, recommended next action — not every escalation has
+  /// all of these).
+  handoffSummary Json?
+  /// Always required — every escalation must have an approved,
+  /// customer-safe explanation before it's visible to them at all. Source
+  /// spec §9: "Do not expose internal risk scores, thresholds or hidden
+  /// rules."
+  customerMessage String
+
+  status       EscalationStatus @default(REQUIRED)
+  assignedToId String?
+  assignedTo   User?            @relation(fields: [assignedToId], references: [id])
+
+  resolvedAt      DateTime?
+  resolutionNotes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([status])
+  @@index([assignedToId, status])
+}
+
+/// docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 2 — duplicate protection
+/// for consequential operations. Scoped to (operation, idempotencyKey,
+/// actorId) rather than just (operation, key) so one customer's key can
+/// never collide with another's, matching the source spec's
+/// actor_reference field. Optional throughout at the call site — a
+/// request with no Idempotency-Key header behaves exactly as it did
+/// before this model existed; this only activates when a client opts in.
+enum IdempotencyOperation {
+  SERVICE_REQUEST_CREATE
+  PAYMENT_INITIATE
+}
+
+enum IdempotencyRecordStatus {
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
+model IdempotencyRecord {
+  id              String                  @id @default(uuid())
+  operation       IdempotencyOperation
+  idempotencyKey  String
+  actorId         String
+  /// The created resource's id (ServiceRequest.id, Payment.id, ...) once
+  /// status is SUCCEEDED — a retry with the same key re-fetches this
+  /// instead of re-running the operation. Null while PROCESSING/FAILED.
+  resultReference String?
+  status          IdempotencyRecordStatus @default(PROCESSING)
+  createdAt       DateTime                @default(now())
+
+  @@unique([operation, idempotencyKey, actorId])
 }
 
 /// Platform Expansion PRD §4.4 "Two-Way Beneficiary Relay" — upgrades the

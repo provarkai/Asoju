@@ -1,6 +1,15 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { CaseStatus, CaseTier, PaymentStatus, Prisma, QuoteLineCategory, ReconciliationStatus, RefundRequestStatus } from '@prisma/client';
+import {
+  CaseStatus,
+  CaseTier,
+  IdempotencyOperation,
+  PaymentStatus,
+  Prisma,
+  QuoteLineCategory,
+  ReconciliationStatus,
+  RefundRequestStatus,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -15,6 +24,7 @@ import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
 import { RecordDirectCostDto } from './dto/record-direct-cost.dto';
 import { suggestRegionalServiceFee } from './regional-pricing';
 import { usdToNgnRate } from '../concierge/membership-plans';
+import { IdempotencyService } from '../common/idempotency/idempotency.service';
 
 /** Prefix distinguishing case-invoice Paystack references from subscription
  * ones so a single webhook endpoint can route both (see PaystackService). */
@@ -85,6 +95,7 @@ export class CommerceService {
     private readonly paystack: PaystackService,
     private readonly membership: MembershipService,
     private readonly scope: ScopeService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   /**
@@ -297,8 +308,42 @@ export class CommerceService {
    * hosted-checkout URL — real if PAYSTACK_SECRET_KEY is set, a dry-run
    * placeholder otherwise (see PaystackService). Nothing here can mark a
    * payment PAID; only the verified webhook below can (Non-Negotiable #4).
+   *
+   * docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 2 — idempotencyKey is
+   * optional, same contract as createServiceRequest. A retry after the
+   * original already succeeded does NOT re-initiate a second Paystack
+   * transaction (which would double the customer-visible checkout
+   * attempts against the same invoice) — it returns the already-created
+   * Payment's reference instead. There's no authorizationUrl to hand back
+   * on replay (Paystack's hosted-checkout URL isn't persisted — it's only
+   * ever returned once, from the original call); a client retrying after
+   * a timeout should poll payment status by the returned reference rather
+   * than expect a fresh checkout link.
    */
-  async initiatePayment(actor: AuthenticatedUser, invoiceId: string) {
+  async initiatePayment(actor: AuthenticatedUser, invoiceId: string, idempotencyKey?: string) {
+    if (idempotencyKey) {
+      const check = await this.idempotency.begin(IdempotencyOperation.PAYMENT_INITIATE, idempotencyKey, actor.id);
+      if (!check.shouldProceed) {
+        const payment = await this.prisma.payment.findUniqueOrThrow({ where: { id: check.resultReference! } });
+        return { reference: payment.providerReference, dryRun: false, replay: true };
+      }
+    }
+
+    try {
+      const result = await this.doInitiatePayment(actor, invoiceId);
+      if (idempotencyKey) {
+        await this.idempotency.complete(IdempotencyOperation.PAYMENT_INITIATE, idempotencyKey, actor.id, result.paymentId);
+      }
+      return { authorizationUrl: result.authorizationUrl, reference: result.reference, dryRun: result.dryRun };
+    } catch (err) {
+      if (idempotencyKey) {
+        await this.idempotency.fail(IdempotencyOperation.PAYMENT_INITIATE, idempotencyKey, actor.id);
+      }
+      throw err;
+    }
+  }
+
+  private async doInitiatePayment(actor: AuthenticatedUser, invoiceId: string) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
       include: { case: { include: { customer: { include: { user: true } } } }, payments: true },
@@ -322,7 +367,7 @@ export class CommerceService {
       metadata: { invoiceId: invoice.id, caseId: invoice.caseId },
     });
 
-    await this.prisma.payment.create({
+    const payment = await this.prisma.payment.create({
       data: {
         invoiceId: invoice.id,
         amount: invoice.amount,
@@ -341,7 +386,7 @@ export class CommerceService {
       metadata: { invoiceId: invoice.id, reference, dryRun: result.dryRun },
     });
 
-    return { authorizationUrl: result.authorizationUrl, reference: result.reference, dryRun: result.dryRun };
+    return { authorizationUrl: result.authorizationUrl, reference: result.reference, dryRun: result.dryRun, paymentId: payment.id };
   }
 
   /**

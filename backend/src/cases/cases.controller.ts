@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -46,8 +46,14 @@ export class CasesController {
 
   @Roles(Role.CUSTOMER)
   @Post('service-requests')
-  createServiceRequest(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateServiceRequestDto) {
-    return this.casesService.createServiceRequest(user, dto);
+  createServiceRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateServiceRequestDto,
+    // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 2 — optional; a client
+    // that doesn't send this header gets the exact pre-existing behavior.
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.casesService.createServiceRequest(user, dto, idempotencyKey);
   }
 
   @Get('service-requests')

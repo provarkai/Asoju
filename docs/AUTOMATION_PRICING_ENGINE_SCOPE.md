@@ -156,17 +156,42 @@ it just adds an AI gatekeeper in front of the same bottleneck.
 staff-facing admin *screen* for price-book management (only the backend
 endpoints exist).
 
-### Phase 2 — Escalation + Idempotency infrastructure (shared by A and B)
-- New `Escalation` entity (customer-safe `reason_category`, restricted
-  `internal_reason`, staff handoff summary, assignment) — needed before
-  Track B can exist, but also immediately useful today wherever staff
-  currently field ad-hoc "this doesn't fit the normal flow" cases.
-- New `IdempotencyRecord` mechanism for consequential operations (case
-  creation, payment initiation) — a real gap independent of automation;
-  worth having even if Track B never ships.
-- Minimal feature-flag/kill-switch mechanism (`AutomationCapability.enabled`
-  at minimum) — nothing elaborate, but *something* has to exist before any
-  automation is safe to turn on per-service.
+### Phase 2 — Escalation + Idempotency infrastructure (shared by A and B) — ✅ done (15 Aug 2026)
+- New `Escalation` entity (`EscalationReasonCategory`, `EscalationStatus`,
+  customer-safe `customerMessage` vs. restricted `internalReason`/
+  `handoffSummary`, `assignedToId`) — needed before Track B can exist, but
+  also immediately useful today wherever staff currently field ad-hoc
+  "this doesn't fit the normal flow" cases. `POST /cases/:caseId/escalations`
+  (ops roles, `CaseAccessGuard`), `GET /cases/:caseId/escalations` (customer
+  + staff, curated field-level view for the customer — never
+  `internalReason`/`handoffSummary`/`assignedToId`), `GET /escalations`
+  (staff triage queue, optional `?status=`), `GET /escalations/:id` (staff
+  full detail), `POST /escalations/:id/{assign,resolve,cancel}`. Every
+  mutation audited (`escalation.created`/`.assigned`/`.resolved`/`.cancelled`).
+- New `IdempotencyRecord` mechanism (`IdempotencyService.begin/complete/fail`,
+  keyed on `[operation, idempotencyKey, actorId]`) for consequential
+  operations — a real gap independent of automation; worth having even if
+  Track B never ships. Wired into `POST /service-requests` and
+  `POST /invoices/:invoiceId/pay` via an optional `Idempotency-Key` header —
+  a client that omits it gets exactly the pre-existing behaviour. Race-safe:
+  two concurrent requests with the same brand-new key resolve to one 201 and
+  one 409 (Postgres's unique constraint arbitrates, not an app-level lock);
+  a replayed key after success returns the original result rather than
+  reprocessing (payment replay returns `{ reference, replay: true }` with no
+  `authorizationUrl`, since Paystack's hosted-checkout URL is only ever
+  handed back once and isn't persisted).
+- 20 new e2e tests (`test/escalation.e2e-spec.ts`, `test/idempotency.e2e-spec.ts`)
+  + full existing e2e suite (49 suites) reverified clean against real
+  Postgres (aside from the pre-existing, unrelated, rotating
+  `connect ECONNRESET` flakiness `test/jest-e2e.setup.ts` already documents).
+
+**Not done in Phase 2, and deliberately not started:** the
+`AutomationCapability.enabled` feature-flag/kill-switch mentioned in this
+section's original scope. That flag has nothing to gate yet —
+`AutomationCapability` itself is a Phase 3 model. Building a bare `enabled`
+column with no consumer now would be scaffolding, not infrastructure;
+it's deferred to land as part of Phase 3, alongside the model it actually
+switches.
 
 ### Phase 3 — Structured Request + Eligibility Decision (Track B, part 1)
 - New `StructuredRequest` model (richer than `ServiceRequest` — decide via

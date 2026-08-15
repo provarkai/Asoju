@@ -40,6 +40,7 @@ import { AgentWalletModule } from './agent-wallet/agent-wallet.module';
 import { AgentFinancialPlanningModule } from './agent-financial-planning/agent-financial-planning.module';
 import { AgentSosModule } from './agent-sos/agent-sos.module';
 import { CaseReportPdfModule } from './case-report-pdf/case-report-pdf.module';
+import { EscalationModule } from './escalation/escalation.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { CaseReportPdfModule } from './case-report-pdf/case-report-pdf.module';
     AgentFinancialPlanningModule,
     AgentSosModule,
     CaseReportPdfModule,
+    EscalationModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

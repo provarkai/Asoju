@@ -8,6 +8,7 @@ import {
   CaseStatus,
   CollaboratorRole,
   DisputeStatus,
+  IdempotencyOperation,
   Role,
   ServiceType,
   VaultCategory,
@@ -26,6 +27,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RaiseDisputeDto } from './dto/raise-dispute.dto';
 import { BENEFICIARY_CASE_SELECT, toBeneficiaryCaseDetail } from './beneficiary-case-view';
 import { slaHoursForCase } from './regional-sla';
+import { IdempotencyService } from '../common/idempotency/idempotency.service';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
 
@@ -83,11 +85,39 @@ export class CasesService {
     private readonly audit: AuditService,
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   // -- Service requests (pre-case intake) ------------------------------
 
-  async createServiceRequest(user: AuthenticatedUser, dto: CreateServiceRequestDto) {
+  /// docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 2 — idempotencyKey is
+  /// optional; omitting it (every client before this existed) creates a
+  /// request exactly as before. A client that supplies one and retries
+  /// after e.g. a network timeout gets the original request back instead
+  /// of a duplicate.
+  async createServiceRequest(user: AuthenticatedUser, dto: CreateServiceRequestDto, idempotencyKey?: string) {
+    if (idempotencyKey) {
+      const check = await this.idempotency.begin(IdempotencyOperation.SERVICE_REQUEST_CREATE, idempotencyKey, user.id);
+      if (!check.shouldProceed) {
+        return this.prisma.serviceRequest.findUniqueOrThrow({ where: { id: check.resultReference! } });
+      }
+    }
+
+    try {
+      const created = await this.doCreateServiceRequest(user, dto);
+      if (idempotencyKey) {
+        await this.idempotency.complete(IdempotencyOperation.SERVICE_REQUEST_CREATE, idempotencyKey, user.id, created.id);
+      }
+      return created;
+    } catch (err) {
+      if (idempotencyKey) {
+        await this.idempotency.fail(IdempotencyOperation.SERVICE_REQUEST_CREATE, idempotencyKey, user.id);
+      }
+      throw err;
+    }
+  }
+
+  private async doCreateServiceRequest(user: AuthenticatedUser, dto: CreateServiceRequestDto) {
     const customer = await this.requireCustomerProfile(user.id);
 
     const request = await this.prisma.serviceRequest.create({
