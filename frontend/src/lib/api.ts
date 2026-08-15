@@ -47,13 +47,45 @@ export class ApiError extends Error {
   }
 }
 
+// JWT_ACCESS_TTL defaults to 15m server-side (backend/src/auth/auth.service.ts)
+// — every page in this app, not just the ones from this session, used to
+// just show the backend's raw "Unauthorized" once that clock ran out mid-
+// session, since nothing ever called POST /auth/refresh. Coalesced so N
+// concurrent 401s (e.g. a page firing Promise.all([...several apiFetch]))
+// trigger exactly one refresh call, not N races against the same stored
+// refresh token (the backend rotates it — a second racer would send an
+// already-revoked one and fail).
+let refreshPromise: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  const user = getSessionUser();
+  if (!refreshToken || !user) return false;
+  try {
+    const res = await fetch(`${API_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    if (!res.ok) return false;
+    const { accessToken, refreshToken: rotatedRefreshToken } = await res.json();
+    setSession(accessToken, rotatedRefreshToken, user);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Thin fetch wrapper for the customer portal. Auth is client-side only for
  * this MVP slice (tokens in localStorage) — fine for the P0 customer
  * experience; a server-rendered/staff-facing surface would need a real
  * session strategy before it carries anything sensitive.
+ *
+ * `_isRetry` is internal (set only by this function's own retry call) —
+ * every real caller keeps the original two-argument signature.
  */
-export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function apiFetch<T>(path: string, options: RequestInit = {}, _isRetry = false): Promise<T> {
   const token = getAccessToken();
   const res = await fetch(`${API_URL}/api${path}`, {
     ...options,
@@ -63,6 +95,18 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
       ...options.headers,
     },
   });
+
+  if (res.status === 401 && !_isRetry && getRefreshToken()) {
+    refreshPromise ??= tryRefresh().finally(() => {
+      refreshPromise = null;
+    });
+    if (await refreshPromise) {
+      return apiFetch<T>(path, options, true);
+    }
+    clearSession();
+    if (typeof window !== 'undefined') window.location.href = '/login';
+    throw new ApiError('Session expired — please sign in again.', 401);
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { message?: string });
