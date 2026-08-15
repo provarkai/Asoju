@@ -215,17 +215,68 @@ worth recording here:
   breakdown, and five open decisions that need your direction before
   Phase 1 gets a real ticket.
 
-## 6. Recommended next step
+## 6. Recommended next step (superseded by §7 — see below)
 
 Sprint 1 (frontend design-system + global shell) and the P0 frontend test
 infrastructure from §5 are both done — see git history on
-`claude/new-file-repo-9fezh8`. Still open, in rough priority order:
+`claude/new-file-repo-9fezh8`. **This section is stale as of 15 Aug 2026
+— see §7.** Sprint 1's own component library and the Vitest/RTL test
+infra it describes were removed during a large merge with `main` (a
+parallel, independently-evolved frontend rewrite adopted wholesale by
+explicit product decision — see the merge commit `cab1f95` and the
+Escalation/Idempotency work around it for the full story). Backend
+Phase 1 (Pricing Engine) and Phase 2 (Escalation + Idempotency) from §5's
+scope doc are both done; the anonymous-Concierge decision from §2 was
+resolved (chat-only, no structured data pre-auth) and implemented as
+part of that same rewrite.
 
-1. **Backend**: Design A (rename+restructure `ServiceType`→`ServiceFamily`)
-   from §1, plus a product decision + implementation for the anonymous-
-   Concierge gap in §2.
-2. **Backend, larger**: the Automation Eligibility / Pricing Engine /
-   Escalation architecture from §5 — needs a scoping decision before any
-   of it is built.
-3. **Frontend**: Sprint 2 of the original handoff plan (AI Concierge
-   foundation) — blocked on decision #1 above (anonymous Concierge access).
+## 7. Re-audit against the inherited frontend (15 Aug 2026)
+
+The `main` rewrite adopted in the merge above (Radix UI, Tailwind v4,
+route groups under `(auth)`/`(customer)`/`(portal)`) turned out to cover
+a large fraction of the original handoff's Sprint 2–8 backlog already,
+under different component names than this branch originally built. Audited
+against `docs/frontend-handoff-v1.0/05_Implementation/`'s actual sprint
+checklists (not just skimmed) rather than assumed:
+
+**Substantially done, verified against the real code:**
+- **Sprint 2 (AI Concierge foundation)** — `AiConciergeDemo.tsx`: idle/
+  typing/sending/response states, quick-prompt chips, thumbs up/down.
+  Two gaps closed this session: the draft-persistence handoff to
+  `dashboard/new` was half-wired (read side existed, write side didn't —
+  see commit `36466d9`), and failed turns had no retry action (now a
+  proper retry card). Still open: analytics events (needs a
+  privacy-filtering scope decision — not invented here) and
+  component/state-transition tests (no test framework exists post-merge
+  — see §6's note; needs a tooling decision, not a unilateral pick).
+- **Sprint 3 (Authentication & handoff)** — real sign-in (`(auth)/login`)
+  with MFA/enrollment states, real registration (`(auth)/register`),
+  session guard (`useAuthGuard`) redirecting unauthenticated visitors to
+  `/login`, Concierge → auth → restored-request flow (closed this
+  session). Minor gap: `useAuthGuard`'s redirect doesn't carry a
+  `returnTo` back to the page the visitor was trying to reach, so a
+  direct deep link to a protected page loses its destination after
+  login (small, mechanical fix, not done here).
+- **Sprint 4 (Homepage)** — `page.tsx` has hero (Concierge-dominant) →
+  trust strip → six-service cards → How It Works → trust/proof →
+  pricing → diaspora → final CTA → footer. Close to the locked order,
+  though "Representation" and "Why ASOJU" aren't separately named
+  sections the way the spec lists them — worth a content review, not a
+  structural rebuild.
+- **Sprint 7 (Customer workspace)** — `(customer)/layout.tsx` +
+  `dashboard/*`: cases list, new-request wizard, billing, vault,
+  notifications panel, profile — all real, all wired to real endpoints.
+- **Sprint 8 (Cases)** — `dashboard/cases/[id]/page.tsx`: timeline,
+  quote/payment surface (Paystack dry-run aware), evidence grid, reports,
+  and the case-messaging thread (the feature folded in from `main` during
+  the merge) — all present.
+
+**Confirmed NOT done — the one real, large gap:**
+- **Sprints 5 & 6 (Service-page framework + the six service pages)** —
+  every one of `/arrivals`, `/inspect`, `/build`, `/care`, `/verify`,
+  `/assist` is still the literal `ServiceComingSoon` placeholder from
+  this branch's original Sprint 1 work. No shared service-page shell,
+  no service-specific Concierge prompt configuration, no use-case cards,
+  no How-It-Works/Trust/Outcome/FAQ sections exist for any of the six
+  services. This is a real, well-specified, unstarted sprint — not
+  something the inherited rewrite touched at all.
