@@ -155,6 +155,7 @@ export class ProfileService {
     }
 
     return {
+      fullName: customer.fullName,
       totalCases: cases.length,
       completedCases,
       activeCasesByStatus,
