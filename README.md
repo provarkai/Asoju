@@ -789,10 +789,11 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   (not just hold the right role) — triaging a request auto-attaches the triaging staff member;
   `POST /api/cases/:caseId/claim` self-attaches (used by the Ops Console); `.../collaborators`
   (admin-only) attaches anyone else.
-- The very first staff/admin account has no self-service path — seed it directly via Prisma/psql
-  (`npm run seed --workspace=backend` once you've written a seed script, or a one-off script like the
-  ones used during development). Every subsequent agent/provider account can then be onboarded through
-  `/ops/agents` and `/ops/providers`.
+- The very first staff/admin account has no self-service path — run `npm run seed --workspace=backend`
+  (`backend/prisma/seed.ts`) against a real `DATABASE_URL` (e.g. from Render's dashboard Shell for the
+  backend service) to create the first ADMIN and a FIELD_AGENT test account; it prints each generated
+  password once, and re-running it is safe (existing accounts' passwords are left untouched). Every
+  subsequent agent/provider account can then be onboarded through `/ops/agents` and `/ops/providers`.
 - A case's checklist is fixed at creation time from `backend/src/cases/checklist-templates.ts` — there's
   no UI yet to customize a checklist per case, only per service type.
 - A mistyped/expired referral code at registration is silently ignored rather than blocking signup —
