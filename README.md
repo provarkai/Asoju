@@ -711,10 +711,16 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   (not just hold the right role) — triaging a request auto-attaches the triaging staff member;
   `POST /api/cases/:caseId/claim` self-attaches (used by the Ops Console); `.../collaborators`
   (admin-only) attaches anyone else.
-- The very first staff/admin account has no self-service path — seed it directly via Prisma/psql
-  (`npm run seed --workspace=backend` once you've written a seed script, or a one-off script like the
-  ones used during development). Every subsequent agent/provider account can then be onboarded through
-  `/ops/agents` and `/ops/providers`.
+- **Bootstrapping the very first staff/admin account** — every subsequent staff account has a real
+  provisioning path (`POST /admin/staff-accounts` — `AuthService.adminProvisionAccount`, UI on the Admin
+  Console — for RM/Case Manager/QC/Finance/Compliance-Risk/Admin/SuperAdmin; `/ops/agents` and
+  `/ops/providers` for field agents/providers; `POST /admin/partners/:partnerId/contacts` for partner
+  logins), but every one of those requires an already-authenticated Admin/SuperAdmin caller — the
+  chicken-and-egg for account #1. `backend/prisma/seed.ts` (`npm run seed --workspace=backend`,
+  `SEED_SUPERADMIN_EMAIL`/`SEED_SUPERADMIN_PASSWORD` env vars) creates exactly that one account and
+  nothing else, idempotently (a re-run against an email that already exists is a no-op, never a
+  duplicate). MFA is mandatory for `SUPER_ADMIN` like every other privileged role, so its first login
+  goes through the enrollment flow above, not a normal session.
 - A case's checklist is fixed at creation time from `backend/src/cases/checklist-templates.ts` — there's
   no UI yet to customize a checklist per case, only per service type.
 - A mistyped/expired referral code at registration is silently ignored rather than blocking signup —
