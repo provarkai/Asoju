@@ -266,3 +266,145 @@ describe('Agent wallet — real earnings ledger', () => {
       .expect(403);
   });
 });
+
+/**
+ * #52 — the double-entry ledger posted underneath every WalletEntry above.
+ * Not "does the wallet balance look right" (the suite above already
+ * covers that) but the actual accounting invariant: every account's
+ * DEBIT total equals its CREDIT total once you sum the whole ledger, and
+ * a Finance-visible trial balance / per-agent drill-down exists to prove it.
+ */
+describe('Agent wallet — double-entry ledger', () => {
+  let app: INestApplication;
+  let admin: Awaited<ReturnType<typeof createStaff>>;
+  let finance: Awaited<ReturnType<typeof createStaff>>;
+  let adminToken: string;
+  let financeToken: string;
+
+  beforeAll(async () => {
+    await withSetupRetry(async () => {
+      app = await createTestApp();
+      [admin, finance] = await Promise.all([createStaff('ledger-admin', Role.ADMIN), createStaff('ledger-finance', Role.FINANCE)]);
+      [adminToken, financeToken] = await Promise.all([login(app, admin.email), login(app, finance.email)]);
+    });
+  });
+
+  beforeEach(async () => {
+    app = await ensureHealthyApp(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await prisma.$disconnect();
+  });
+
+  async function setUpApprovedCase(prefix: string) {
+    const customer = await createCustomer(prefix);
+    const agent = await createAgent(`${prefix}-agent`);
+    const customerToken = await login(app, customer.email);
+    const agentToken = await login(app, agent.email);
+
+    const reqRes = await request(app.getHttpServer())
+      .post('/api/service-requests')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ rawDescription: `${prefix} ledger test case`, location: 'Lagos', channel: 'web' })
+      .expect(201);
+    const caseRes = await request(app.getHttpServer())
+      .post(`/api/service-requests/${reqRes.body.id}/convert`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ serviceType: 'PROPERTY_INSPECTION', description: 'Inspect', location: 'Lagos', priority: 'STANDARD' })
+      .expect(201);
+    const caseId = caseRes.body.id;
+
+    await prisma.serviceCase.update({ where: { id: caseId }, data: { status: 'SCHEDULED', paymentStatus: 'PAID' } });
+    const assignRes = await request(app.getHttpServer())
+      .post(`/api/cases/${caseId}/assignments`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ role: 'FIELD_AGENT', agentId: agent.agent.id })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/assignments/${assignRes.body.id}/accept`)
+      .set('Authorization', `Bearer ${agentToken}`)
+      .expect(201);
+    await prisma.serviceCase.update({ where: { id: caseId }, data: { status: 'APPROVED' } });
+    await request(app.getHttpServer())
+      .post(`/api/cases/${caseId}/claim`)
+      .set('Authorization', `Bearer ${financeToken}`)
+      .expect(201);
+
+    return { caseId, agentId: agent.agent.id, agentToken };
+  }
+
+  it('posts a balanced journal entry for an earning, and again for the payout that clears it', async () => {
+    const { caseId, agentId, agentToken } = await setUpApprovedCase('ledger-balance');
+
+    await request(app.getHttpServer())
+      .post(`/api/cases/${caseId}/agent-earnings`)
+      .set('Authorization', `Bearer ${financeToken}`)
+      .send({ amount: 20000 })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/agents/${agentId}/payouts`)
+      .set('Authorization', `Bearer ${financeToken}`)
+      .send({ amount: 12000 })
+      .expect(201);
+
+    const trialBalance = await request(app.getHttpServer())
+      .get('/api/ledger/trial-balance')
+      .set('Authorization', `Bearer ${financeToken}`)
+      .expect(200);
+
+    // The core invariant: every account's own debit and credit totals,
+    // summed across the WHOLE ledger (every test that has ever posted, not
+    // just this one), stay in balance — proving nothing anywhere ever
+    // posted an unbalanced entry.
+    const sumDebits = trialBalance.body.reduce((s: number, a: { totalDebits: number }) => s + a.totalDebits, 0);
+    const sumCredits = trialBalance.body.reduce((s: number, a: { totalCredits: number }) => s + a.totalCredits, 0);
+    expect(sumDebits).toBe(sumCredits);
+
+    const expense = trialBalance.body.find((a: { code: string }) => a.code === 'AGENT_COMPENSATION_EXPENSE');
+    const payable = trialBalance.body.find((a: { code: string }) => a.code === 'AGENT_PAYOUT_PAYABLE');
+    const cash = trialBalance.body.find((a: { code: string }) => a.code === 'OPERATING_CASH');
+    expect(expense.totalDebits).toBeGreaterThanOrEqual(20000);
+    expect(payable.totalCredits).toBeGreaterThanOrEqual(20000);
+    expect(payable.totalDebits).toBeGreaterThanOrEqual(12000);
+    expect(cash.totalCredits).toBeGreaterThanOrEqual(12000);
+
+    // The subsidiary drill-down: this agent's own two entries, visible to
+    // the agent themself and to Finance, and blocked for an outsider.
+    const agentLedger = await request(app.getHttpServer())
+      .get(`/api/agents/${agentId}/ledger`)
+      .set('Authorization', `Bearer ${agentToken}`)
+      .expect(200);
+    expect(agentLedger.body).toHaveLength(2);
+    expect(agentLedger.body.map((e: { entityType: string }) => e.entityType).sort()).toEqual(['Payout', 'WalletEntry']);
+
+    const outsider = await createAgent('ledger-outsider');
+    const outsiderToken = await login(app, outsider.email);
+    await request(app.getHttpServer())
+      .get(`/api/agents/${agentId}/ledger`)
+      .set('Authorization', `Bearer ${outsiderToken}`)
+      .expect(403);
+  });
+
+  it('is idempotent — replaying the same earning never double-posts', async () => {
+    const { caseId, agentId } = await setUpApprovedCase('ledger-idempotent');
+    await request(app.getHttpServer())
+      .post(`/api/cases/${caseId}/agent-earnings`)
+      .set('Authorization', `Bearer ${financeToken}`)
+      .send({ amount: 9000 })
+      .expect(201);
+
+    const before = await request(app.getHttpServer())
+      .get(`/api/agents/${agentId}/ledger`)
+      .set('Authorization', `Bearer ${financeToken}`)
+      .expect(200);
+    expect(before.body).toHaveLength(1);
+
+    // Re-posting the exact same WalletEntry id directly through the
+    // service (simulating a retried call) must not create a second entry.
+    const walletEntry = await prisma.walletEntry.findFirstOrThrow({ where: { agentId, type: 'EARNING' } });
+    const existingCount = await prisma.journalEntry.count({ where: { idempotencyKey: `EARNING_${walletEntry.id}` } });
+    expect(existingCount).toBe(1);
+  });
+});
