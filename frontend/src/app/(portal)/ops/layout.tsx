@@ -46,6 +46,9 @@ export default function OpsLayout({ children }: { children: React.ReactNode }) {
     tabs.push({ href: '/ops/refund-approvals', label: 'Refund Approvals' });
   }
   if (user && ADMIN_ROLES.includes(user.role)) {
+    tabs.push({ href: '/ops/sos', label: 'SOS' });
+  }
+  if (user && ADMIN_ROLES.includes(user.role)) {
     tabs.push({ href: '/ops/audit', label: 'Audit Log' });
   }
   if (user && ADMIN_ROLES.includes(user.role)) {
