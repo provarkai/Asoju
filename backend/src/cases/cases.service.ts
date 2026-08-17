@@ -815,6 +815,93 @@ export class CasesService {
     return updated;
   }
 
+  /**
+   * "A case's checklist is fixed at creation time from checklist-templates.ts
+   * — there's no UI yet to customize a checklist per case, only per service
+   * type" (README). Every case still gets seeded from its service type's
+   * template first — this only ever adds *on top* of that, for the
+   * case-specific step no template could have predicted. Blocked once the
+   * case is done (COMPLETED/CLOSED) — same reasoning as holdCase not
+   * accepting a terminal-status case.
+   */
+  async addTask(actor: AuthenticatedUser, caseId: string, label: string, isRequired?: boolean) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+    if (serviceCase.status === CaseStatus.COMPLETED || serviceCase.status === CaseStatus.CLOSED) {
+      throw new BadRequestException(`Cannot add a checklist item to a case in status ${serviceCase.status}`);
+    }
+
+    const maxSortOrder = await this.prisma.caseTask.aggregate({ where: { caseId }, _max: { sortOrder: true } });
+    const task = await this.prisma.caseTask.create({
+      data: {
+        caseId,
+        label,
+        isRequired: isRequired ?? true,
+        sortOrder: (maxSortOrder._max.sortOrder ?? 0) + 1,
+      },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case_task.added',
+      metadata: { taskId: task.id, label, isRequired: task.isRequired },
+    });
+
+    return task;
+  }
+
+  /** Editing is only meaningful before the item is done — once a field
+   * agent has actually completed a step, rewriting what it says (or
+   * whether it was ever required) would rewrite the record of what
+   * happened, not just plan ahead. completeTask (EvidenceService) is the
+   * only way isComplete/completedAt ever change. */
+  async updateTask(actor: AuthenticatedUser, caseId: string, taskId: string, label?: string, isRequired?: boolean) {
+    const task = await this.prisma.caseTask.findUnique({ where: { id: taskId } });
+    if (!task || task.caseId !== caseId) throw new NotFoundException('Checklist item not found on this case');
+    if (task.isComplete) throw new BadRequestException('Cannot edit a checklist item that is already complete');
+    if (label === undefined && isRequired === undefined) {
+      throw new BadRequestException('Nothing to update — provide label and/or isRequired');
+    }
+
+    const updated = await this.prisma.caseTask.update({
+      where: { id: taskId },
+      data: { ...(label !== undefined ? { label } : {}), ...(isRequired !== undefined ? { isRequired } : {}) },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case_task.updated',
+      metadata: { taskId, label, isRequired },
+    });
+
+    return updated;
+  }
+
+  /** Same "never touch a completed item" guard as updateTask — removing a
+   * checklist item that's already been done would destroy the record that
+   * it happened, not just tidy up the plan. */
+  async removeTask(actor: AuthenticatedUser, caseId: string, taskId: string) {
+    const task = await this.prisma.caseTask.findUnique({ where: { id: taskId } });
+    if (!task || task.caseId !== caseId) throw new NotFoundException('Checklist item not found on this case');
+    if (task.isComplete) throw new BadRequestException('Cannot remove a checklist item that is already complete');
+
+    await this.prisma.caseTask.delete({ where: { id: taskId } });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case_task.removed',
+      metadata: { taskId, label: task.label },
+    });
+
+    return { removed: true };
+  }
+
   /** Section 3.1 — customer rejects the delivered report. Only reachable
    * from CUSTOMER_REVIEW (the report must actually be in front of them),
    * and — like holdCase/resumeCase — bypasses the static TRANSITIONS map

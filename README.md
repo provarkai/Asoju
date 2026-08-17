@@ -721,8 +721,11 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   nothing else, idempotently (a re-run against an email that already exists is a no-op, never a
   duplicate). MFA is mandatory for `SUPER_ADMIN` like every other privileged role, so its first login
   goes through the enrollment flow above, not a normal session.
-- A case's checklist is fixed at creation time from `backend/src/cases/checklist-templates.ts` — there's
-  no UI yet to customize a checklist per case, only per service type.
+- A case's checklist is seeded at creation time from `backend/src/cases/checklist-templates.ts` (per
+  service type), and staff (Case Manager/Admin/SuperAdmin) can add, edit, or remove case-specific items
+  on top of it from the Ops case page's "Checklist" card (`POST`/`PATCH`/`DELETE
+  cases/:caseId/tasks[/:taskId]`) — never on a `COMPLETED`/`CLOSED` case, and never on an item the field
+  agent has already completed (`completeTask` stays the only route that can flip that).
 - A mistyped/expired referral code at registration is silently ignored rather than blocking signup —
   check `GET /api/me/referral` if you need to confirm a code is actually valid before sharing it.
 - A `RecurringSchedule` is unique per origin case — cancelling (`PATCH /api/cases/:caseId/recurrence`,
