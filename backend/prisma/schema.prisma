@@ -1711,6 +1711,16 @@ model Notification {
   deliveryStatus NotificationDeliveryStatus @default(SENT)
   failureReason  String?
   createdAt      DateTime                   @default(now())
+
+  /// A live SOS test confirmed this gap directly: the notification told
+  /// an admin an alert existed with no way to actually reach it — no
+  /// admin-facing SOS review page existed at all until this same change.
+  /// A same-origin relative path (e.g. "/ops/sos", "/ops/cases/:id"),
+  /// never a full URL — NotificationBell resolves it against whatever
+  /// origin is already rendering the bell. Null for every notification
+  /// that has nothing to link to, which is most of them; only set where
+  /// a caller has a real destination (see AgentSosService.notifyAdmins).
+  actionUrl String?
 }
 
 // ---------------------------------------------------------------------------

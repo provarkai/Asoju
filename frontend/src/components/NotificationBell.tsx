@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 
 interface NotificationItem {
@@ -9,6 +10,7 @@ interface NotificationItem {
   body: string;
   readAt: string | null;
   createdAt: string;
+  actionUrl?: string | null;
 }
 
 export function NotificationBell() {
@@ -63,13 +65,26 @@ export function NotificationBell() {
           }}
         >
           {items.length === 0 && <p className="muted">No notifications yet.</p>}
-          {items.map((n) => (
-            <div key={n.id} style={{ marginBottom: '0.75rem' }}>
-              <strong>{n.title}</strong>
-              <p className="muted" style={{ margin: '0.2rem 0' }}>{n.body}</p>
-              <span className="muted" style={{ fontSize: '0.75rem' }}>{new Date(n.createdAt).toLocaleString()}</span>
-            </div>
-          ))}
+          {items.map((n) => {
+            const body = (
+              <>
+                <strong>{n.title}</strong>
+                <p className="muted" style={{ margin: '0.2rem 0' }}>{n.body}</p>
+                <span className="muted" style={{ fontSize: '0.75rem' }}>{new Date(n.createdAt).toLocaleString()}</span>
+              </>
+            );
+            return (
+              <div key={n.id} style={{ marginBottom: '0.75rem' }}>
+                {n.actionUrl ? (
+                  <Link href={n.actionUrl} onClick={() => setOpen(false)} style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
+                    {body}
+                  </Link>
+                ) : (
+                  body
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

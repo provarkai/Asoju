@@ -67,7 +67,7 @@ export class AgentSosService {
     private readonly ownership: OwnershipService,
   ) {}
 
-  private async requireOwnAgent(actor: AuthenticatedUser): Promise<{ id: string }> {
+  private async requireOwnAgent(actor: AuthenticatedUser): Promise<{ id: string; fullName: string }> {
     const agent = await this.prisma.agent.findUnique({ where: { userId: actor.id } });
     if (!agent) throw new ForbiddenException('Only a field agent can trigger an SOS alert');
     return agent;
@@ -123,22 +123,33 @@ export class AgentSosService {
       metadata: { alertId: alert.id, alertType: dto.alertType, severity: dto.severity, caseHeld },
     });
 
-    await this.notifyAdmins(alert.id, dto.alertType, dto.severity);
+    await this.notifyAdmins(alert.id, agent.fullName, dto.alertType, dto.severity, dto.caseId);
 
     return alert;
   }
 
-  private async notifyAdmins(alertId: string, alertType: string, severity: string) {
+  /** A live test of this alert surfaced the actual gap: the notification
+   * named nothing and linked nowhere — an admin had no way to reach the
+   * alert, the agent, or the case from it at all (there was no
+   * admin-facing SOS review surface anywhere in the app until /ops/sos,
+   * added alongside this fix). Now: the agent's name is in the body, and
+   * actionUrl deep-links straight to this alert on that page — which
+   * itself shows the agent's location/trust info and the linked case
+   * inline, rather than requiring a separate agent-profile page that
+   * doesn't exist yet. */
+  private async notifyAdmins(alertId: string, agentName: string, alertType: string, severity: string, caseId?: string) {
     const admins = await this.prisma.user.findMany({
       where: { role: { in: [Role.ADMIN, Role.SUPER_ADMIN] } },
       select: { id: true },
     });
+    const caseNote = caseId ? ' Linked to an active case.' : '';
     await Promise.all(
       admins.map((admin) =>
         this.notifications.notify(
           admin.id,
           `🚨 SOS Alert — ${severity}`,
-          `A field agent triggered a ${alertType} emergency alert (${severity}). Alert ID: ${alertId}`,
+          `${agentName} triggered a ${alertType} emergency alert (${severity}).${caseNote} Tap to review.`,
+          `/ops/sos?alert=${alertId}`,
         ),
       ),
     );
@@ -256,7 +267,10 @@ export class AgentSosService {
   async getActiveAlerts() {
     return this.prisma.sosAlert.findMany({
       where: { status: { in: [SOS_STATUS.ACTIVE, SOS_STATUS.ACKNOWLEDGED, SOS_STATUS.ESCALATED] } },
-      include: { agent: { select: { fullName: true } } },
+      include: {
+        agent: { select: { fullName: true, city: true, state: true } },
+        case: { select: { caseNumber: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -272,6 +286,10 @@ export class AgentSosService {
 
     return this.prisma.sosAlert.findMany({
       where: effectiveAgentId ? { agentId: effectiveAgentId } : {},
+      include: {
+        agent: { select: { fullName: true, city: true, state: true } },
+        case: { select: { caseNumber: true } },
+      },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });

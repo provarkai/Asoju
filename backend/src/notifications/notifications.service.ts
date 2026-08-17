@@ -30,8 +30,13 @@ export class NotificationsService {
     private readonly emailService: EmailService,
   ) {}
 
-  async notify(userId: string, title: string, body: string) {
-    const notification = await this.prisma.notification.create({ data: { userId, title, body } });
+  /** `actionUrl` is optional and additive — every existing call site
+   * keeps working with no link. Only set it where there's a real
+   * same-origin destination for the recipient to click through to (see
+   * Notification.actionUrl's schema comment; AgentSosService.notifyAdmins
+   * is the first real caller). */
+  async notify(userId: string, title: string, body: string, actionUrl?: string) {
+    const notification = await this.prisma.notification.create({ data: { userId, title, body, actionUrl } });
     return this.attemptChannelFanOut(notification);
   }
 
