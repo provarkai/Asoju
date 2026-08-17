@@ -6,6 +6,7 @@ import { Download, FileText, FolderLock, Loader2, Plus, Trash2, UploadCloud } fr
 import { apiFetch } from '@/lib/api';
 import { uploadVaultFile } from '@/lib/upload';
 import { cn } from '@/lib/utils';
+import { ErrorState } from '@/components/portal/ui';
 
 interface VaultDocument {
   id: string;
@@ -42,6 +43,7 @@ export default function VaultPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = () => {
+    setError(null);
     apiFetch<VaultDocument[]>('/me/vault')
       .then(setDocuments)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load your vault'));
@@ -106,12 +108,18 @@ export default function VaultPage() {
         </Button>
       </div>
 
-      {error && <p className="error-text mt-4">{error}</p>}
+      {error && documents !== null && <p className="error-text mt-4">{error}</p>}
 
       <section className="mt-8">
         <h2 className="font-display text-lg font-semibold text-forest">Documents</h2>
         {documents === null ? (
-          <p className="mt-3 text-sm text-forest/50">Loading…</p>
+          error ? (
+            <div className="mt-3">
+              <ErrorState message={error} onRetry={load} />
+            </div>
+          ) : (
+            <div className="mt-3 h-40 animate-pulse rounded-2xl bg-forest/5" />
+          )
         ) : documents.length === 0 ? (
           <div className="mt-3 flex items-center gap-3 rounded-2xl border border-dashed border-forest/20 bg-white/60 px-5 py-8 text-sm text-forest/50">
             <FileText className="size-5" />

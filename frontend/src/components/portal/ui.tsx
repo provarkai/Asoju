@@ -1,7 +1,8 @@
-import { LucideIcon } from 'lucide-react';
+import { AlertTriangle, LucideIcon } from 'lucide-react';
 import { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { statusDot, statusLabel, statusTone } from '@/lib/statusMeta';
+import { Button } from '@/components/ui/button';
 
 export function StatusPill({ status, className }: { status: string; className?: string }) {
   return (
@@ -50,6 +51,35 @@ export function SectionTitle({ title, action }: { title: string; action?: ReactN
     <div className="mb-4 flex items-center justify-between">
       <h2 className="font-display text-xl font-semibold text-forest">{title}</h2>
       {action}
+    </div>
+  );
+}
+
+/**
+ * The customer portal's one real, systemic navigation gap: every page's
+ * failed-fetch state used to be bare `<p className="error-text">` — a
+ * dead end with no way forward except a manual browser refresh. That
+ * matters here specifically because the backend sleeps after 15 minutes
+ * idle (README) and takes a few seconds to wake, so a customer landing
+ * mid-cold-start could hit this. Same visual language as EmptyState
+ * (which it deliberately mirrors) but a solid warm-red border instead of
+ * a dashed neutral one, and the action is always "try again," not a
+ * feature CTA. onRetry is expected to be the same load function the
+ * page already calls on mount.
+ */
+export function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center rounded-2xl border border-red-200 bg-red-50/60 px-6 py-14 text-center">
+      <span className="flex size-14 items-center justify-center rounded-2xl bg-red-100 text-red-600">
+        <AlertTriangle className="size-7" />
+      </span>
+      <h3 className="mt-5 font-display text-xl font-semibold text-forest">Something went wrong</h3>
+      <p className="mt-2 max-w-sm text-sm text-forest/60">{message}</p>
+      <div className="mt-6">
+        <Button variant="outline" className="border-red-200 text-red-700 hover:bg-red-50" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
     </div>
   );
 }

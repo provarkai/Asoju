@@ -7,6 +7,7 @@ import { ArrowRight, CheckCircle2, CreditCard, Loader2, ShieldCheck, Sparkles, X
 import { apiFetch } from '@/lib/api';
 import { naira } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { ErrorState } from '@/components/portal/ui';
 
 interface PlanConfig {
   plan: 'ESSENTIAL' | 'PRIORITY' | 'PREMIUM';
@@ -44,6 +45,7 @@ export default function BillingPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = () => {
+    setError(null);
     Promise.all([apiFetch<PlanConfig[]>('/membership-plans'), apiFetch<Subscription | null>('/me/subscription')])
       .then(([p, s]) => {
         setPlans(p);
@@ -54,7 +56,7 @@ export default function BillingPage() {
 
   useEffect(load, []);
 
-  if (error) return <p className="error-text">{error}</p>;
+  if (error && !plans) return <ErrorState message={error} onRetry={load} />;
   if (!plans || sub === undefined) {
     return (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
