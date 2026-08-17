@@ -53,21 +53,29 @@ export class AuthService {
 
     // A mistyped/expired referral or partner code shouldn't block
     // onboarding — treat it as "no referral" rather than failing the whole
-    // registration.
+    // registration. It shouldn't be silently swallowed either, though: the
+    // caller gets told which of the two codes it supplied were actually
+    // recognized (`referralCodeApplied`/`partnerCodeApplied` below), so the
+    // frontend can show a non-blocking "code not recognized" notice instead
+    // of a customer never finding out their referral never counted.
     let referredByCustomerId: string | undefined;
+    let referralCodeApplied: boolean | undefined;
     if (dto.referralCode) {
       const referrer = await this.prisma.customer.findUnique({
         where: { referralCode: dto.referralCode.toUpperCase() },
       });
       referredByCustomerId = referrer?.id;
+      referralCodeApplied = !!referrer;
     }
 
     let referredByPartnerId: string | undefined;
+    let partnerCodeApplied: boolean | undefined;
     if (dto.partnerCode) {
       const partner = await this.prisma.partner.findUnique({
         where: { code: dto.partnerCode.toUpperCase() },
       });
-      if (partner?.status === 'ACTIVE') referredByPartnerId = partner.id;
+      referredByPartnerId = partner?.status === 'ACTIVE' ? partner.id : undefined;
+      partnerCodeApplied = !!referredByPartnerId;
     }
 
     const user = await this.prisma.user.create({
@@ -91,7 +99,15 @@ export class AuthService {
     });
 
     const tokens = await this.issueTokens(user.id, user.role);
-    return { user: this.toPublicUser(user), ...tokens };
+    return {
+      user: this.toPublicUser(user),
+      ...tokens,
+      // Present only when the corresponding code was actually supplied —
+      // `undefined` (omitted from the JSON response) means "wasn't sent",
+      // distinct from `false` ("sent but not recognized").
+      ...(referralCodeApplied !== undefined ? { referralCodeApplied } : {}),
+      ...(partnerCodeApplied !== undefined ? { partnerCodeApplied } : {}),
+    };
   }
 
   /**

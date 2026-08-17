@@ -1929,8 +1929,13 @@ model RecurringSchedule {
 
   cadenceDays Int
   nextRunAt   DateTime
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  active      Boolean   @default(true)
+  // Set the moment a schedule is paused (`setActive(false)`), cleared on
+  // resume — lets `setActive(true)` restore the exact remaining time until
+  // `nextRunAt` instead of resetting the full cadence from the resume
+  // moment. Null whenever the schedule has never been paused.
+  pausedAt    DateTime?
+  createdAt   DateTime  @default(now())
 
   spawnedCases ServiceCase[] @relation("ScheduleSpawned")
 }

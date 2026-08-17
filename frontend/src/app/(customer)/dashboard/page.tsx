@@ -51,6 +51,19 @@ export default function DashboardHome() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [pendingRequests, setPendingRequests] = useState<ServiceRequestSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [postRegisterNotice, setPostRegisterNotice] = useState<string | null>(null);
+
+  // One-shot notice from /register: an unrecognized referral/partner code
+  // never blocks signup, but the visitor should still find out it didn't
+  // apply rather than silently assuming it worked. Read-and-clear so a
+  // page refresh doesn't keep showing it.
+  useEffect(() => {
+    const notice = sessionStorage.getItem('asoju:post-register-notice');
+    if (notice) {
+      setPostRegisterNotice(notice);
+      sessionStorage.removeItem('asoju:post-register-notice');
+    }
+  }, []);
 
   const load = () => {
     setError(null);
@@ -71,13 +84,30 @@ export default function DashboardHome() {
 
   useEffect(load, []);
 
+  const notice = postRegisterNotice && (
+    <div className="flex items-start justify-between gap-3 rounded-2xl border border-gold/30 bg-gold/10 p-4 text-sm text-forest">
+      <p>{postRegisterNotice}</p>
+      <button
+        type="button"
+        onClick={() => setPostRegisterNotice(null)}
+        className="shrink-0 text-forest/60 hover:text-forest"
+        aria-label="Dismiss"
+      >
+        ✕
+      </button>
+    </div>
+  );
+
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (!cases || !portfolio) {
     return (
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="h-32 animate-pulse rounded-2xl bg-forest/5" />
-        ))}
+      <div className="space-y-4">
+        {notice}
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-32 animate-pulse rounded-2xl bg-forest/5" />
+          ))}
+        </div>
       </div>
     );
   }
@@ -89,6 +119,7 @@ export default function DashboardHome() {
 
   return (
     <div className="space-y-8">
+      {notice}
       {/* Hero */}
       <section className="relative overflow-hidden rounded-3xl bg-forest p-7 text-ivory shadow-xl shadow-forest/20 sm:p-9">
         <div className="absolute inset-0 pattern-grid-dark" />
