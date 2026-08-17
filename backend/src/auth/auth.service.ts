@@ -493,7 +493,19 @@ export class AuthService {
   async getMe(userId: string) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { id: true, email: true, phone: true, role: true, mfaEnabled: true },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        role: true,
+        mfaEnabled: true,
+        // #54 — the field portal's wallet/trust-score/financial-plan
+        // pages take an Agent id, not a User id, and there was no way for
+        // the frontend to resolve its own one; null for every non-agent
+        // role, same "only ever populated where it applies" shape as the
+        // rest of this app's optional relations.
+        agentProfile: { select: { id: true } },
+      },
     });
     return user;
   }
