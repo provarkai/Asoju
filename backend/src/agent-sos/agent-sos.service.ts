@@ -5,6 +5,7 @@ import { AuditService } from '../audit/audit.service';
 import { CasesService } from '../cases/cases.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { OwnershipService } from '../common/ownership/ownership.service';
 import { TriggerSosDto } from './dto/trigger-sos.dto';
 import { EscalateSosDto } from './dto/escalate-sos.dto';
 
@@ -63,6 +64,7 @@ export class AgentSosService {
     private readonly audit: AuditService,
     private readonly cases: CasesService,
     private readonly notifications: NotificationsService,
+    private readonly ownership: OwnershipService,
   ) {}
 
   private async requireOwnAgent(actor: AuthenticatedUser): Promise<{ id: string }> {
@@ -262,13 +264,11 @@ export class AgentSosService {
   async getAlertHistory(actor: AuthenticatedUser, agentId?: string, limit = 50) {
     // A field agent may only ever see their own history; staff can filter
     // by any agent or see everything.
-    const isStaff = actor.role === Role.ADMIN || actor.role === Role.SUPER_ADMIN || actor.role === Role.CASE_MANAGER;
-    let effectiveAgentId = agentId;
-    if (!isStaff) {
-      const ownAgent = await this.prisma.agent.findUnique({ where: { userId: actor.id } });
-      if (!ownAgent) throw new ForbiddenException('Not authorised to view SOS alert history');
-      effectiveAgentId = ownAgent.id;
-    }
+    const effectiveAgentId = await this.ownership.resolveEffectiveAgentId(actor, agentId, [
+      Role.ADMIN,
+      Role.SUPER_ADMIN,
+      Role.CASE_MANAGER,
+    ]);
 
     return this.prisma.sosAlert.findMany({
       where: effectiveAgentId ? { agentId: effectiveAgentId } : {},

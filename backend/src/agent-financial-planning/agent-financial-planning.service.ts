@@ -1,7 +1,7 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { OwnershipService } from '../common/ownership/ownership.service';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Agent Financial Planning — inherited from FieldForce's financial-planning.ts
@@ -194,7 +194,10 @@ export interface FinancialPlan {
 
 @Injectable()
 export class AgentFinancialPlanningService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly ownership: OwnershipService,
+  ) {}
 
   /** Buckets this agent's EARNING wallet entries by calendar month, oldest
    * first. Only counts entries actually posted to the ledger — never
@@ -226,14 +229,7 @@ export class AgentFinancialPlanningService {
   }
 
   async getFinancialPlan(actor: AuthenticatedUser, agentId: string, monthsBack = 6): Promise<FinancialPlan> {
-    const agent = await this.prisma.agent.findUnique({ where: { id: agentId } });
-    if (!agent) throw new NotFoundException('Agent not found');
-
-    const isOps = actor.role === Role.FINANCE || actor.role === Role.ADMIN || actor.role === Role.SUPER_ADMIN;
-    const isOwnPlan = agent.userId === actor.id;
-    if (!isOps && !isOwnPlan) {
-      throw new ForbiddenException('Not authorised to view this agent’s financial plan');
-    }
+    await this.ownership.assertAgentOwnership(actor, agentId);
 
     const history = await this.getMonthlyEarningsHistory(agentId, monthsBack);
     const projection = projectEarnings(history);

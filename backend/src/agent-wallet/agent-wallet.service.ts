@@ -1,8 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { CaseStatus, Role } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { CaseStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { OwnershipService } from '../common/ownership/ownership.service';
+import { LedgerService } from './ledger.service';
 import { RecordEarningDto } from './dto/record-earning.dto';
 import { RecordPayoutDto } from './dto/record-payout.dto';
 
@@ -25,6 +27,8 @@ export class AgentWalletService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly ownership: OwnershipService,
+    private readonly ledger: LedgerService,
   ) {}
 
   private async getOrCreateWallet(agentId: string) {
@@ -55,10 +59,10 @@ export class AgentWalletService {
 
     const wallet = await this.getOrCreateWallet(assignment.agentId);
 
-    const [entry] = await this.prisma.$transaction([
-      this.prisma.walletEntry.create({
+    const entry = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.walletEntry.create({
         data: {
-          agentId: assignment.agentId,
+          agentId: assignment.agentId!,
           walletAccountId: wallet.id,
           type: 'EARNING',
           amount: dto.amount,
@@ -66,15 +70,22 @@ export class AgentWalletService {
           description: dto.description,
           actorId: actor.id,
         },
-      }),
-      this.prisma.walletAccount.update({
+      });
+      await tx.walletAccount.update({
         where: { id: wallet.id },
         data: {
           availableBalance: { increment: dto.amount },
           totalEarnings: { increment: dto.amount },
         },
-      }),
-    ]);
+      });
+      await this.ledger.postEarning(tx, {
+        walletEntryId: created.id,
+        agentId: assignment.agentId!,
+        amount: dto.amount,
+        caseId,
+      });
+      return created;
+    });
 
     await this.audit.record({
       caseId,
@@ -104,8 +115,8 @@ export class AgentWalletService {
       );
     }
 
-    const [payout] = await this.prisma.$transaction([
-      this.prisma.payout.create({
+    const payout = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.payout.create({
         data: {
           recipientType: 'FIELD_AGENT',
           agentId,
@@ -113,26 +124,27 @@ export class AgentWalletService {
           status: 'PAID',
           note: dto.note,
         },
-      }),
-      this.prisma.walletAccount.update({
+      });
+      await tx.walletAccount.update({
         where: { id: wallet!.id },
         data: {
           availableBalance: { decrement: dto.amount },
           totalPaid: { increment: dto.amount },
         },
-      }),
-    ]);
-
-    await this.prisma.walletEntry.create({
-      data: {
-        agentId,
-        walletAccountId: wallet!.id,
-        type: 'PAYOUT_DEBIT',
-        amount: dto.amount,
-        payoutId: payout.id,
-        description: dto.note,
-        actorId: actor.id,
-      },
+      });
+      await tx.walletEntry.create({
+        data: {
+          agentId,
+          walletAccountId: wallet!.id,
+          type: 'PAYOUT_DEBIT',
+          amount: dto.amount,
+          payoutId: created.id,
+          description: dto.note,
+          actorId: actor.id,
+        },
+      });
+      await this.ledger.postPayout(tx, { payoutId: created.id, agentId, amount: dto.amount });
+      return created;
     });
 
     await this.audit.record({
@@ -146,14 +158,7 @@ export class AgentWalletService {
   }
 
   async getWallet(actor: AuthenticatedUser, agentId: string) {
-    const agent = await this.prisma.agent.findUnique({ where: { id: agentId } });
-    if (!agent) throw new NotFoundException('Agent not found');
-
-    const isOps = actor.role === Role.FINANCE || actor.role === Role.ADMIN || actor.role === Role.SUPER_ADMIN;
-    const isOwnWallet = agent.userId === actor.id;
-    if (!isOps && !isOwnWallet) {
-      throw new ForbiddenException('Not authorised to view this agent’s wallet');
-    }
+    await this.ownership.assertAgentOwnership(actor, agentId);
 
     const wallet = await this.prisma.walletAccount.findUnique({ where: { agentId } });
     if (!wallet) {

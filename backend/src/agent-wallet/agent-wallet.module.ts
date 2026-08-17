@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { AgentWalletService } from './agent-wallet.service';
 import { AgentWalletController } from './agent-wallet.controller';
+import { LedgerService } from './ledger.service';
 
 @Module({
-  providers: [AgentWalletService],
+  providers: [AgentWalletService, LedgerService],
   controllers: [AgentWalletController],
-  exports: [AgentWalletService],
+  exports: [AgentWalletService, LedgerService],
 })
 export class AgentWalletModule {}
