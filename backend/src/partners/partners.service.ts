@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PartnerType } from '@prisma/client';
+import { PartnerType, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { AuthService } from '../auth/auth.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { generateUniquePartnerCode } from '../common/referral-code';
 
@@ -17,6 +18,7 @@ export class PartnersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly authService: AuthService,
   ) {}
 
   // -- Admin management -------------------------------------------------
@@ -46,6 +48,27 @@ export class PartnersService {
     const partner = await this.requirePartner(partnerId);
     const referredCustomers = await this.referredCustomerSummaries(partnerId, true);
     return { partner, referredCustomers };
+  }
+
+  /** Section 5.7 "Admin Console" — the other self-service gap the README
+   * called out alongside staff accounts: a PARTNER-role login always
+   * needs a Partner to attach to, so this creates the User (via the same
+   * setup-link flow AuthService.adminProvisionAccount uses for staff) and
+   * the PartnerContact link in one call rather than two raw Prisma writes. */
+  async createPartnerContact(actor: AuthenticatedUser, partnerId: string, email: string) {
+    await this.requirePartner(partnerId);
+
+    const { user, devToken } = await this.authService.adminProvisionAccount(actor, email, Role.PARTNER);
+    const contact = await this.prisma.partnerContact.create({ data: { partnerId, userId: user.id } });
+
+    await this.audit.record({
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'partner_contact.created',
+      metadata: { partnerId, contactId: contact.id, userId: user.id, email },
+    });
+
+    return { contact, user, ...(devToken ? { devToken } : {}) };
   }
 
   // -- Partner self-service ----------------------------------------------

@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, createAgent, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -44,20 +44,30 @@ describe('Case ON_HOLD state', () => {
   }
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, caseManager, admin, agent] = await Promise.all([
-      createCustomer('hold'),
-      createStaff('hold-cm', Role.CASE_MANAGER),
-      createStaff('hold-admin', Role.ADMIN),
-      createAgent('hold-agent'),
-    ]);
-    [customerToken, caseManagerToken, adminToken, agentToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, caseManager.email),
-      login(app, admin.email),
-      login(app, agent.email),
-    ]);
+      [customer, caseManager, admin, agent] = await Promise.all([
+        createCustomer('hold'),
+        createStaff('hold-cm', Role.CASE_MANAGER),
+        createStaff('hold-admin', Role.ADMIN),
+        createAgent('hold-agent'),
+      ]);
+      [customerToken, caseManagerToken, adminToken, agentToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, caseManager.email),
+        login(app, admin.email),
+        login(app, agent.email),
+      ]);
+
+    });
+  });
+
+  // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a
+  // wedged shared `app` before the next test runs instead of letting a
+  // mid-file connection reset poison every later test in this file.
+  beforeEach(async () => {
+    app = await ensureHealthyApp(app);
   });
 
   afterAll(async () => {

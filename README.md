@@ -721,6 +721,48 @@ binary and crashes on first real use (`prisma migrate deploy` at container boot)
 generate` earlier in the build appears to succeed. This was caught by an actual deploy attempt, not
 code review — worth knowing if this ever needs debugging again.
 
+## Deploying (Render) — frontend
+
+`https://asoju-frontend.onrender.com` exists and is reachable, but as of 15 Aug 2026 it's serving a build
+that predates this repo's current frontend entirely — plain-CSS markup (`class="site-header"`,
+`class="container"`, `class="btn"`), a `/trust` route that doesn't exist anywhere in the current code, and
+the pre-fix tagline. It isn't tracking `main`, or it's tracking a stale branch/commit, or its build is
+failing and Render is still serving an old successful build — I can't tell which from outside Render's
+dashboard, and (same as Railway above) I have no access to log into it, see its current repo/branch
+connection, or trigger a redeploy on your behalf.
+
+`render.yaml` (repo root) now defines this service as Blueprint-manageable — everything below the line is
+code already in this repo; everything above it is a one-time manual step in Render's dashboard:
+
+**If `asoju-frontend` already exists as a service (the likely case, given the live URL):**
+
+1. Open it in Render's dashboard → **Settings**.
+2. Confirm/fix **Repository** and **Branch** — this repo, `main`.
+3. Confirm/fix **Root Directory** to the repo root (not `frontend/`) — the build command below needs to
+   run from the workspace root so it can see the root `package-lock.json` and hoisted `node_modules`,
+   same reason `ci.yml`'s `frontend` job runs `npm ci` before `npm run build --workspace=frontend` rather
+   than `cd frontend && npm ci`.
+4. Set **Build Command** to `npm ci && npm run build --workspace=frontend` and **Start Command** to
+   `npm run start --workspace=frontend`, matching `render.yaml`.
+5. Under **Environment**, set `NEXT_PUBLIC_API_URL` to wherever the real backend actually lives (Railway,
+   per the section above, once that's set up — or leave it pointed at whatever backend is currently live
+   if one already is). Without this the frontend builds and serves fine but every API call fails.
+6. **Manual Deploy** → **Deploy latest commit** to confirm the fix, then push to `main` to verify
+   auto-deploy is actually wired going forward.
+7. On whichever backend `NEXT_PUBLIC_API_URL` points to, if that backend sets `CORS_ORIGIN` (a
+   comma-separated allowlist — `backend/src/main.ts`; unset means allow-any-origin, so only relevant once
+   it's actually configured), make sure it includes this service's actual `*.onrender.com` domain (or
+   your custom domain).
+
+**If you'd rather adopt the Blueprint fresh** (Render's "New → Blueprint", pointed at this repo) instead
+of reconfiguring the existing service by hand, `render.yaml` above will provision it with the same
+settings — you'd then either delete the old manually-configured service or point its custom domain
+(if any) at the new Blueprint-managed one.
+
+Either path, this is unverified the same way the Railway section above is — built from Render's
+documented Blueprint spec, not confirmed against your actual `asoju-frontend` service's current
+configuration, since I can't see it.
+
 ## Running locally
 
 ### 1. Infrastructure

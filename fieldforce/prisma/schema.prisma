@@ -1,0 +1,1566 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ASOJU FieldForce — Agent Portal Domain Model v4.0
+// Aligned with Domain Model & Database Schema API Contract Specification v1.0
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Agent Profile ─────────────────────────────────────────────────────────
+// Authoritative for FieldForce agents
+
+model Agent {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  phone           String   @unique
+  email           String?  @unique
+  password        String?
+  displayName     String
+  firstName       String
+  lastName        String
+  avatarUrl       String?
+
+  // Agent Lifecycle State Machine
+  status              String @default("APPLIED")
+  verificationLevel   String @default("APPLICANT")
+
+  // Tier system: Starter → Verified → Pro → Elite
+  tierId          String?
+  tier            AgentTier?            @relation(fields: [tierId], references: [id])
+
+  // KYC / Verification
+  idType          String?
+  idDocumentUrl   String?
+  selfieUrl       String?
+
+  // Bank Account (Paystack payout)
+  bankCode        String?
+  accountNumber   String?
+  accountName     String?
+
+  // Device metadata
+  deviceBrand     String?
+  deviceModel      String?
+  deviceOS        String?
+
+  // Performance metrics
+  totalMissionsCompleted Int    @default(0)
+  // Monetary fields: Int (minor-unit kobo for production; prototype uses Naira integers)
+  totalEarnings          Int    @default(0)
+  currentBalance         Int    @default(0)
+  pendingBalance         Int    @default(0)
+  qcClearedBalance       Int    @default(0)
+  rating                 Float  @default(0)
+  ratingCount            Int    @default(0)
+  reliabilityScore       Float  @default(0)
+  completionRate         Float  @default(0)
+
+  // Timestamps
+  lastActiveAt    DateTime?
+  activatedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  lgas                AgentLga[]
+  deviceSessions      DeviceSession[]
+  capabilities        AgentCapability[]
+  certifications      AgentCertification[]
+  tierHistory         AgentTierHistory[]
+  assignments         MissionAssignment[]
+  missions            Mission[]
+  gpsChecks           GpsCheck[]
+  walletAccount       WalletAccount?
+  walletEntries       WalletEntry[]
+  payouts             Payout[]
+  evidences           EvidenceItem[]
+  expenses            Expense[]
+  supportMessages     SupportMessage[]
+  offlineQueueItems   OfflineQueue[]
+  auditEvents         AuditEvent[]
+  trustScore          AgentTrustScore?
+  sosAlerts           SosAlert[]
+  liveLocations       LiveLocation[]
+
+  @@index([status])
+  @@index([verificationLevel])
+  @@index([tierId])
+}
+
+// ─── Agent Tier ────────────────────────────────────────────────────────────
+
+model AgentTier {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  level       Int      @unique
+  description String?
+  minScore    Float?
+  benefits    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  agents          Agent[]
+  tierHistory     AgentTierHistory[] @relation("AgentTierHistory")
+}
+
+// ─── Agent Tier History ─────────────────────────────────────────────────────
+
+model AgentTierHistory {
+  id              String   @id @default(cuid())
+  agentId         String
+  fromTierId      String?
+  toTierId        String?
+  reason          String?
+  changedAt       DateTime @default(now())
+
+  agent           Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tier            AgentTier? @relation("AgentTierHistory", fields: [toTierId], references: [id])
+
+  @@index([agentId])
+}
+
+// ─── Capability Catalogue ────────────────────────────────────────────────────
+
+model Capability {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  category    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  agentCapabilities AgentCapability[]
+  serviceRules       ServiceCapabilityRule[]
+}
+
+// ─── Agent Capability ──────────────────────────────────────────────────────
+
+model AgentCapability {
+  id           String    @id @default(cuid())
+  agentId      String
+  capabilityId String
+  status       String    @default("ACTIVE")
+  assessedAt   DateTime?
+  expiresAt    DateTime?
+
+  agent        Agent      @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  capability   Capability @relation(fields: [capabilityId], references: [id])
+
+  @@unique([agentId, capabilityId])
+  @@index([agentId])
+}
+
+// ─── Certification ──────────────────────────────────────────────────────────
+
+model Certification {
+  id                 String   @id @default(cuid())
+  certificationType  String
+  issuedAt           DateTime @default(now())
+  expiresAt          DateTime?
+  status             String   @default("ACTIVE")
+  evidenceRef        String?
+  issuer             String?
+  version            String?
+
+  agentCertifications AgentCertification[]
+}
+
+// ─── Agent Certification ───────────────────────────────────────────────────
+
+model AgentCertification {
+  id               String  @id @default(cuid())
+  agentId          String
+  certificationId  String
+  status           String  @default("ACTIVE")
+  certifiedAt      DateTime @default(now())
+
+  agent            Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  certification    Certification @relation(fields: [certificationId], references: [id])
+
+  @@unique([agentId, certificationId])
+  @@index([agentId])
+}
+
+// ─── Agent LGA Coverage ─────────────────────────────────────────────────────
+
+model AgentLga {
+  id      String @id @default(cuid())
+  agentId String
+  state   String
+  lga     String
+  primary Boolean @default(false)
+
+  agent   Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, state, lga])
+  @@index([agentId])
+}
+
+// ─── Device Sessions ────────────────────────────────────────────────────────
+
+model DeviceSession {
+  id         String    @id @default(cuid())
+  agentId    String
+  deviceKey  String
+  userAgent  String?
+  ip         String?
+  gpsLat     Float?
+  gpsLng     Float?
+  trustedAt  DateTime? @default(now())
+  lastSeenAt DateTime?
+  status     String   @default("ACTIVE")
+
+  agent      Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+
+  @@unique([agentId, deviceKey])
+  @@index([agentId])
+}
+
+// ─── Service Definition (Versioned) ─────────────────────────────────────────
+
+model ServiceDefinition {
+  id                   String   @id @default(cuid())
+  serviceCode          String
+  version              String   @default("1.0")
+  name                 String
+  scope                String?
+  exclusions           String?
+  riskLevel            String   @default("LOW")
+  durationEstimate     String?
+  status               String   @default("ACTIVE")
+  checklistTemplate    String?
+  evidenceRequirements String?
+  safetyLevel          String?
+  createdAt            DateTime @default(now())
+
+  capabilityRules ServiceCapabilityRule[]
+
+  @@unique([serviceCode, version])
+  @@index([serviceCode])
+  @@index([status])
+}
+
+// ─── Service Capability Rule ────────────────────────────────────────────────
+
+model ServiceCapabilityRule {
+  id               String @id @default(cuid())
+  serviceDefId     String
+  capabilityId     String
+  required         Boolean @default(true)
+  minTierLevel     Int?
+
+  serviceDef       ServiceDefinition @relation(fields: [serviceDefId], references: [id])
+  capability       Capability       @relation(fields: [capabilityId], references: [id])
+
+  @@unique([serviceDefId, capabilityId])
+}
+
+// ─── Mission (Agent's Accepted/Assigned Work) ─────────────────────────────
+// State machine: ACCEPTED → EN_ROUTE → ON_SITE → EXECUTING → SUBMITTING →
+//   SUBMITTED → QC_REVIEW → COMPLETED
+// Alternate: ESCALATED, PAUSED, REASSIGNED, REWORK, CANCELLED, FAILED
+
+model Mission {
+  id                  String   @id @default(cuid())
+  caseId              String   @unique
+  agentId             String
+  organizationId      String?
+
+  serviceCode         String
+  serviceVersion      String?  @default("1.0")
+  title               String
+  description         String?
+
+  state               String
+  lga                 String
+  address             String?
+
+  scopeSnapshot       String?
+  locationSnapshot    String?
+  slaSnapshot         String?
+  checklistTemplate   String?
+
+  payoutAmount        Int
+  asojuFee            Int    @default(0)
+  netPayout           Int
+
+  slaDeadline         DateTime
+  slaAssignmentTarget DateTime?
+  slaArrivalTarget    DateTime?
+  slaSubmissionTarget DateTime?
+
+  priority            String   @default("NORMAL")
+  riskLevel           String   @default("LOW")
+
+  beneficiaryName     String?
+  beneficiaryPhone    String?
+
+  workflowState       String   @default("ACCEPTED")
+  checklistProgress   Int      @default(0)
+  checklistTotal      Int      @default(0)
+  evidenceCount       Int      @default(0)
+
+  escalated           Boolean  @default(false)
+  escalationReason    String?
+  escalationType      String?
+  escalationSeverity  String?
+  escalatedAt         DateTime?
+
+  assignedAt          DateTime @default(now())
+  acceptedAt          DateTime?
+  completedAt         DateTime?
+  submittedAt         DateTime?
+  syncedAt            DateTime @default(now())
+
+  qcReviewCount       Int            @default(0)
+
+  agent               Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  evidences           EvidenceItem[]
+  qcReviews           QcReview[]
+  externalMappings    ExternalMissionMapping[]
+  serviceReport       ServiceReport?
+  liveLocations       LiveLocation[]
+
+  @@index([agentId])
+  @@index([workflowState])
+  @@index([slaDeadline])
+  @@index([priority])
+}
+
+// ─── Mission Assignment (Offer/Accept tracking) ─────────────────────────
+
+model MissionAssignment {
+  id                    String   @id @default(cuid())
+  missionId             String   @unique
+  agentId               String
+  state                 String   @default("OFFERED")
+  eligibilitySnapshot   String?
+  rankSnapshot          String?
+  offeredAt             DateTime @default(now())
+  respondedAt           DateTime?
+  acceptedAt            DateTime?
+  rejectionReason       String?
+
+  agent                 Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([state])
+}
+
+// ─── GPS Check (Physical Presence Verification) ─────────────────────────
+
+model GpsCheck {
+  id                 String   @id @default(cuid())
+  missionId          String
+  agentId            String
+  latitude           Float
+  longitude          Float
+  accuracy           Float?
+  capturedAt         DateTime @default(now())
+  receivedAt         DateTime @default(now())
+  targetLat          Float?
+  targetLng          Float?
+  geofenceRule       String?
+  distanceFromTarget Float?
+  result             String
+  exceptionCode      String?
+  exceptionReason    String?
+
+  agent              Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([missionId])
+  @@index([agentId])
+  @@index([result])
+}
+
+// ─── Evidence Item (Metadata & Provenance) ─────────────────────────────────
+// P0.5: Secure evidence pipeline with chain-of-custody tracking.
+// Security invariants:
+//   - Server recomputes content hash; client-provided hash is a claim only.
+//   - Object storage is private; signed URLs required for read access.
+//   - Original artifacts are never overwritten.
+//   - Evidence cannot be reassigned by changing IDs.
+
+model EvidenceItem {
+  id               String   @id @default(cuid())
+  missionId        String
+  agentId          String
+  checklistItemId  String?
+
+  // P0.5 Content Integrity
+  clientHash       String?              // Client-provided SHA-256 claim
+  serverHash       String?              // Server-computed SHA-256 (authoritative)
+  hashMatched      Boolean?             // true = verified, false = mismatch/quarantined
+  storageProvider  String?              // S3, GCS, LOCAL (for production routing)
+  storageKey       String?              // Server-assigned object key (immutable)
+  storageBucket    String?              // Bucket/container name
+
+  // Capture Metadata
+  capturedAt       DateTime?
+  receivedAt       DateTime @default(now())
+  captureLat       Float?
+  captureLng       Float?
+  captureDeviceId  String?              // Device session that captured
+  mimeType         String?
+  size             Int?
+
+  // P0.5 Custody State
+  status           String   @default("CAPTURED") // CAPTURED, UPLOADED, VERIFIED, QUARANTINED, QC_REVIEWED, ACCEPTED, REJECTED, ARCHIVED
+  version          Int      @default(1)
+  idempotencyKey   String?              // For offline retry dedup
+  exifStripped     Boolean  @default(false)
+  notes            String?
+  rejectionReason  String?
+
+  agent            Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  mission          Mission  @relation(fields: [missionId], references: [id])
+  custodyEvents    EvidenceCustodyEvent[]
+
+  @@index([missionId])
+  @@index([agentId])
+  @@index([status])
+  @@index([serverHash])
+  @@index([idempotencyKey])
+}
+
+// ─── Evidence Custody Event (Immutable Chain of Custody) ────────────────────
+// Every state transition on an evidence item is recorded.
+// QC/rework produces NEW events rather than deleting history.
+
+model EvidenceCustodyEvent {
+  id               String   @id @default(cuid())
+  evidenceId       String
+  eventType        String              // CAPTURED, UPLOADED, VERIFIED, QUARANTINED, QC_REVIEWED, ACCEPTED, REJECTED, ARCHIVED, DOWNLOADED, ACCESSED
+  actorType        String              // AGENT, SYSTEM, ADMIN, QC_REVIEWER
+  actorId          String?
+  actorName        String?
+  previousStatus   String?
+  newStatus       String?
+  details          String?             // JSON: additional context
+  ipAddress        String?             // For audit
+  createdAt        DateTime @default(now())
+
+  evidence         EvidenceItem @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceId])
+  @@index([eventType])
+  @@index([actorType])
+  @@index([createdAt])
+}
+
+// ─── QC Review (Mission Quality Control) ─────────────────────────────────
+// Tracks QC review cycles per mission — preserves rework history
+
+model QcReview {
+  id                String   @id @default(cuid())
+  missionId         String
+  caseId            String?
+  cycleNumber       Int      @default(1)
+  reviewerId        String?
+  reviewerName      String?
+  state             String   @default("PENDING") // PENDING, IN_REVIEW, APPROVED, REJECTED
+  rejectionReason   String?
+  reworkInstructions String?
+  gateResults       String?  // JSON: CompletionGate evaluation results
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime @default(now())
+
+  mission           Mission? @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@index([missionId])
+  @@index([state])
+}
+
+// ─── Wallet Account ───────────────────────────────────────────────────────
+
+model WalletAccount {
+  id               String   @id @default(cuid())
+  agentId          String   @unique
+  pendingBalance   Int    @default(0)
+  qcClearedBalance Int    @default(0)
+  availableBalance Int    @default(0)
+  totalEarnings    Int    @default(0)
+  totalPaid        Int    @default(0)
+  updatedAt        DateTime @updatedAt
+  createdAt        DateTime @default(now())
+
+  agent            Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  entries          WalletEntry[]
+}
+
+// ─── Wallet Entry (Immutable Ledger) ──────────────────────────────────────
+
+model WalletEntry {
+  id               String   @id @default(cuid())
+  agentId          String
+  walletAccountId  String
+  type             String
+  amount           Int
+  description      String?
+  referenceId      String?
+  metadata         String?
+  createdAt        DateTime @default(now())
+
+  agent            Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  wallet           WalletAccount @relation(fields: [walletAccountId], references: [id])
+
+  @@index([agentId])
+  @@index([walletAccountId])
+  @@index([type])
+}
+
+// ─── Payout ────────────────────────────────────────────────────────────────
+// P0.8: Enhanced with Paystack integration, idempotency, and journal linkage
+// Lifecycle: REQUESTED → PROCESSING → SUCCESS | FAILED → REQUESTED | SUCCESS → REVERSED
+
+model Payout {
+  id                String   @id @default(cuid())
+  agentId           String
+  amount            Int
+  asojuFee          Int    @default(0)
+  netAmount         Int
+  status            String   @default("REQUESTED") // REQUESTED, PROCESSING, SUCCESS, FAILED, REVERSED
+
+  // Paystack integration
+  paystackReference String?   // Paystack transfer reference
+  paystackStatus    String?   // Paystack-side status (pending, success, failed, reversed)
+  providerReference String?   // Idempotent provider reference (ASOJU_PAYOUT_<id>)
+  idempotencyKey    String?   // Client/idempotent request key to prevent duplicates
+
+  // Bank details snapshot
+  bankCode          String?
+  accountNumber     String?
+  accountName       String?
+
+  // Mission linkage
+  missionId         String?
+  missionTitle      String?
+
+  // Journal linkage
+  journalEntryId    String?   @unique  // Links to the debit journal entry (1:1)
+
+  // Failure & reconciliation
+  failureReason     String?
+  failureCode      String?   // Paystack error code
+  webhookReceivedAt DateTime?
+  reconciledAt      DateTime?
+  reconciliationNote String?
+
+  // Timestamps
+  requestedAt       DateTime @default(now())
+  processingStartedAt DateTime?
+  paidAt            DateTime?
+  failedAt          DateTime?
+  reversedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @default(now())
+
+  agent             Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  journalEntry      JournalEntry? @relation(fields: [journalEntryId], references: [id])
+
+  @@unique([idempotencyKey])
+  @@index([agentId])
+  @@index([status])
+  @@index([providerReference])
+  @@index([paystackReference])
+}
+
+// ─── Expense ─────────────────────────────────────────────────────────────
+
+model Expense {
+  id            String   @id @default(cuid())
+  agentId       String
+  missionId     String?
+  amount        Int
+  description   String?
+  receiptUrl    String?
+  status        String   @default("PENDING")
+  approvedBy    String?
+  approvedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  agent         Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([status])
+}
+
+// ─── Offline Sync Queue (P0.6) ─────────────────────────────────────────────
+// Lifecycle: LOCAL → QUEUED → UPLOADING → SYNCED
+// Failures:   UPLOADING → FAILED → retry with exponential backoff
+// Conflicts:  UPLOADING → CONFLICT → resource-specific resolution
+
+model OfflineQueue {
+  id               String   @id @default(cuid())
+  agentId          String
+  missionId        String?
+  operationType    String              // EVIDENCE_UPLOAD, GPS_CHECK, CHECKLIST_UPDATE, STATE_TRANSITION, etc.
+  resourceType     String?             // Mission, Evidence, GpsCheck, Checklist
+  resourceId       String?             // ID of the resource being mutated
+  payload          String              // JSON: full mutation payload
+  idempotencyKey   String   @unique
+  clientVersion    Int?                // Client-side version for conflict detection
+  status           String   @default("QUEUED") // QUEUED, UPLOADING, SYNCED, FAILED, CONFLICT
+  retryCount       Int      @default(0)
+  maxRetries       Int      @default(5)
+  nextRetryAt      DateTime?            // Exponential backoff timestamp
+  createdAt        DateTime @default(now())
+  syncedAt         DateTime?
+  error            String?
+  conflictDetails  String?             // JSON: server state that caused conflict
+  resolvedBy       String?             // How conflict was resolved
+  resolvedAt       DateTime?
+
+  agent            Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([status])
+  @@index([nextRetryAt])
+  @@index([resourceType, resourceId])
+}
+
+// ─── Support Messages ─────────────────────────────────────────────────────
+
+model SupportMessage {
+  id              String   @id @default(cuid())
+  agentId         String
+  missionId       String?
+  sender          String
+  message         String
+  attachmentUrl   String?
+  attachmentType  String?
+  read            Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, missionId])
+}
+
+// ─── Audit Event (Append-Only) ──────────────────────────────────────────
+
+model AuditEvent {
+  id              String   @id @default(cuid())
+  actorType       String
+  actorId         String?
+  action          String
+  entityType      String?
+  entityId        String?
+  metadata        String?
+  correlationId   String?
+  createdAt       DateTime @default(now())
+
+  agent           Agent?   @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([actorType, actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// ─── Cached Gig / Mission Opportunities ──────────────────────────────────
+
+model CachedGig {
+  id               String   @id @default(cuid())
+  caseId           String   @unique
+  agentId          String?
+  serviceCode      String
+  title            String
+  description      String?
+  state            String
+  lga              String
+  address          String?
+  estimatedPayout  Int
+  slaDeadline      DateTime
+  priority         String   @default("NORMAL")
+  beneficiaryName  String?
+  beneficiaryPhone String?
+  caseScope        String?
+  status           String   @default("AVAILABLE")
+  claimedBy        String?
+  claimedAt        DateTime?
+  syncedAt         DateTime @default(now())
+  expiresAt        DateTime?
+
+  @@index([status])
+  @@index([priority])
+  @@index([slaDeadline])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ASOJU Admin & Customer Portal — Domain Models
+// Aligned with Admin & External Customer Dashboard Technical Engineering Spec v1.0
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Admin User (Internal Operations Team) ────────────────────────────────
+
+model AdminUser {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  password        String
+  displayName     String
+  role            String   @default("OPERATIONS") // SUPER_ADMIN, OPERATIONS, FINANCE, QC, SUPPORT, ANALYST
+  avatarUrl       String?
+  isActive        Boolean  @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  auditEvents     AdminAuditEvent[]
+
+  @@index([role])
+  @@index([isActive])
+}
+
+// ─── Customer (Organization / Diaspora Client) ───────────────────────────
+
+model Customer {
+  id              String   @id @default(cuid())
+  name            String
+  email           String   @unique
+  phone           String?
+  address         String?
+  city            String?
+  state           String?
+  country         String   @default("Nigeria")
+  logoUrl         String?
+  type            String   @default("INDIVIDUAL") // INDIVIDUAL, CORPORATE, GOVERNMENT
+  status          String   @default("ACTIVE")
+  primaryContact  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  members         CustomerMember[]
+  serviceRequests ServiceRequest[]
+  cases           Case[]
+  payments        CustomerPayment[]
+  carePlans       CarePlan[]
+
+  @@index([status])
+  @@index([type])
+}
+
+// ─── Customer Member (User within Customer Org) ──────────────────────────
+
+model CustomerMember {
+  id              String   @id @default(cuid())
+  customerId      String
+  userId          String   @unique
+  email           String   @unique
+  password        String
+  displayName     String
+  role            String   @default("MEMBER") // OWNER, MEMBER
+  phone           String?
+  avatarUrl       String?
+  isActive        Boolean  @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  serviceRequests ServiceRequest[]
+  caseMessages    CaseMessage[]
+
+  @@unique([customerId, email])
+  @@index([customerId])
+  @@index([role])
+}
+
+// ─── Service Request (Customer's Service Order) ────────────────────────────
+
+model ServiceRequest {
+  id              String   @id @default(cuid())
+  customerId      String
+  memberId        String
+  serviceCode     String
+  title           String
+  description     String?
+  locationAddress String?
+  locationLga     String?
+  locationState   String?
+  locationLat     Float?
+  locationLng     Float?
+  priority        String   @default("NORMAL")
+  urgency         String   @default("STANDARD") // STANDARD, URGENT, CRITICAL
+  attachments     String?
+  specialInstructions String?
+  status          String   @default("DRAFT") // DRAFT, SUBMITTED, VALIDATED, QUOTED, ACCEPTED, REJECTED, CANCELLED
+  validatedAt     DateTime?
+  quotedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  member          CustomerMember @relation(fields: [memberId], references: [id])
+  case            Case?
+
+  @@index([customerId])
+  @@index([memberId])
+  @@index([status])
+  @@index([serviceCode])
+}
+
+// ─── Case (Full Execution Case) ────────────────────────────────────────────
+// Links customer request → FieldForce mission execution
+
+model Case {
+  id                      String   @id @default(cuid())
+  caseNumber              String   @unique
+  customerId              String
+  serviceRequestId        String   @unique
+  serviceCode             String
+  title                   String
+  description             String?
+  priority                String   @default("NORMAL")
+  status                  String   @default("OPEN") // OPEN, QUOTED, PAYMENT_PENDING, ACCEPTED, IN_PROGRESS, UNDER_REVIEW, COMPLETED, CANCELLED, FAILED
+
+  // Location
+  address                 String?
+  lga                     String?
+  state                   String?
+
+  // Commercial
+  quoteAmount             Int      @default(0)
+  agentPayout             Int      @default(0)
+  asojuFee                Int      @default(0)
+  paymentStatus           String   @default("PENDING") // PENDING, PAID, PARTIAL, REFUNDED
+  paymentMethod           String?
+
+  // SLA
+  slaDeadline             DateTime?
+  slaStartedAt            DateTime?
+  slaCompletedAt          DateTime?
+
+  // Field Execution (controlled projection from FieldForce)
+  missionId               String?
+  missionState            String?
+  assignedAgentName       String?
+  assignedAt              DateTime?
+  agentCheckedIn          Boolean  @default(false)
+  agentOnSite             Boolean  @default(false)
+  executingSince          DateTime?
+  submittedAt             DateTime?
+  qcStatus                String?   // PENDING, APPROVED, REJECTED
+
+  // Beneficiary
+  beneficiaryName         String?
+  beneficiaryPhone        String?
+
+  // Resolution
+  completedAt             DateTime?
+  cancelledAt             DateTime?
+  cancelReason            String?
+
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  customer                Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  serviceRequest          ServiceRequest @relation(fields: [serviceRequestId], references: [id])
+  timeline                CaseTimelineEvent[]
+  quotes                  Quote[]
+  payments                CustomerPayment[]
+  messages                CaseMessage[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([priority])
+  @@index([serviceCode])
+  @@index([paymentStatus])
+  @@index([slaDeadline])
+}
+
+// ─── Case Timeline Event (Immutable Customer-Facing Events) ───────────────
+
+model CaseTimelineEvent {
+  id              String   @id @default(cuid())
+  caseId          String
+  eventType       String   // REQUEST_CREATED, QUOTE_GENERATED, QUOTE_ACCEPTED, PAYMENT_RECEIVED, MISSION_ASSIGNED, AGENT_EN_ROUTE, AGENT_ON_SITE, EXECUTING, SUBMITTED, UNDER_REVIEW, QC_APPROVED, COMPLETED, CANCELLED
+  title           String
+  description     String?
+  actorType       String   // CUSTOMER, SYSTEM, ADMIN, AGENT
+  actorName       String?
+  metadata        String?
+  isCustomerVisible Boolean @default(true)
+  createdAt       DateTime @default(now())
+
+  case            Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+// ─── Quote (for a Case) ───────────────────────────────────────────────────
+
+model Quote {
+  id              String   @id @default(cuid())
+  caseId          String
+  amount          Int
+  agentPayout     Int      @default(0)
+  asojuFee        Int      @default(0)
+  breakdown       String?
+  validityDays    Int      @default(7)
+  status          String   @default("PENDING") // PENDING, ACCEPTED, REJECTED, EXPIRED
+  expiresAt       DateTime?
+  acceptedAt      DateTime?
+  rejectedAt      DateTime?
+  createdAt       DateTime @default(now())
+
+  case            Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([status])
+}
+
+// ─── Customer Payment ─────────────────────────────────────────────────────
+
+model CustomerPayment {
+  id              String   @id @default(cuid())
+  customerId      String
+  caseId          String?
+  amount          Int
+  method          String   // PAYSTACK, BANK_TRANSFER, WALLET
+  reference       String?
+  status          String   @default("PENDING") // PENDING, VERIFIED, FAILED, REFUNDED
+  paystackRef     String?
+  paidAt          DateTime?
+  verifiedAt      DateTime?
+  metadata        String?
+  createdAt       DateTime @default(now())
+
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  case            Case?    @relation(fields: [caseId], references: [id])
+
+  @@index([customerId])
+  @@index([caseId])
+  @@index([status])
+}
+
+// ─── Case Message (Customer ↔ Support Communication) ─────────────────────
+
+model CaseMessage {
+  id              String   @id @default(cuid())
+  caseId          String
+  senderType      String   // CUSTOMER, SUPPORT
+  senderId        String?
+  senderName      String?
+  message         String
+  attachmentUrl   String?
+  attachmentType  String?
+  read            Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  case            Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  member          CustomerMember? @relation(fields: [senderId], references: [id])
+
+  @@index([caseId])
+  @@index([senderType])
+}
+
+// ─── Admin Audit Event (Internal Operations Audit) ─────────────────────────
+
+model AdminAuditEvent {
+  id              String   @id @default(cuid())
+  adminUserId     String?
+  actorType       String   // ADMIN, SYSTEM
+  action          String
+  entityType      String?
+  entityId        String?
+  metadata        String?
+  correlationId   String?
+  createdAt       DateTime @default(now())
+
+  adminUser       AdminUser? @relation(fields: [adminUserId], references: [id])
+
+  @@index([adminUserId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P0.8 FINANCE — Double-Entry Ledger & Paystack Integration
+// Core invariant: Every journal entry must balance (total debits = total credits)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Ledger Account (Chart of Accounts) ────────────────────────────────
+// Canonical account definitions for the double-entry system
+
+model LedgerAccount {
+  id          String   @id @default(cuid())
+  code        String   @unique  // e.g. "AGENT_EARNINGS", "AGENT_AVAILABLE", "ASOJU_FEES", "PAYOUT_ESCROW", "PAYOUT_PAYABLE"
+  name        String             // Human-readable name
+  type        String             // ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE
+  category    String             // AGENT, PLATFORM, ESCROW, PAYOUT
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  lines       JournalLine[]
+
+  @@index([type])
+  @@index([category])
+  @@index([isActive])
+}
+
+// ─── Journal Entry (Immutable Double-Entry Header) ─────────────────────
+// Every financial mutation must be recorded as a balanced journal entry
+// Debits and credits must sum to zero (conservation of value)
+
+model JournalEntry {
+  id              String   @id @default(cuid())
+  idempotencyKey  String   @unique     // Prevents duplicate postings
+  entityType      String              // Mission, Payout, Payment, Adjustment
+  entityId        String?             // ID of the triggering entity
+  agentId         String?             // Agent involved (if applicable)
+  description     String?
+  status          String   @default("POSTED") // POSTED, REVERSED
+  reversalOfId    String?             // If this reverses another entry
+  metadata        String?             // JSON: additional context
+  postedAt        DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  lines           JournalLine[]
+  payout          Payout?
+
+  @@index([entityType, entityId])
+  @@index([agentId])
+  @@index([idempotencyKey])
+  @@index([status])
+}
+
+// ─── Journal Line (Debit/Credit Line) ───────────────────────────────────
+// Each line belongs to a journal entry and represents a single debit or credit
+
+model JournalLine {
+  id              String   @id @default(cuid())
+  journalEntryId  String
+  accountId       String
+  direction       String             // DEBIT, CREDIT
+  amount          Int                // Always positive; direction determines sign
+  description     String?
+  createdAt       DateTime @default(now())
+
+  journalEntry    JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account         LedgerAccount @relation(fields: [accountId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+// ─── Finance Exception (Reconciliation & Audit) ────────────────────────
+// Records financial anomalies: duplicate webhooks, amount mismatches,
+// failed reconciliations, and unbalanced attempts
+
+model FinanceException {
+  id              String   @id @default(cuid())
+  type            String             // DUPLICATE_WEBHOOK, AMOUNT_MISMATCH, STATUS_MISMATCH, UNBALANCED_ENTRY, PAYOUT_FAILURE, RECONCILIATION_REQUIRED
+  severity        String   @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  entityType      String?            // Payout, Payment, JournalEntry
+  entityId        String?
+  description     String?
+  metadata        String?             // JSON: full context for investigation
+  resolvedAt      DateTime?
+  resolvedBy      String?            // Admin who resolved
+  resolution      String?
+  createdAt       DateTime @default(now())
+
+  @@index([type])
+  @@index([severity])
+  @@index([entityType, entityId])
+  @@index([resolvedAt])
+}
+
+// ─── Notification (Customer & Admin) ───────────────────────────────────────
+
+model Notification {
+  id              String   @id @default(cuid())
+  recipientType   String   // ADMIN, CUSTOMER
+  recipientId     String
+  type            String
+  title           String
+  message         String?
+  entityType      String?
+  entityId        String?
+  read            Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([recipientType, recipientId])
+  @@index([read])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P0.10 PRODUCTION RELIABILITY — Transactional Outbox & Idempotency
+// Core invariant: Domain mutations and outbound events commit in the same transaction.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Outbox Message (Transactional Event Publication) ──────────────────
+// Every domain event that requires external delivery (webhooks, integrations,
+// notifications) is first persisted here in the same DB transaction as the
+// domain mutation. A background worker then claims, delivers, and marks these.
+// Lifecycle: PENDING → PROCESSING → DELIVERED | FAILED → DEAD_LETTER
+
+model OutboxMessage {
+  id              String   @id @default(cuid())
+  aggregateType   String                  // Mission, Case, Payout, JournalEntry, etc.
+  aggregateId     String                  // ID of the aggregate that generated this event
+  eventType       String                  // MISSION_CREATED, MISSION_TRANSITIONED, PAYOUT_REQUESTED, etc.
+  eventVersion    String   @default("1")  // Event schema version for evolution
+  payload         String                  // JSON: full event payload
+  source          String   @default("FIELDFORCE") // Origin system
+
+  // Delivery tracking
+  status          String   @default("PENDING") // PENDING, PROCESSING, DELIVERED, FAILED, DEAD_LETTER
+  attempts        Int      @default(0)
+  maxAttempts     Int      @default(5)
+  nextRetryAt     DateTime?                // Exponential backoff timestamp
+  lastError       String?                  // Most recent error message
+  lastAttemptAt   DateTime?
+
+  // Target routing
+  targetUrl       String?                 // Webhook URL or integration endpoint
+  targetType      String   @default("WEBHOOK") // WEBHOOK, INTERNAL, INTEGRATION
+
+  // Deduplication
+  idempotencyKey  String   @unique         // Prevents duplicate event publication
+
+  // Correlation
+  correlationId   String?                 // Links to request/trace context
+
+  // Timestamps
+  claimedAt       DateTime?
+  deliveredAt     DateTime?
+  deadLetteredAt  DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([status])
+  @@index([aggregateType, aggregateId])
+  @@index([eventType])
+  @@index([nextRetryAt])  // Worker polls by this
+  @@index([idempotencyKey])
+  @@index([source])
+}
+
+// ─── Idempotency Record (Duplicate Request Prevention) ─────────────────
+// Every mutation endpoint (payout, mission transition, integration call)
+// must check/create an idempotency record BEFORE processing.
+// Consumer identity = source + idempotencyKey (unique constraint).
+
+model IdempotencyRecord {
+  id              String   @id @default(cuid())
+  idempotencyKey  String   @unique         // Client-provided key (header or body)
+  source          String                  // API, INTEGRATION, WEBHOOK
+  entityType      String?                 // What was created/modified
+  entityId        String?                 // ID of the created/modified resource
+  requestHash     String?                 // Hash of request body for exact-match check
+  responseCode    Int?                    // HTTP status code of the original response
+  responsePayload String?                 // Cached response body for idempotent replay
+  createdAt       DateTime @default(now())
+
+  @@index([source])
+  @@index([entityType, entityId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P0.9 INTEGRATION GATEWAY — External Client Management & Mission Mapping
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Integration Client (External System Registry) ────────────────────────
+// Each external system (e.g., ASOJU) has credentials, scopes, and rate limits.
+
+model IntegrationClient {
+  id              String   @id @default(cuid())
+  name            String   @unique          // e.g. "ASOJU"
+  clientId        String   @unique          // Public identifier
+  clientSecret    String                    // HMAC signing secret (hashed in production)
+  scopes          String   @default("missions:read") // Comma-separated allowed scopes
+  webhookUrl      String?                   // For event delivery
+  isActive        Boolean  @default(true)
+  rateLimitPerMin Int      @default(60)
+  lastRequestAt   DateTime?
+  lastRequestIp   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  missionMappings ExternalMissionMapping[]
+}
+
+// ─── External Mission Mapping (P0.9) ─────────────────────────────────────
+// Maps external mission IDs to FieldForce mission IDs per client.
+// Uniqueness: (clientId + externalId) must be unique per client.
+
+model ExternalMissionMapping {
+  id              String   @id @default(cuid())
+  clientId        String
+  externalId      String                    // External system's mission ID
+  missionId       String                    // FieldForce internal mission ID
+  externalStatus  String?                   // External system's status snapshot
+  syncedAt        DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  client          IntegrationClient @relation(fields: [clientId], references: [id])
+  mission         Mission? @relation(fields: [missionId], references: [id])
+
+  @@unique([clientId, externalId])
+  @@index([missionId])
+  @@index([clientId, externalStatus])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LAUNCH DIFFERENTIATOR — Agent Trust Score & Reputation
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model AgentTrustScore {
+  id              String   @id @default(cuid())
+  agentId         String   @unique
+
+  // Composite score components (0-100 each)
+  completionScore   Float @default(0)    // Mission completion rate (30%)
+  gpsComplianceScore Float @default(0)    // Geofence adherence (20%)
+  evidenceScore     Float @default(0)    // Evidence quality/on-time (20%)
+  customerRating     Float @default(0)    // Customer satisfaction (20%)
+  responseScore     Float @default(0)    // Acceptance speed + response time (10%)
+
+  // Composite score (weighted)
+  compositeScore     Float @default(0)    // 0-100
+
+  // Trust tier based on composite score
+  trustTier          String @default("NEW")  // NEW → BRONZE → SILVER → GOLD → PLATINUM
+  trustBadge         String?                    // Emoji badge identifier
+
+  // Volume metrics
+  totalMissions      Int    @default(0)
+  completedMissions  Int    @default(0)
+  failedMissions     Int    @default(0)
+  avgResponseMin     Float? // Minutes from offer to accept
+
+  // Trend
+  previousScore      Float?
+  scoreTrend         String @default("STABLE")  // IMPROVING, STABLE, DECLINING
+
+  calculatedAt       DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  agent              Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([compositeScore])
+  @@index([trustTier])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LAUNCH DIFFERENTIATOR — Recurring Care Plans
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model CarePlan {
+  id                String   @id @default(cuid())
+  customerId        String                      // Customer requesting the care plan
+  beneficiaryName    String                      // Person being cared for
+  beneficiaryPhone   String
+  beneficiaryAddress String
+  serviceCode       String                      // Type of service (e.g. ELDERLY_CHECK, MEDICATION_PICKUP)
+  serviceTitle      String
+
+  // Schedule
+  frequency         String @default("WEEKLY")   // DAILY, WEEKLY, BIWEEKLY, MONTHLY
+  preferredDay       String?                     // MON, TUE, ..., SUN
+  preferredTime      String?                     // HH:MM
+  preferredAgentId   String?                     // Requested specific agent
+  timezone          String @default("Africa/Lagos")
+
+  // Status
+  status            String @default("ACTIVE")    // ACTIVE, PAUSED, CANCELLED, EXPIRED
+  startDate         DateTime
+  endDate           DateTime?
+  maxVisits         Int?                         // Null = unlimited
+
+  // Stats
+  totalVisits       Int    @default(0)
+  completedVisits   Int    @default(0)
+  missedVisits      Int    @default(0)
+  nextVisitDate     DateTime?
+
+  // Pricing
+  costPerVisit      Int                          // Per-visit cost in kobo
+  totalBilled       Int    @default(0)
+
+  // Auto-report settings
+  autoReportToCustomer Boolean @default(true)    // Send auto-report to diaspora customer
+  autoReportToBeneficiary Boolean @default(false)
+  reportChannel     String @default("WHATSAPP")  // WHATSAPP, SMS, EMAIL, IN_APP
+
+  // Notes
+  specialInstructions String?                    // E.g. "Ask about her medication"
+  notes             String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  customer          Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  careVisits        CareVisit[]
+
+  @@index([customerId, status])
+  @@index([status])
+  @@index([nextVisitDate])
+  @@index([frequency])
+}
+
+model CareVisit {
+  id                String   @id @default(cuid())
+  carePlanId        String
+  missionId         String?                     // Link to actual mission if dispatched
+  scheduledDate     DateTime
+  scheduledTime      String?
+  visitNumber       Int                          // 1, 2, 3...
+
+  status            String @default("SCHEDULED") // SCHEDULED, DISPATCHED, IN_PROGRESS, COMPLETED, MISSED, CANCELLED
+
+  dispatchedAt      DateTime?
+  completedAt       DateTime?
+  agentId           String?
+  agentName         String?
+
+  // Visit report
+  visitNotes        String?
+  photoEvidence     String?                      // JSON array of evidence URLs
+  gpsLat            Float?
+  gpsLng            Float?
+  gpsAccuracy       Float?
+  beneficiaryStatus String?                      // "SEEN_AND_OK", "SEEN_WITH_CONCERN", "NOT_SEEN"
+  concernNotes      String?
+
+  // Auto-report sent
+  reportSentAt      DateTime?
+  reportChannel     String?
+  reportId          String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  carePlan          CarePlan @relation(fields: [carePlanId], references: [id], onDelete: Cascade)
+
+  @@index([carePlanId, scheduledDate])
+  @@index([status])
+  @@index([agentId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LAUNCH DIFFERENTIATOR — Service Complete Report
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model ServiceReport {
+  id                String   @id @default(cuid())
+  missionId         String   @unique
+  caseId            String
+  customerId        String
+  agentId           String
+
+  // Report content
+  title             String                      // "Service Report — {case title}"
+  summary           String?                     // Brief narrative of what was done
+  outcome           String                      // COMPLETED, PARTIALLY_COMPLETED, FAILED, BENEFICIARY_UNAVAILABLE
+
+  // Evidence included
+  photoUrls         String?                     // JSON array of evidence photo URLs
+  gpsLat            Float?
+  gpsLng            Float?
+  gpsAccuracy       Float?
+  addressVerified   Boolean @default(false)
+
+  // Timeline
+  acceptedAt        DateTime?
+  arrivedAt         DateTime?
+  completedAt       DateTime?
+  submittedAt       DateTime?
+  durationMinutes   Int?
+
+  // Agent info snapshot
+  agentName         String
+  agentPhone        String
+  agentTier         String?
+  trustTier         String?
+  trustBadge        String?
+
+  // Delivery
+  reportPdfUrl      String?                     // Generated PDF URL
+  deliveredAt       DateTime?                    // When report was sent to customer
+  deliveryChannel   String?                     // WHATSAPP, SMS, EMAIL, IN_APP
+  deliveryStatus    String @default("PENDING")  // PENDING, SENT, DELIVERED, FAILED
+  deliveryId        String?                     // External delivery ID
+
+  mission            Mission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([customerId])
+  @@index([agentId])
+  @@index([deliveryStatus])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MOAT BUILDER — Emergency SOS Protocol
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model SosAlert {
+  id                String   @id @default(cuid())
+  agentId           String
+  missionId         String?
+  caseId            String?
+
+  // SOS data
+  alertType         String @default("GENERAL")  // GENERAL, MEDICAL, SECURITY, SAFETY, LOST
+  severity          String @default("HIGH")       // LOW, MEDIUM, HIGH, CRITICAL
+  message           String?
+
+  // Location at time of alert
+  latitude          Float
+  longitude         Float
+  accuracy          Float?
+  address           String?
+
+  // Status
+  status            String @default("ACTIVE")    // ACTIVE, ACKNOWLEDGED, RESOLVED, ESCALATED, FALSE_ALARM
+  acknowledgedBy    String?                     // Admin who acknowledged
+  acknowledgedAt    DateTime?
+  resolvedBy        String?
+  resolvedAt        DateTime?
+  resolutionNotes   String?
+
+  // Escalation chain
+  escalationLevel   Int    @default(0)
+  escalatedChannels String?                     // JSON array: ["admin", "whatsapp", "emergency_contact"]
+  emergencyContacts String?                    // JSON array of contacted persons
+
+  // Audio/photo evidence
+  audioUrl          String?
+  photoUrls         String?                     // JSON array
+
+  // Related mission evidence auto-locked
+  evidenceLocked    Boolean @default(true)
+
+  agent              Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([agentId, status])
+  @@index([missionId])
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MOAT BUILDER — Voice Notes in Chat
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model VoiceNote {
+  id                String   @id @default(cuid())
+  messageId         String                      // Chat message ID (in chat service DB)
+  threadId          String
+  senderId          String
+  senderRole        String
+
+  // Audio data
+  audioUrl          String                      // Stored file URL
+  durationSeconds   Float
+  fileSize          Int?
+  mimeType          String @default("audio/webm")
+
+  // Transcription
+  transcript        String?                     // Original language transcript
+  transcriptLang    String?                     // Original language code
+  translatedText    String?                     // Translated text (if applicable)
+  translatedLang    String?                     // Target language code
+
+  // Processing status
+  transcriptionStatus String @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  translationStatus   String @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED, NOT_REQUESTED
+
+  createdAt         DateTime @default(now())
+
+  @@index([messageId])
+  @@index([threadId])
+  @@index([senderId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LAUNCH DIFFERENTIATOR — WhatsApp Notification Gateway
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model WhatsAppNotification {
+  id                String   @id @default(cuid())
+  recipientPhone    String                      // Phone number
+  recipientName     String?
+  recipientRole     String                      // CUSTOMER, BENEFICIARY, ADMIN, AGENT
+
+  // Message content
+  templateId        String?                     // WhatsApp template ID
+  templateParams    String?                     // JSON array of template parameters
+  messageText       String?                     // Custom message text
+  mediaUrl          String?                     // Image/PDF URL to send
+  mediaType         String?                     // IMAGE, DOCUMENT
+
+  // Context
+  entityType        String?                     // MISSION, CASE, CARE_VISIT, SOS, REPORT
+  entityId          String?
+  caseId            String?
+
+  // Status
+  status            String @default("PENDING")  // PENDING, QUEUED, SENT, DELIVERED, READ, FAILED
+  whatsappMessageId String?                     // WhatsApp API message ID
+  errorCode         String?
+  errorMessage      String?
+
+  // Retry
+  retryCount        Int    @default(0)
+  maxRetries        Int    @default(3)
+  nextRetryAt       DateTime?
+
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  failedAt          DateTime?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([recipientPhone, status])
+  @@index([entityType, entityId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LAUNCH DIFFERENTIATOR — Live GPS Tracking
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model LiveLocation {
+  id                String   @id @default(cuid())
+  missionId         String
+  agentId           String
+
+  latitude          Float
+  longitude         Float
+  accuracy          Float?
+  speed             Float?                      // m/s
+  heading           Float?                      // degrees
+  batteryLevel      Int?                        // 0-100
+
+  mission            Mission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  agent              Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  createdAt         DateTime @default(now())
+
+  @@index([missionId, createdAt])
+  @@index([agentId])
+}

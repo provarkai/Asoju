@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { PaymentStatus, Role } from '@prisma/client';
 
@@ -83,20 +83,30 @@ describe('Refund-amount threshold approval', () => {
   }
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, admin, finance, secondFinance] = await Promise.all([
-      createCustomer('refundapproval'),
-      createStaff('refundapproval-admin', Role.ADMIN),
-      createStaff('refundapproval-finance', Role.FINANCE),
-      createStaff('refundapproval-finance2', Role.FINANCE),
-    ]);
-    [customerToken, adminToken, financeToken, secondFinanceToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, admin.email),
-      login(app, finance.email),
-      login(app, secondFinance.email),
-    ]);
+      [customer, admin, finance, secondFinance] = await Promise.all([
+        createCustomer('refundapproval'),
+        createStaff('refundapproval-admin', Role.ADMIN),
+        createStaff('refundapproval-finance', Role.FINANCE),
+        createStaff('refundapproval-finance2', Role.FINANCE),
+      ]);
+      [customerToken, adminToken, financeToken, secondFinanceToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, admin.email),
+        login(app, finance.email),
+        login(app, secondFinance.email),
+      ]);
+
+    });
+  });
+
+  // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a
+  // wedged shared `app` before the next test runs instead of letting a
+  // mid-file connection reset poison every later test in this file.
+  beforeEach(async () => {
+    app = await ensureHealthyApp(app);
   });
 
   afterAll(async () => {

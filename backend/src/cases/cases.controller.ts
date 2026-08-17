@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -15,6 +15,8 @@ import { AssignOwnerDto } from './dto/assign-owner.dto';
 import { SetNextActionDto } from './dto/set-next-action.dto';
 import { HoldCaseDto } from './dto/hold-case.dto';
 import { ResumeCaseDto } from './dto/resume-case.dto';
+import { SendMessageDto } from './dto/send-message.dto';
+import { RaiseDisputeDto } from './dto/raise-dispute.dto';
 
 const STAFF_TRIAGE_ROLES = [Role.CASE_MANAGER, Role.RELATIONSHIP_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
 const STAFF_TRANSITION_ROLES = [Role.CASE_MANAGER, Role.QUALITY_CONTROL, Role.ADMIN, Role.SUPER_ADMIN];
@@ -45,8 +47,14 @@ export class CasesController {
 
   @Roles(Role.CUSTOMER)
   @Post('service-requests')
-  createServiceRequest(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateServiceRequestDto) {
-    return this.casesService.createServiceRequest(user, dto);
+  createServiceRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateServiceRequestDto,
+    // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 2 — optional; a client
+    // that doesn't send this header gets the exact pre-existing behavior.
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.casesService.createServiceRequest(user, dto, idempotencyKey);
   }
 
   @Get('service-requests')
@@ -161,5 +169,49 @@ export class CasesController {
   @Post('cases/:caseId/resume')
   resumeCase(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Body() dto: ResumeCaseDto) {
     return this.casesService.resumeCase(user, caseId, dto.reason);
+  }
+
+  /** Section 3.1 — customer rejects the delivered report with specific,
+   * structured reasons (distinct from the lighter REQUEST_ADDITIONAL_WORK
+   * approval action — see raiseDispute's docstring). */
+  @Roles(Role.CUSTOMER)
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/dispute')
+  raiseDispute(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Body() dto: RaiseDisputeDto,
+  ) {
+    return this.casesService.raiseDispute(user, caseId, dto);
+  }
+
+  /** Staff-side: accepts the dispute and schedules rework. */
+  @Roles(...OPS_ROLES)
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/dispute/resolve')
+  resolveDispute(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Body() dto: ResumeCaseDto,
+  ) {
+    return this.casesService.resolveDispute(user, caseId, dto.reason);
+  }
+
+  // -------------------------------------------------------------------
+  // Case messaging — any role CaseAccessGuard already lets onto the case
+  // (customer, staff collaborator, or bypass-eligible admin) can read and
+  // post; there's no separate messaging-specific role restriction.
+  // -------------------------------------------------------------------
+
+  @UseGuards(CaseAccessGuard)
+  @Get('cases/:caseId/messages')
+  listMessages(@Param('caseId') caseId: string) {
+    return this.casesService.listMessages(caseId);
+  }
+
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/messages')
+  sendMessage(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Body() dto: SendMessageDto) {
+    return this.casesService.sendMessage(user, caseId, dto.body);
   }
 }

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { CircuitBreaker, CircuitBreakerError } from '../common/resilience/circuit-breaker';
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
 const DEFAULT_FROM = 'ASOJU <onboarding@resend.dev>';
@@ -23,6 +24,13 @@ const DEFAULT_FROM = 'ASOJU <onboarding@resend.dev>';
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
 
+  /** Same "protect the request path from a degrading provider" rationale
+   * as WhatsappSenderService's breaker — ported from FieldForce's
+   * circuit-breaker.ts, which had no ASOJU-backend equivalent before now. */
+  private readonly breaker = CircuitBreaker.register(
+    new CircuitBreaker({ name: 'resend-email', failureThreshold: 5, resetTimeoutMs: 30_000, timeoutMs: 10_000 }),
+  );
+
   isConfigured(): boolean {
     return Boolean(process.env.RESEND_API_KEY);
   }
@@ -36,21 +44,34 @@ export class EmailService {
     const apiKey = process.env.RESEND_API_KEY!;
     const from = process.env.RESEND_FROM_EMAIL || DEFAULT_FROM;
 
-    const response = await fetch(RESEND_API_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ from, to, subject, html }),
-    });
+    try {
+      return await this.breaker.execute(async () => {
+        const response = await fetch(RESEND_API_URL, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ from, to, subject, html }),
+        });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      this.logger.error(`Email send failed (${response.status}): ${errorBody}`);
+        if (!response.ok) {
+          const errorBody = await response.text();
+          // Thrown so the breaker counts it — see WhatsappSenderService's
+          // postMessage for why a non-2xx counts the same as a network
+          // failure here.
+          throw new Error(`Email send failed (${response.status}): ${errorBody}`);
+        }
+
+        return { sent: true, dryRun: false };
+      });
+    } catch (error) {
+      if (error instanceof CircuitBreakerError) {
+        this.logger.error(`Email send blocked — ${error.message}`);
+      } else {
+        this.logger.error(error instanceof Error ? error.message : 'Email send failed');
+      }
       return { sent: false, dryRun: false };
     }
-
-    return { sent: true, dryRun: false };
   }
 }

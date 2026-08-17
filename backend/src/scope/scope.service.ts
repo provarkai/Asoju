@@ -4,6 +4,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateScopeDto } from './dto/create-scope.dto';
+import { classifyZone } from './pricing-zone';
 
 /**
  * P0 Technical Build Spec Section 14 "Scope Versioning" / P0 Engineering
@@ -46,10 +47,17 @@ export class ScopeService {
     const last = await this.getLatest(caseId);
     const version = (last?.version ?? 0) + 1;
 
+    // Platform Expansion PRD §2.2 — staff can set the pricing zone
+    // explicitly (the "TBD by Case Manager at scoping" case); otherwise
+    // it's derived from the case's location, same as every prior scope
+    // version would have gotten if asked.
+    const zone = dto.zone ?? classifyZone(serviceCase.location);
+
     const scope = await this.prisma.caseScope.create({
       data: {
         caseId,
         version,
+        zone,
         objective: dto.objective,
         tasks: dto.tasks,
         deliverables: dto.deliverables ?? [],

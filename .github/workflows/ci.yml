@@ -15,8 +15,45 @@ on:
   pull_request:
 
 jobs:
+  # Fast, unsharded: unit tests + the audit gate. No Postgres needed.
   backend:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Unit tests (AI safety, config validation)
+        run: npm run test --workspace=backend
+      # Security checklist — "Integrate Automated Vulnerability Scanning".
+      # Gated at critical only (0 today, confirmed via `npm audit`) so this
+      # is a real, zero-disruption gate rather than one that starts red on
+      # day one — Dependabot (.github/dependabot.yml) handles the existing
+      # moderate/high findings gradually via its own PRs. Raise the
+      # threshold once those are cleared.
+      - name: Dependency vulnerability scan (fails only on critical)
+        run: npm audit --workspace=backend --audit-level=critical
+
+  # Sharded across 4 parallel jobs, each with its own fresh Postgres
+  # container. The real fix for the long-running "connect ECONNRESET"
+  # flakiness (see test/jest-e2e.setup.ts's own comment): 49 e2e spec
+  # files, each booting a full NestJS app + 2 Prisma connection pools in
+  # beforeAll, running sequentially (--runInBand) against ONE long-lived
+  # container for the whole job, was simply too much sustained connection
+  # churn on one Postgres instance — connection_limit=5 (still set below)
+  # was the cheap mitigation tried first and wasn't enough by itself, and
+  # the problem only grows as more spec files are added. Splitting the
+  # same 49 files across 4 containers/jobs (via Jest's native --shard)
+  # cuts each container's sustained load ~4x and bounds any one job's
+  # blast radius if a shard still hits a transient reset.
+  backend-e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: postgres:16-alpine
@@ -26,12 +63,12 @@ jobs:
           POSTGRES_DB: asoju_test
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U asoju"
+          --health-cmd "pg_isready -U asoju -d asoju_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: "postgresql://asoju:asoju@localhost:5432/asoju_test?schema=public"
+      DATABASE_URL: "postgresql://asoju:asoju@localhost:5432/asoju_test?schema=public&connection_limit=5"
       JWT_ACCESS_SECRET: "ci-only-access-secret-never-used-outside-this-workflow"
       JWT_REFRESH_SECRET: "ci-only-refresh-secret-never-used-outside-this-workflow"
       AUTH_THROTTLE_LIMIT: "1000"
@@ -45,10 +82,9 @@ jobs:
       - run: npm ci
       - run: npm run prisma:generate
       - run: npm run prisma:deploy --workspace=backend
-      - name: Unit tests (AI safety, config validation)
-        run: npm run test --workspace=backend
-      - name: E2E tests (authorization, privileged auth, health) — real Postgres, no mocks
-        run: npm run test:e2e --workspace=backend
+      - name: "E2E tests (shard ${{ matrix.shard }}/4) — real Postgres, no mocks"
+        working-directory: backend
+        run: npx jest --config ./test/jest-e2e.json --runInBand --shard=${{ matrix.shard }}/4
 
   frontend:
     runs-on: ubuntu-latest
@@ -59,12 +95,16 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # Vitest + React Testing Library baseline (see vitest.config.mts's
+      # own comment for the framework choice/rationale) — component-level
+      # tests, distinct from and much cheaper than the backend-e2e job.
+      - run: npm run test --workspace=frontend
       - run: npm run build --workspace=frontend
 
   deploy:
     name: Deploy to Railway (production)
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, backend-e2e, frontend]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4

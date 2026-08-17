@@ -1,6 +1,15 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { CaseStatus, CaseTier, PaymentStatus, Prisma, QuoteLineCategory, ReconciliationStatus, RefundRequestStatus } from '@prisma/client';
+import {
+  CaseStatus,
+  CaseTier,
+  IdempotencyOperation,
+  PaymentStatus,
+  Prisma,
+  QuoteLineCategory,
+  ReconciliationStatus,
+  RefundRequestStatus,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -13,6 +22,9 @@ import { CreateQuoteDto } from './dto/create-quote.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
 import { RecordDirectCostDto } from './dto/record-direct-cost.dto';
+import { suggestRegionalServiceFee } from './regional-pricing';
+import { usdToNgnRate } from '../concierge/membership-plans';
+import { IdempotencyService } from '../common/idempotency/idempotency.service';
 
 /** Prefix distinguishing case-invoice Paystack references from subscription
  * ones so a single webhook endpoint can route both (see PaystackService). */
@@ -44,6 +56,19 @@ function quoteValidityHours(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_QUOTE_VALIDITY_HOURS;
 }
 
+const DEFAULT_FX_LOCK_HOURS = 48;
+
+/** Platform Expansion PRD §4.3 — "This rate is locked for 48 hours."
+ * Configurable per environment, same pattern as QUOTE_VALIDITY_HOURS/
+ * PAYMENT_EXPIRY_HOURS. Purely informational (see Quote.fxLockExpiry's
+ * schema comment) — does not gate acceptance; the quote's own expiresAt
+ * is the real deadline. */
+function fxLockHours(): number {
+  const configured = process.env.FX_LOCK_HOURS;
+  const parsed = configured ? Number(configured) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FX_LOCK_HOURS;
+}
+
 const DEFAULT_REFUND_APPROVAL_THRESHOLD_NGN = 200_000;
 
 /** P0 Security, Privacy & Trust Architecture v1.0 §8 "Privileged Action
@@ -70,6 +95,7 @@ export class CommerceService {
     private readonly paystack: PaystackService,
     private readonly membership: MembershipService,
     private readonly scope: ScopeService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   /**
@@ -123,11 +149,17 @@ export class CommerceService {
     // never counts against the monthly allowance either.
     const benefit =
       serviceCase.tier === CaseTier.CONCIERGE && serviceFeeTotal > 0
-        ? await this.membership.previewBenefit(serviceCase.customerId, serviceCase.tier, serviceFeeTotal)
+        ? await this.membership.previewBenefit(serviceCase.customerId, serviceCase.tier, serviceFeeTotal, latestScope.zone)
         : null;
 
     const finalServiceFee = benefit ? benefit.finalAmount : serviceFeeTotal;
     const amount = finalServiceFee + nonServiceFeeTotal;
+
+    // Platform Expansion PRD §4.3 — pinned once, at the moment the
+    // customer first sees a price, from the same rate Subscription
+    // pricing already locks. Only meaningful when there's an actual
+    // ASOJU_SERVICE_FEE portion to express in USD.
+    const fxRate = serviceFeeTotal > 0 ? usdToNgnRate() : null;
 
     const quote = await this.prisma.quote.create({
       data: {
@@ -145,6 +177,14 @@ export class CommerceService {
         discountPercent: benefit?.discountPercent,
         discountAmount: benefit?.discountAmount,
         scAppliedNgn: benefit?.scAppliedNgn,
+        lockedFxRate: fxRate,
+        sourceCurrency: fxRate ? 'USD' : null,
+        fxLockExpiry: fxRate ? new Date(Date.now() + fxLockHours() * 60 * 60 * 1000) : null,
+        // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 1 traceability —
+        // undefined (not persisted) for the common case of a fully
+        // staff-typed quote; only set when dto.priceBookId was passed
+        // through from the pricing-preview calculator.
+        priceBookId: dto.priceBookId,
         lines: { create: dto.lines.map((l) => ({ category: l.category, label: l.label, amount: l.amount })) },
       },
       include: { lines: true },
@@ -169,6 +209,35 @@ export class CommerceService {
     );
 
     return quote;
+  }
+
+  /**
+   * Platform Expansion PRD §2.2/§2.3 — staff-facing preview of what the
+   * regional matrix says this case's ASOJU_SERVICE_FEE line(s) should be,
+   * and whether SC will even be offered, *before* they build the actual
+   * quote lines by hand (createQuote's dto.lines stays authoritative —
+   * this is guidance, not an auto-applied price). Requires a confirmed
+   * scope, same precondition as createQuote itself, since the zone lives
+   * on CaseScope.
+   */
+  async getRegionalPricingHint(caseId: string) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+
+    const latestScope = await this.scope.getLatest(caseId);
+    if (!latestScope) {
+      throw new BadRequestException('This case has no scope yet — create one before requesting a pricing hint');
+    }
+
+    const suggestion = suggestRegionalServiceFee(latestScope.zone, serviceCase.priority);
+    const fxRate = usdToNgnRate();
+
+    return {
+      ...suggestion,
+      fxRate,
+      suggestedServiceFeeNgn:
+        suggestion.suggestedServiceFeeUsd === null ? null : Math.round(suggestion.suggestedServiceFeeUsd * fxRate),
+    };
   }
 
   /**
@@ -239,8 +308,42 @@ export class CommerceService {
    * hosted-checkout URL — real if PAYSTACK_SECRET_KEY is set, a dry-run
    * placeholder otherwise (see PaystackService). Nothing here can mark a
    * payment PAID; only the verified webhook below can (Non-Negotiable #4).
+   *
+   * docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 2 — idempotencyKey is
+   * optional, same contract as createServiceRequest. A retry after the
+   * original already succeeded does NOT re-initiate a second Paystack
+   * transaction (which would double the customer-visible checkout
+   * attempts against the same invoice) — it returns the already-created
+   * Payment's reference instead. There's no authorizationUrl to hand back
+   * on replay (Paystack's hosted-checkout URL isn't persisted — it's only
+   * ever returned once, from the original call); a client retrying after
+   * a timeout should poll payment status by the returned reference rather
+   * than expect a fresh checkout link.
    */
-  async initiatePayment(actor: AuthenticatedUser, invoiceId: string) {
+  async initiatePayment(actor: AuthenticatedUser, invoiceId: string, idempotencyKey?: string) {
+    if (idempotencyKey) {
+      const check = await this.idempotency.begin(IdempotencyOperation.PAYMENT_INITIATE, idempotencyKey, actor.id);
+      if (!check.shouldProceed) {
+        const payment = await this.prisma.payment.findUniqueOrThrow({ where: { id: check.resultReference! } });
+        return { reference: payment.providerReference, dryRun: false, replay: true };
+      }
+    }
+
+    try {
+      const result = await this.doInitiatePayment(actor, invoiceId);
+      if (idempotencyKey) {
+        await this.idempotency.complete(IdempotencyOperation.PAYMENT_INITIATE, idempotencyKey, actor.id, result.paymentId);
+      }
+      return { authorizationUrl: result.authorizationUrl, reference: result.reference, dryRun: result.dryRun };
+    } catch (err) {
+      if (idempotencyKey) {
+        await this.idempotency.fail(IdempotencyOperation.PAYMENT_INITIATE, idempotencyKey, actor.id);
+      }
+      throw err;
+    }
+  }
+
+  private async doInitiatePayment(actor: AuthenticatedUser, invoiceId: string) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
       include: { case: { include: { customer: { include: { user: true } } } }, payments: true },
@@ -264,7 +367,7 @@ export class CommerceService {
       metadata: { invoiceId: invoice.id, caseId: invoice.caseId },
     });
 
-    await this.prisma.payment.create({
+    const payment = await this.prisma.payment.create({
       data: {
         invoiceId: invoice.id,
         amount: invoice.amount,
@@ -283,7 +386,7 @@ export class CommerceService {
       metadata: { invoiceId: invoice.id, reference, dryRun: result.dryRun },
     });
 
-    return { authorizationUrl: result.authorizationUrl, reference: result.reference, dryRun: result.dryRun };
+    return { authorizationUrl: result.authorizationUrl, reference: result.reference, dryRun: result.dryRun, paymentId: payment.id };
   }
 
   /**

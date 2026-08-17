@@ -10,6 +10,6 @@ export class WhatsappController {
 
   @Post()
   handleInbound(@Body() dto: InboundMessageDto) {
-    return this.whatsappService.handleInboundMessage(dto.from, dto.body);
+    return this.whatsappService.handleInboundMessage(dto.from, dto.body, dto.interactiveReplyId);
   }
 }

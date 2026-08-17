@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp } from './utils/bootstrap';
+import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
 import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
@@ -25,52 +25,62 @@ describe('Admin audit log', () => {
   let caseId: string;
 
   beforeAll(async () => {
-    app = await createTestApp();
+    await withSetupRetry(async () => {
+      app = await createTestApp();
 
-    [customer, admin, caseManager] = await Promise.all([
-      createCustomer('audit-log'),
-      createStaff('audit-log-admin', Role.ADMIN),
-      createStaff('audit-log-cm', Role.CASE_MANAGER),
-    ]);
-    [customerToken, adminToken, caseManagerToken] = await Promise.all([
-      login(app, customer.email),
-      login(app, admin.email),
-      login(app, caseManager.email),
-    ]);
+      [customer, admin, caseManager] = await Promise.all([
+        createCustomer('audit-log'),
+        createStaff('audit-log-admin', Role.ADMIN),
+        createStaff('audit-log-cm', Role.CASE_MANAGER),
+      ]);
+      [customerToken, adminToken, caseManagerToken] = await Promise.all([
+        login(app, customer.email),
+        login(app, admin.email),
+        login(app, caseManager.email),
+      ]);
 
-    // Generates a handful of real, distinct audit events tied to a known
-    // case: scope.created then scope.confirmed.
-    const reqRes = await request(app.getHttpServer())
-      .post('/api/service-requests')
-      .set('Authorization', `Bearer ${customerToken}`)
-      .send({ rawDescription: 'Audit log test case', location: 'Lagos', channel: 'web' })
-      .expect(201);
-    const caseRes = await request(app.getHttpServer())
-      .post(`/api/service-requests/${reqRes.body.id}/convert`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ serviceType: 'PROPERTY_INSPECTION', description: 'Inspect', location: 'Lagos', priority: 'STANDARD' })
-      .expect(201);
-    caseId = caseRes.body.id;
+      // Generates a handful of real, distinct audit events tied to a known
+      // case: scope.created then scope.confirmed.
+      const reqRes = await request(app.getHttpServer())
+        .post('/api/service-requests')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({ rawDescription: 'Audit log test case', location: 'Lagos', channel: 'web' })
+        .expect(201);
+      const caseRes = await request(app.getHttpServer())
+        .post(`/api/service-requests/${reqRes.body.id}/convert`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ serviceType: 'PROPERTY_INSPECTION', description: 'Inspect', location: 'Lagos', priority: 'STANDARD' })
+        .expect(201);
+      caseId = caseRes.body.id;
 
-    await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/transition`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ toStatus: 'SUBMITTED' })
-      .expect(201);
-    await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/transition`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ toStatus: 'UNDER_REVIEW' })
-      .expect(201);
-    await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/scope`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ objective: 'Inspect', tasks: ['Visit site'] })
-      .expect(201);
-    await request(app.getHttpServer())
-      .post(`/api/cases/${caseId}/scope/confirm`)
-      .set('Authorization', `Bearer ${customerToken}`)
-      .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/transition`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ toStatus: 'SUBMITTED' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/transition`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ toStatus: 'UNDER_REVIEW' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/scope`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ objective: 'Inspect', tasks: ['Visit site'] })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/scope/confirm`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .expect(200);
+
+    });
+  });
+
+  // See test/utils/bootstrap.ts's ensureHealthyApp — recovers from a
+  // wedged shared `app` before the next test runs instead of letting a
+  // mid-file connection reset poison every later test in this file.
+  beforeEach(async () => {
+    app = await ensureHealthyApp(app);
   });
 
   afterAll(async () => {

@@ -5,6 +5,8 @@ import { AuditService } from '../audit/audit.service';
 import { CONCIERGE_SYSTEM_PROMPT, PERSONAL_ASSISTANT_SYSTEM_PROMPT } from './system-prompt';
 import { scoreLead } from './scoring';
 import { ConciergeMessageDto } from './dto/concierge-message.dto';
+import { ConciergeFeedbackDto } from './dto/concierge-feedback.dto';
+import { ConciergeAnalyticsEventDto } from './dto/concierge-analytics-event.dto';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 
 interface ConciergeTurnResult {
@@ -154,12 +156,16 @@ export class AiService {
    * anything with it. Deterministic scoring (Section 7.4) runs in plain
    * code, never as another LLM call.
    */
-  async converse(user: AuthenticatedUser, dto: ConciergeMessageDto) {
+  /** The actual model call + forced-tool-use validation, shared by
+   * converse() (authenticated, persists a ServiceRequest on completion)
+   * and demoConverse() (public landing-page preview, persists nothing).
+   * Keeping this the one place that talks to OpenRouter for the intake
+   * Concierge means both surfaces stay behaviorally identical — same
+   * system prompt, same forced structured output — and only differ in
+   * what they do with the result. */
+  private async runConciergeTurn(dto: ConciergeMessageDto): Promise<ConciergeTurnResult> {
     if (!this.configured) {
       throw new Error('AI Concierge is not configured (missing OPENROUTER_API_KEY).');
-    }
-    if (user.role !== Role.CUSTOMER) {
-      throw new Error('AI Concierge is customer-facing only.');
     }
 
     const messages: ChatMessage[] = [
@@ -182,7 +188,15 @@ export class AiService {
     } catch {
       throw new Error('AI Concierge did not return a structured turn.');
     }
+    return turn;
+  }
 
+  async converse(user: AuthenticatedUser, dto: ConciergeMessageDto) {
+    if (user.role !== Role.CUSTOMER) {
+      throw new Error('AI Concierge is customer-facing only.');
+    }
+
+    const turn = await this.runConciergeTurn(dto);
     const escalation = ESCALATION_MAP[turn.escalate] ?? AiEscalation.NONE;
 
     const interaction = await this.prisma.aiInteraction.create({
@@ -214,6 +228,29 @@ export class AiService {
       escalate: turn.escalate,
       conversationComplete: turn.conversation_complete,
       serviceRequestId,
+    };
+  }
+
+  /**
+   * Public landing-page preview of the AI Concierge (asoju-app-main
+   * conversion) — a visitor trying it before signing up. Deliberately
+   * thin next to converse(): no user, so no ServiceRequest, no
+   * AiInteraction row (nothing real to attach it to yet), no lead
+   * scoring. Just the conversational capture + reply, so the demo feels
+   * alive without inventing a second, anonymous intake pipeline that
+   * writes real records. When the conversation completes, the frontend
+   * is expected to route the visitor to sign-in — actual case creation
+   * stays exactly where it already was: authenticated only, staff
+   * quotes it from there like every other request (this app never lets
+   * the AI generate a binding quote — see cases/commerce README notes on
+   * why quotes are human-issued).
+   */
+  async demoConverse(dto: ConciergeMessageDto) {
+    const turn = await this.runConciergeTurn(dto);
+    return {
+      reply: turn.reply_text,
+      escalate: turn.escalate,
+      conversationComplete: turn.conversation_complete,
     };
   }
 
@@ -331,5 +368,50 @@ export class AiService {
     });
 
     return { reply };
+  }
+
+  /** Section 7 — thumbs up/down on a single Concierge reply. Separate from
+   * AiInteraction (which logs the structured outcome of a whole turn, not
+   * a human quality rating of it) so the team can pull "what are customers
+   * marking as bad replies" without wading through every turn. */
+  async recordConciergeFeedback(user: AuthenticatedUser, dto: ConciergeFeedbackDto) {
+    const customer = await this.prisma.customer.findUnique({ where: { userId: user.id } });
+    if (!customer) throw new Error('No customer profile for this user');
+
+    const feedback = await this.prisma.conciergeFeedback.create({
+      data: {
+        customerId: customer.id,
+        rating: dto.rating,
+        userMessage: dto.userMessage,
+        aiReply: dto.aiReply,
+        hadQuote: dto.hadQuote ?? false,
+      },
+    });
+
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'user',
+      action: 'ai.concierge_feedback_recorded',
+      metadata: { feedbackId: feedback.id, rating: dto.rating },
+    });
+
+    return feedback;
+  }
+
+  /** First-party Concierge usage analytics (see AiPublicController and
+   * ConciergeAnalyticsEvent's own schema comment). Deliberately not an
+   * AuditService.record call: audit entries are accountability records
+   * tied to a real actor taking an action, and most of this traffic is
+   * anonymous by design (same reasoning demoConverse above never touches
+   * the audit log). No return value worth shaping — the frontend fires
+   * these and moves on regardless of outcome. */
+  async recordAnalyticsEvent(dto: ConciergeAnalyticsEventDto): Promise<void> {
+    await this.prisma.conciergeAnalyticsEvent.create({
+      data: {
+        name: dto.name,
+        sessionId: dto.sessionId,
+        metadata: dto.metadata ?? undefined,
+      },
+    });
   }
 }

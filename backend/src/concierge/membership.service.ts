@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { CaseTier, Prisma, Subscription, SubscriptionStatus } from '@prisma/client';
+import { CaseTier, Prisma, PricingZone, Subscription, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScLedgerService } from './sc-ledger.service';
 import { PlanConfigService } from './plan-config.service';
@@ -63,8 +63,20 @@ export class MembershipService {
    * — writes nothing to the SC ledger. Returns null when no benefit
    * applies: no active subscription, the case isn't CONCIERGE tier, or
    * the monthly eligible-request allowance is already used up this period.
+   *
+   * `zone` is the confirmed scope's pricing zone (Platform Expansion PRD
+   * §2.2) — §2.3's "SC Exclusion Rule": a case scoped to an Other
+   * Location never gets SC applied, no matter the available balance.
+   * The tier discount still applies either way — only the voucher is
+   * excluded, matching "the customer must pay the full quoted amount
+   * (minus their 5% or 10% tier discount)."
    */
-  async previewBenefit(customerId: string, caseTier: CaseTier, baseAmountNgn: number): Promise<QuoteBenefitPreview | null> {
+  async previewBenefit(
+    customerId: string,
+    caseTier: CaseTier,
+    baseAmountNgn: number,
+    zone: PricingZone,
+  ): Promise<QuoteBenefitPreview | null> {
     if (caseTier !== CaseTier.CONCIERGE) return null;
     const subscription = await this.getActiveSubscription(customerId);
     if (!subscription) return null;
@@ -76,10 +88,13 @@ export class MembershipService {
     const discountAmount = Math.round(baseAmountNgn * (plan.discountPercent / 100));
     const afterDiscount = baseAmountNgn - discountAmount;
 
-    const availableScUsd = await this.scLedger.getBalanceUsd(subscription.id);
-    const fxRate = Number(subscription.fxRate);
-    const availableScNgn = availableScUsd * fxRate;
-    const scAppliedNgn = Math.max(0, Math.min(availableScNgn, afterDiscount));
+    let scAppliedNgn = 0;
+    if (zone !== PricingZone.OTHER) {
+      const availableScUsd = await this.scLedger.getBalanceUsd(subscription.id);
+      const fxRate = Number(subscription.fxRate);
+      const availableScNgn = availableScUsd * fxRate;
+      scAppliedNgn = Math.max(0, Math.min(availableScNgn, afterDiscount));
+    }
     const finalAmount = Math.max(0, Math.round(afterDiscount - scAppliedNgn));
 
     return {
