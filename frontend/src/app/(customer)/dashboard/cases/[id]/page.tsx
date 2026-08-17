@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EvidenceGrid, HistoryEvent, MessageItem, MessageThread, QuoteCard, QuoteData, ReportCard, ReportData, Timeline } from '@/components/portal/CaseDetailParts';
-import { StatusPill } from '@/components/portal/ui';
+import { ErrorState, StatusPill } from '@/components/portal/ui';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -105,6 +105,7 @@ export default function CaseDetailPage() {
   const [disputeNotes, setDisputeNotes] = useState('');
 
   const load = () => {
+    setError(null);
     Promise.all([apiFetch<CaseDetail>(`/cases/${caseId}`), apiFetch<MessageItem[]>(`/cases/${caseId}/messages`)])
       .then(([c, m]) => {
         setKase(c);
@@ -118,7 +119,7 @@ export default function CaseDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
 
-  if (error) return <p className="error-text">{error}</p>;
+  if (error && !kase) return <ErrorState message={error} onRetry={load} />;
   if (!kase) {
     return (
       <div className="space-y-4">

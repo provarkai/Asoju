@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { CaseCard, CaseSummary } from '@/components/portal/CaseCard';
-import { EmptyState, StatCard, StatusPill } from '@/components/portal/ui';
+import { EmptyState, ErrorState, StatCard, StatusPill } from '@/components/portal/ui';
 import { BellRing, CheckCircle2, CircleDollarSign, FilePlus2, FolderOpen, MessageSquare, Sparkles } from 'lucide-react';
 import { apiFetch, getSessionUser } from '@/lib/api';
 import { timeAgo } from '@/lib/statusMeta';
@@ -52,7 +52,8 @@ export default function DashboardHome() {
   const [pendingRequests, setPendingRequests] = useState<ServiceRequestSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = () => {
+    setError(null);
     Promise.all([
       apiFetch<CaseSummary[]>('/cases'),
       apiFetch<Portfolio>('/me/portfolio'),
@@ -66,9 +67,11 @@ export default function DashboardHome() {
         setPendingRequests(r.filter((req) => !req.convertedCaseId));
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load your dashboard'));
-  }, []);
+  };
 
-  if (error) return <p className="error-text">{error}</p>;
+  useEffect(load, []);
+
+  if (error) return <ErrorState message={error} onRetry={load} />;
   if (!cases || !portfolio) {
     return (
       <div className="grid gap-4 sm:grid-cols-3">

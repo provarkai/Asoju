@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Heart, Home, Loader2, MapPin, Phone, Plus, Save, ShieldCheck, UserRound } from 'lucide-react';
 import { apiFetch, getSessionUser } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { ErrorState } from '@/components/portal/ui';
 
 const CHANNELS = [
   { key: 'whatsapp', label: 'WhatsApp' },
@@ -65,6 +66,7 @@ export default function ProfilePage() {
   const [adding, setAdding] = useState<string | null>(null);
 
   const load = () => {
+    setError(null);
     Promise.all([apiFetch<Preferences>('/me/preferences'), apiFetch<Property[]>('/me/properties'), apiFetch<Beneficiary[]>('/me/beneficiaries')])
       .then(([p, props, bens]) => {
         setPrefs(p);
@@ -76,7 +78,7 @@ export default function ProfilePage() {
 
   useEffect(load, []);
 
-  if (error) return <p className="error-text">{error}</p>;
+  if (error && !prefs) return <ErrorState message={error} onRetry={load} />;
   if (!prefs || !properties || !beneficiaries) {
     return <div className="h-64 animate-pulse rounded-3xl bg-forest/5" />;
   }
