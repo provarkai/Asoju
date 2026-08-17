@@ -7,6 +7,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CasesService } from './cases.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
+import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
 import { ConvertRequestDto } from './dto/convert-request.dto';
 import { TransitionCaseDto } from './dto/transition-case.dto';
 import { ApprovalActionDto } from './dto/approval-action.dto';
@@ -65,6 +66,38 @@ export class CasesController {
   @Get('service-requests')
   listServiceRequests(@CurrentUser() user: AuthenticatedUser) {
     return this.casesService.listServiceRequests(user);
+  }
+
+  /** docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3 — progressive
+   * enrichment of the request the customer started; re-runs the
+   * automation eligibility decision every call. */
+  @Roles(Role.CUSTOMER)
+  @Patch('service-requests/:id')
+  updateServiceRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateServiceRequestDto,
+  ) {
+    return this.casesService.updateServiceRequest(user, id, dto);
+  }
+
+  // No @Roles — the owning customer or any staff can read a request's
+  // automation decision; CasesService.getAutomationDecision enforces
+  // ownership for a CUSTOMER caller itself (ServiceRequest predates
+  // CaseAccessGuard's case-scoped model, so this is the same pattern
+  // hand-rolled).
+  @Get('service-requests/:id/automation-decision')
+  getAutomationDecision(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.casesService.getAutomationDecision(user, id);
+  }
+
+  /** Staff-only, on-demand recompute — same "trigger without waiting on
+   * the pipeline" pattern as every other sweep in this codebase. Useful
+   * right after an admin changes an AutomationCapability/rule. */
+  @Roles(...STAFF_TRIAGE_ROLES)
+  @Post('service-requests/:id/automation-decision/recompute')
+  recomputeAutomationDecision(@Param('id') id: string) {
+    return this.casesService.recomputeAutomationDecision(id);
   }
 
   @Roles(...STAFF_TRIAGE_ROLES)

@@ -29,6 +29,8 @@ import { BENEFICIARY_CASE_SELECT, toBeneficiaryCaseDetail } from './beneficiary-
 import { slaHoursForCase } from './regional-sla';
 import { IdempotencyService } from '../common/idempotency/idempotency.service';
 import { familyForServiceType } from './service-family';
+import { AutomationEligibilityService } from '../automation/automation-eligibility.service';
+import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
 
@@ -97,6 +99,7 @@ export class CasesService {
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
     private readonly idempotency: IdempotencyService,
+    private readonly automationEligibility: AutomationEligibilityService,
   ) {}
 
   // -- Service requests (pre-case intake) ------------------------------
@@ -137,6 +140,7 @@ export class CasesService {
         rawDescription: dto.rawDescription,
         location: dto.location,
         channel: dto.channel,
+        serviceType: dto.serviceType,
       },
     });
 
@@ -147,7 +151,77 @@ export class CasesService {
       metadata: { serviceRequestId: request.id, channel: dto.channel },
     });
 
+    // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3 — "wire the
+    // eligibility check into the existing... service-request flow."
+    // Decision-and-audit only in this phase: nothing here creates,
+    // converts, or acts on anything.
+    await this.automationEligibility.evaluateAndRecord(request.id);
+
     return request;
+  }
+
+  /**
+   * Progressive enrichment of the same ServiceRequest a Concierge
+   * conversation started (resolved decision #1 — this is
+   * `StructuredRequest`). Re-evaluates the automation decision every
+   * time, so a request that started CUSTOMER_INPUT for a missing field
+   * can reach AUTO/ESCALATE/BLOCKED as soon as that field arrives.
+   * Blocked once the request has already converted to a real Case — at
+   * that point this is history, not a draft still being assembled.
+   */
+  async updateServiceRequest(user: AuthenticatedUser, requestId: string, dto: UpdateServiceRequestDto) {
+    const customer = await this.requireCustomerProfile(user.id);
+    const request = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
+    if (!request || request.customerId !== customer.id) throw new NotFoundException('Service request not found');
+    if (request.convertedCaseId) {
+      throw new BadRequestException('This request has already been converted to a case');
+    }
+
+    const updated = await this.prisma.serviceRequest.update({
+      where: { id: requestId },
+      data: {
+        ...(dto.serviceType !== undefined ? { serviceType: dto.serviceType } : {}),
+        ...(dto.objective !== undefined ? { objective: dto.objective } : {}),
+        ...(dto.subject !== undefined ? { subject: dto.subject } : {}),
+        ...(dto.timing !== undefined ? { timing: dto.timing } : {}),
+        ...(dto.location !== undefined ? { location: dto.location } : {}),
+        ...(dto.requirements !== undefined ? { requirements: dto.requirements as any } : {}),
+      },
+    });
+
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'user',
+      action: 'service_request.updated',
+      metadata: { serviceRequestId: requestId, fields: Object.keys(dto) },
+    });
+
+    await this.automationEligibility.evaluateAndRecord(requestId);
+
+    return updated;
+  }
+
+  /** Read-only — the current decision for one request. Customer (own
+   * request only) or staff. */
+  async getAutomationDecision(user: AuthenticatedUser, requestId: string) {
+    const request = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
+    if (!request) throw new NotFoundException('Service request not found');
+    if (user.role === Role.CUSTOMER) {
+      const customer = await this.requireCustomerProfile(user.id);
+      if (request.customerId !== customer.id) throw new NotFoundException('Service request not found');
+    }
+    return this.automationEligibility.getDecision(requestId);
+  }
+
+  /** Staff-only, on-demand — same "recompute without waiting" pattern as
+   * every other sweep/recompute trigger in this codebase (e.g.
+   * RiskEngineService's "Recompute risk level"). Useful after an
+   * AutomationCapability/rule change to see its effect on an existing
+   * request immediately. */
+  async recomputeAutomationDecision(requestId: string) {
+    const request = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
+    if (!request) throw new NotFoundException('Service request not found');
+    return this.automationEligibility.evaluateAndRecord(requestId);
   }
 
   async listServiceRequests(user: AuthenticatedUser) {

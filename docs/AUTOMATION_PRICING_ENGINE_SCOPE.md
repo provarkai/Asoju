@@ -193,16 +193,48 @@ column with no consumer now would be scaffolding, not infrastructure;
 it's deferred to land as part of Phase 3, alongside the model it actually
 switches.
 
-### Phase 3 — Structured Request + Eligibility Decision (Track B, part 1)
-- New `StructuredRequest` model (richer than `ServiceRequest` — decide via
-  the open question in §5 below whether it replaces or sits alongside it).
-- `AutomationCapability` + `AutomationRule` + `AutomationDecision` models
-  and the deterministic rule-evaluation service.
-- Wire the *eligibility check* into the existing Concierge/service-request
-  flow — but resolve **AUTO** at first to "still requires staff convert,"
-  i.e. land the decision-making and audit trail without yet removing the
-  human from case creation. This proves the eligibility logic against real
-  traffic before anything acts on it autonomously.
+### Phase 3 — Structured Request + Eligibility Decision (Track B, part 1) — ✅ done (17 Aug 2026)
+- `ServiceRequest` extended in place per decision #1 below (`objective`,
+  `subject`, `timing`, `requirements` — nullable/additive; also finally
+  wired `serviceType` to actually persist, both at creation and via new
+  `PATCH /service-requests/:id`, closing a gap this doc's own table
+  flagged: the field existed with a comment saying an AI/human would
+  populate it, but nothing ever did).
+- `AutomationCapability` (per-`ServiceType` kill switch, off by default) +
+  `AutomationRule` (`REQUIRED_FIELDS`/`BLOCKED_KEYWORDS`, config-driven) +
+  `AutomationDecision` (one row per request, upserted on every
+  re-evaluation, full rule-by-rule audit trail in `ruleResults`) —
+  `backend/src/automation/`. The rule-evaluation function itself
+  (`automation-evaluator.ts`) is pure and DB-free, unit-tested in
+  isolation (10 tests, no I/O) — same "pure calculation, deterministic
+  inputs/outputs" reasoning this doc gave Track A's pricing calculator.
+  Deterministic precedence: `BLOCKED` beats a missing required field
+  (never bypass a configured block), which beats `AUTO`. Admin CRUD only
+  (Finance/Admin/SuperAdmin, `/admin/automation/capabilities[/rules]`),
+  same resolved scope as Phase 1's pricing-engine admin surface — no
+  frontend screen yet.
+- `Escalation.caseId` is now nullable (`serviceRequestId` already was,
+  forward-compatible since Phase 2) — the `ESCALATE` outcome creates a
+  real `Escalation` (new `AUTOMATION_UNAVAILABLE` reason category) the
+  moment a capability's kill switch is off, surfacing in the exact same
+  staff triage queue (`GET /escalations`) any other escalation does.
+  Idempotent: re-evaluating an already-escalated request never spawns a
+  second one.
+- Wired into the existing service-request flow exactly as scoped: created
+  automatically on `POST /service-requests` and re-run on every
+  `PATCH /service-requests/:id`, plus an on-demand staff recompute trigger
+  (`POST /service-requests/:id/automation-decision/recompute`). **`AUTO`
+  never converts or creates anything** — `POST /service-requests/:id/convert`
+  (staff-only) remains the only way a Case is ever created; every test in
+  `automation-eligibility.e2e-spec.ts` that reaches `AUTO` explicitly
+  confirms the request is still unconverted. This is exactly Phase 3's own
+  instruction: "resolve AUTO at first to 'still requires staff convert' ...
+  land the decision-making and audit trail without yet removing the human
+  from case creation."
+- 13 new e2e tests (`test/automation-eligibility.e2e-spec.ts`) + 10 pure
+  unit tests, plus the full existing e2e suite reverified clean against
+  real Postgres (the `Escalation.caseId` nullability change is the one
+  edit here with any blast radius against Phase 2's own code).
 
 ### Phase 4 — Automated case creation (Track B, part 2)
 - Only once Phase 3's eligibility decisions have been observed against
@@ -265,10 +297,12 @@ switches.
    using the API version day-to-day. Revisit if that turns out to be too
    much friction in practice.
 
-All five decisions are now resolved — Phase 2 (Escalation + Idempotency
-infrastructure) and Phase 3 (Structured Request + Eligibility Decision,
-per decisions #1 and #3 above) are ready to be scoped into real tickets
-whenever you want to proceed.
+All five decisions are now resolved. Phases 1–3 are all done (see each
+phase's own "✅" status above). Phase 4 (letting an `AUTO` decision
+actually create a case) is the next real ticket whenever you want to
+proceed — it depends on Phase 3's decisions having been observed against
+real traffic first, per decision #2's own resolution, not bundled into
+the same pass that landed the decisioning.
 
 ---
 

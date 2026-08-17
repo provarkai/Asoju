@@ -770,6 +770,23 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   public `GET /service-families` (no auth), and `serviceFamily` now rides alongside the real
   `serviceType` on every case response (`GET /cases`, `GET /cases/:id`, the beneficiary view too) —
   additive, never replacing it.
+- **Automation eligibility engine — Phase 3 skeleton** (`docs/AUTOMATION_PRICING_ENGINE_SCOPE.md`) —
+  the deterministic gate between a Concierge conversation and automated case creation, built exactly to
+  the scope doc's own instruction: **decision-and-audit only, nothing here creates, converts, or acts on
+  anything.** `ServiceRequest` gained the enriched fields the target `StructuredRequest` needed
+  (`objective`/`subject`/`timing`/`requirements`, plus finally persisting `serviceType` — previously a
+  comment's promise nothing kept), fillable progressively via new `PATCH /service-requests/:id`. New
+  `AutomationCapability` (a per-service-type kill switch, off by default) + `AutomationRule`
+  (`REQUIRED_FIELDS`/`BLOCKED_KEYWORDS`, admin-configurable) feed a pure, unit-tested evaluator
+  (`backend/src/automation/automation-evaluator.ts`) that decides `AUTO`/`CUSTOMER_INPUT`/`ESCALATE`/
+  `UNSUPPORTED`/`BLOCKED` for every request — re-run automatically on create and on every update.
+  `ESCALATE` creates a real `Escalation` (Phase 2's entity, `Escalation.caseId` now nullable to allow
+  one before a Case exists) that surfaces in the exact same staff triage queue any other escalation
+  does. `POST /service-requests/:id/convert` (staff-only) remains the **only** way a Case is ever
+  created — an `AUTO` decision is recorded and nothing more; Phase 4 (letting `AUTO` actually act) is
+  explicitly not part of this. Admin CRUD only (Finance/Admin/SuperAdmin,
+  `/admin/automation/capabilities[/rules]`), no frontend screen yet — same resolved scope as the pricing
+  engine's own admin surface. Covered by 13 e2e tests + 10 pure unit tests (the evaluator itself, no I/O).
 - **WhatsApp integration** (Zavu, docs.zavu.dev): set `WHATSAPP_WEBHOOK_SECRET` to accept inbound
   messages at `POST /api/webhooks/whatsapp` (shared-secret stand-in — Zavu's real inbound signature
   scheme isn't confirmed publicly enough to implement; see `WhatsappWebhookGuard`'s comment). Set
