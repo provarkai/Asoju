@@ -265,6 +265,21 @@ export class CommerceService {
       throw new BadRequestException('This quote has expired — request a new quote for the current terms');
     }
 
+    // Atomically claim the accept before doing anything with a side effect
+    // (the SC debit below). The check above is just a fast, friendly error
+    // for the common case — this updateMany is what actually prevents it:
+    // its WHERE re-checks acceptedAt IS NULL at the database level, so of
+    // two concurrent accepts (double-click, client retry) only one can
+    // ever match and update the row. Without this, both requests could
+    // pass the check above, both debit SC, and both create an Invoice.
+    const claim = await this.prisma.quote.updateMany({
+      where: { id: quoteId, acceptedAt: null },
+      data: { acceptedAt: new Date() },
+    });
+    if (claim.count === 0) {
+      throw new BadRequestException('Quote already accepted');
+    }
+
     // The point of real commitment — re-validates SC availability against
     // *now*, not the stale preview from createQuote, and only here does an
     // actual DEBIT ledger entry get written (MembershipService.commitBenefit).
@@ -273,7 +288,7 @@ export class CommerceService {
     const [, invoice] = await this.prisma.$transaction([
       this.prisma.quote.update({
         where: { id: quoteId },
-        data: { acceptedAt: new Date(), ...(adjusted ? { amount: finalAmount } : {}) },
+        data: adjusted ? { amount: finalAmount } : {},
       }),
       this.prisma.invoice.create({
         data: { caseId: quote.caseId, quoteId: quote.id, amount: finalAmount, currency: quote.currency },
@@ -522,33 +537,57 @@ export class CommerceService {
    * one partially refunds it, and the Payment moves to PARTIALLY_REFUNDED
    * rather than REFUNDED until the full amount has been returned.
    */
-  private async remainingRefundable(paymentId: string, paymentAmount: Prisma.Decimal | number): Promise<number> {
-    const alreadyRefunded = await this.prisma.refund.aggregate({ where: { paymentId }, _sum: { amount: true } });
+  private async remainingRefundable(
+    db: PrismaService | Prisma.TransactionClient,
+    paymentId: string,
+    paymentAmount: Prisma.Decimal | number,
+  ): Promise<number> {
+    const alreadyRefunded = await db.refund.aggregate({ where: { paymentId }, _sum: { amount: true } });
     const refundedSoFar = Number(alreadyRefunded._sum.amount ?? 0);
     return Number(paymentAmount) - refundedSoFar;
+  }
+
+  /** Serializes concurrent refunds against the same payment. `SELECT ...
+   * FOR UPDATE` locks the Payment row for the transaction's lifetime, so a
+   * second concurrent refund attempt on the same payment blocks until the
+   * first commits — then it re-reads remainingRefundable and sees the
+   * first refund's now-committed Refund row. Without this, two concurrent
+   * refund requests (two Finance actors, or one retried request) can both
+   * read the same "remaining" value via remainingRefundable's aggregate
+   * and together refund more than the payment ever had. */
+  private async withPaymentLock<T>(paymentId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${paymentId} FOR UPDATE`;
+      return fn(tx);
+    });
   }
 
   /** The actual refund: Paystack call, Refund row, Payment/case status
    * update, audit, customer notification. Shared by the immediate
    * (below-threshold) path and approveRefundRequest (above-threshold,
    * post-approval) — the two differ only in *when* this runs and who
-   * authorized it, never in what it does. */
+   * authorized it, never in what it does. Callers are expected to have
+   * already validated `requested` against a lock-held remainingRefundable
+   * (withPaymentLock) and to pass that same `db` handle through here, so
+   * the Refund row this writes lands inside the same locked transaction
+   * as the validation that authorized it. */
   private async executeRefund(
+    db: PrismaService | Prisma.TransactionClient,
     actor: AuthenticatedUser,
     payment: Prisma.PaymentGetPayload<{ include: { invoice: { include: { case: { include: { customer: true } } } } } }>,
     requested: number,
     reason: string | null,
   ) {
-    const refundedSoFar = Number(payment.amount) - (await this.remainingRefundable(payment.id, payment.amount));
+    const refundedSoFar = Number(payment.amount) - (await this.remainingRefundable(db, payment.id, payment.amount));
     const result = await this.paystack.refundTransaction(payment.providerReference, Math.round(requested * 100));
 
-    const refund = await this.prisma.refund.create({
+    const refund = await db.refund.create({
       data: { paymentId: payment.id, amount: requested, reason: reason ?? undefined, actorId: actor.id },
     });
 
     const newStatus = requested + refundedSoFar >= Number(payment.amount) ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED;
-    const updatedPayment = await this.prisma.payment.update({ where: { id: payment.id }, data: { status: newStatus } });
-    await this.prisma.serviceCase.update({ where: { id: payment.invoice.caseId }, data: { paymentStatus: newStatus } });
+    const updatedPayment = await db.payment.update({ where: { id: payment.id }, data: { status: newStatus } });
+    await db.serviceCase.update({ where: { id: payment.invoice.caseId }, data: { paymentStatus: newStatus } });
 
     await this.audit.record({
       caseId: payment.invoice.caseId,
@@ -585,7 +624,7 @@ export class CommerceService {
       throw new BadRequestException(`Cannot refund a payment in status ${payment.status}`);
     }
 
-    const remaining = await this.remainingRefundable(paymentId, payment.amount);
+    const remaining = await this.remainingRefundable(this.prisma, paymentId, payment.amount);
     const requested = dto.amount ?? remaining;
     if (requested <= 0 || requested > remaining) {
       throw new BadRequestException(`Refund amount must be between 0 and the remaining refundable amount (${remaining})`);
@@ -606,7 +645,17 @@ export class CommerceService {
       return { refundRequest };
     }
 
-    return this.executeRefund(actor, payment, requested, dto.reason);
+    // Re-validated under a row lock immediately before executing — the
+    // check above is a fast, friendly error for the common case; this is
+    // what actually prevents two concurrent refunds on the same payment
+    // from together exceeding its total amount (see withPaymentLock).
+    return this.withPaymentLock(paymentId, async (tx) => {
+      const lockedRemaining = await this.remainingRefundable(tx, paymentId, payment.amount);
+      if (requested <= 0 || requested > lockedRemaining) {
+        throw new BadRequestException(`Refund amount must be between 0 and the remaining refundable amount (${lockedRemaining})`);
+      }
+      return this.executeRefund(tx, actor, payment, requested, dto.reason);
+    });
   }
 
   /** Approves a pending RefundRequest and executes the refund. Deliberately
@@ -630,14 +679,21 @@ export class CommerceService {
       throw new BadRequestException(`Cannot refund a payment in status ${payment.status}`);
     }
     const requested = Number(refundRequest.amount);
-    const remaining = await this.remainingRefundable(payment.id, payment.amount);
-    if (requested <= 0 || requested > remaining) {
-      throw new BadRequestException(
-        `Refund amount must be between 0 and the remaining refundable amount (${remaining}) — it may have changed since this request was made`,
-      );
-    }
 
-    const result = await this.executeRefund(actor, payment, requested, refundRequest.reason);
+    // Same row-locked re-validation as refundPayment's immediate path (see
+    // withPaymentLock) — without it, this request's approval could race
+    // another refund on the same payment (a second RefundRequest approval,
+    // or a below-threshold immediate refund) and together exceed the
+    // payment's total amount.
+    const result = await this.withPaymentLock(payment.id, async (tx) => {
+      const remaining = await this.remainingRefundable(tx, payment.id, payment.amount);
+      if (requested <= 0 || requested > remaining) {
+        throw new BadRequestException(
+          `Refund amount must be between 0 and the remaining refundable amount (${remaining}) — it may have changed since this request was made`,
+        );
+      }
+      return this.executeRefund(tx, actor, payment, requested, refundRequest.reason);
+    });
 
     await this.prisma.refundRequest.update({
       where: { id: refundRequestId },

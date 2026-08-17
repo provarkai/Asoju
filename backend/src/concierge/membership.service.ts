@@ -3,8 +3,7 @@ import { CaseTier, Prisma, PricingZone, Subscription, SubscriptionStatus } from 
 import { PrismaService } from '../prisma/prisma.service';
 import { ScLedgerService } from './sc-ledger.service';
 import { PlanConfigService } from './plan-config.service';
-
-const BILLING_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+import { BILLING_PERIOD_MS } from './membership-plans';
 
 export interface QuoteBenefitPreview {
   subscriptionId: string;

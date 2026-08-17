@@ -7,7 +7,7 @@ import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ScLedgerService } from './sc-ledger.service';
 import { MembershipService } from './membership.service';
 import { PlanConfigService } from './plan-config.service';
-import { usdToNgnRate } from './membership-plans';
+import { usdToNgnRate, BILLING_PERIOD_MS } from './membership-plans';
 
 /**
  * Section 12 P1 "Concierge workflow" — the subscription/relationship-
@@ -33,7 +33,13 @@ export class ConciergeService {
    * 5/mo). Locks the plan's USD price and the current FX rate onto the
    * subscription row at subscribe time (never recomputed retroactively —
    * see the schema comment), and grants the first period's SC immediately
-   * so a new member doesn't wait for the first renewal sweep to have any. */
+   * so a new member doesn't wait for the first renewal sweep to have any.
+   *
+   * Also sets renewsAt to one billing period out, matching what
+   * SubscriptionBillingService.billPeriod() would set on a renewal —
+   * runBillingSweep() only selects `renewsAt: { lte: now }`, and a NULL
+   * renewsAt never satisfies that, so leaving it unset here would silently
+   * exclude the subscription from ever being billed again. */
   async subscribe(user: AuthenticatedUser, plan: MembershipPlan = MembershipPlan.PRIORITY) {
     const customer = await this.requireCustomer(user.id);
 
@@ -54,6 +60,7 @@ export class ConciergeService {
         priceUsd: planConfig.priceUsd,
         fxRate,
         amount: Math.round(planConfig.priceUsd * fxRate),
+        renewsAt: new Date(Date.now() + BILLING_PERIOD_MS),
       },
     });
 

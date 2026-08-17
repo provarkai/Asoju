@@ -143,6 +143,54 @@ describe('Membership / SC ledger', () => {
     expect(Number(ledger.body[0].amountUsd)).toBe(50);
   });
 
+  it('sets renewsAt ~30 days out at subscribe time, and the billing sweep only bills once it is actually due', async () => {
+    // Regression test — subscribe() used to never set renewsAt at all.
+    // runBillingSweep() only selects `renewsAt: { lte: now }`, and NULL
+    // never satisfies that in SQL, so an unset renewsAt silently excluded
+    // the subscription from ever being billed again after the signup SC
+    // grant. Confirms both halves: a fresh subscription has a real future
+    // renewsAt (not null, and not already due), and backdating it makes
+    // the sweep actually pick it up and bill it.
+    //
+    // Uses its own customer/subscription rather than the shared
+    // `subscriptionId` above — this test mutates renewsAt directly, and
+    // the eligible-request-allowance tests below key their "this period"
+    // window off that same field, so reusing it risks coupling this test's
+    // side effects into theirs.
+    const billingCustomer = await createCustomer('membership-billing-sweep');
+    const billingToken = await login(app, billingCustomer.email);
+    const subRes = await request(app.getHttpServer())
+      .post('/api/me/subscription')
+      .set('Authorization', `Bearer ${billingToken}`)
+      .send({ plan: 'PRIORITY' })
+      .expect(201);
+    const billingSubscriptionId = subRes.body.id;
+
+    const subscription = await prisma.subscription.findUniqueOrThrow({ where: { id: billingSubscriptionId } });
+    expect(subscription.renewsAt).not.toBeNull();
+    const daysOut = (subscription.renewsAt!.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    expect(daysOut).toBeGreaterThan(29);
+    expect(daysOut).toBeLessThan(31);
+
+    await request(app.getHttpServer())
+      .post('/api/admin/subscriptions/run-billing')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    // Not due yet — the sweep must leave it alone.
+    expect(await prisma.subscriptionInvoice.count({ where: { subscriptionId: billingSubscriptionId } })).toBe(0);
+
+    await prisma.subscription.update({ where: { id: billingSubscriptionId }, data: { renewsAt: new Date(Date.now() - 1000) } });
+    const sweepRes = await request(app.getHttpServer())
+      .post('/api/admin/subscriptions/run-billing')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(sweepRes.body.billed).toBeGreaterThanOrEqual(1);
+    expect(await prisma.subscriptionInvoice.count({ where: { subscriptionId: billingSubscriptionId } })).toBe(1);
+
+    const rebilled = await prisma.subscription.findUniqueOrThrow({ where: { id: billingSubscriptionId } });
+    expect(rebilled.renewsAt!.getTime()).toBeGreaterThan(Date.now());
+  });
+
   it('rejects subscribing twice while already active', async () => {
     await request(app.getHttpServer())
       .post('/api/me/subscription')

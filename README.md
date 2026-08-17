@@ -263,6 +263,25 @@ end-to-end against a real Postgres instance:
   every completed intake audited as AI-attributed) now mocks the OpenRouter HTTP call instead of the
   Anthropic SDK. Negative-control verified: temporarily reintroducing a freeform-text fallback when no
   tool call is present fails exactly the one test guarding against it; restoring it passes all 11 again.
+- **Fixed three real money-handling race conditions**, found by a codebase-wide review, not from a bug
+  report: (1) `acceptQuote()` checked `quote.acceptedAt === null` then acted, with no lock — two
+  concurrent accepts of the same quote (a double-click, a client retry) could both pass the check before
+  either wrote, double-debiting the customer's SC balance and creating two `Invoice` rows for one quote.
+  Fixed with an atomic `updateMany({ where: { id, acceptedAt: null } })` — the database itself now
+  guarantees only one of two concurrent accepts can ever win. (2) `refundPayment()` / `approveRefundRequest()`
+  computed "remaining refundable" via a plain aggregate with no row lock, so two concurrent refunds on the
+  same payment could together refund more than it ever had. Fixed with `SELECT ... FOR UPDATE` inside an
+  interactive `$transaction`, serializing concurrent refund attempts on the same `Payment` row and
+  re-validating the remaining amount under the lock immediately before executing. (3) `ConciergeService
+  .subscribe()` created a new `Subscription` without ever setting `renewsAt` — `runBillingSweep()` only
+  selects `renewsAt: { lte: now }`, and `NULL <= now` is never true in SQL, so a new subscription got its
+  signup SC grant and then silently never billed again. Fixed by setting `renewsAt` one billing period out
+  at subscribe time, the same as a renewal would. All three are exercised by new regression tests that
+  fire real concurrent requests (`Promise.all`) against the real HTTP server and real Postgres, not
+  simulated: `quote-expiry.e2e-spec.ts` (two concurrent accepts → exactly one 201, one Invoice row),
+  `refund.e2e-spec.ts` (two concurrent over-limit refunds → exactly one succeeds, total never exceeds the
+  payment), `membership.e2e-spec.ts` (fresh `renewsAt` is real and ~30 days out, sweep leaves it alone
+  until backdated, then bills and rolls it forward).
 - **Payment expiry sweep** — a checkout started via `POST /invoices/:id/pay` that's abandoned (no
   webhook ever arrives) used to stay `PENDING` forever. `PaymentExpirySchedulerService` runs hourly
   (plus `POST /admin/payments/run-expiry-sweep`, Admin/SuperAdmin, for ops/testing — same

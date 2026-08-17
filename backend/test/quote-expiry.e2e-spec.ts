@@ -122,6 +122,28 @@ describe('Quote expiry', () => {
     expect(res.body.message).toMatch(/expired/i);
   });
 
+  it('two concurrent accepts of the same quote: exactly one succeeds, exactly one Invoice is created', async () => {
+    // Regression test for a TOCTOU race in acceptQuote — a double-click or
+    // client retry sending two concurrent accepts used to both pass the
+    // acceptedAt-is-null check before either wrote, causing a double SC
+    // debit and two Invoice rows for one quote. Fired via Promise.all
+    // against the real HTTP server / real Postgres, not simulated.
+    const { quoteId } = await createQuotedCase();
+
+    const [first, second] = await Promise.all([
+      request(app.getHttpServer()).post(`/api/quotes/${quoteId}/accept`).set('Authorization', `Bearer ${customerToken}`),
+      request(app.getHttpServer()).post(`/api/quotes/${quoteId}/accept`).set('Authorization', `Bearer ${customerToken}`),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([201, 400]);
+    const loser = first.status === 400 ? first : second;
+    expect(loser.body.message).toMatch(/already accepted/i);
+
+    const invoices = await prisma.invoice.findMany({ where: { quoteId } });
+    expect(invoices).toHaveLength(1);
+  });
+
   it('blocks Finance (non-Admin) from triggering the quote expiry sweep', async () => {
     await request(app.getHttpServer())
       .post('/api/admin/quotes/run-expiry-sweep')

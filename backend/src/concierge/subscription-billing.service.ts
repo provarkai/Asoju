@@ -7,13 +7,12 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PaystackService } from '../payments/paystack.service';
 import { ScLedgerService } from './sc-ledger.service';
 import { PlanConfigService } from './plan-config.service';
+import { BILLING_PERIOD_MS } from './membership-plans';
 
 /** Reference prefix distinguishing subscription-billing Paystack references
  * from case-invoice ones (CASE_INVOICE_REFERENCE_PREFIX in commerce.service)
  * so the one webhook endpoint can route both. */
 export const SUBSCRIPTION_INVOICE_REFERENCE_PREFIX = 'subinv_';
-
-const BILLING_PERIOD_DAYS = 30;
 
 interface BillableSubscription {
   id: string;
@@ -88,7 +87,7 @@ export class SubscriptionBillingService {
 
   private async billPeriod(subscription: BillableSubscription) {
     const periodStart = new Date();
-    const periodEnd = new Date(periodStart.getTime() + BILLING_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+    const periodEnd = new Date(periodStart.getTime() + BILLING_PERIOD_MS);
     const reference = `${SUBSCRIPTION_INVOICE_REFERENCE_PREFIX}${subscription.id}_${randomBytes(4).toString('hex')}`;
     const amountKobo = Math.round(Number(subscription.amount) * 100);
 

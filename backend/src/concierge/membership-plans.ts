@@ -10,6 +10,11 @@
 
 const DEFAULT_USD_TO_NGN_RATE = 1600;
 
+/** Shared by ConciergeService.subscribe() (sets the first renewsAt) and
+ * SubscriptionBillingService (bills on it, then rolls it forward) — one
+ * flat 30-day period, no proration, per Section 11.2. */
+export const BILLING_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+
 /**
  * P0 Technical Build Spec Section 19 "FX Pricing → Naira Execution" —
  * "a configured source/manual approved rate", not a live FX-provider

@@ -187,4 +187,38 @@ describe('Payment refunds', () => {
     expect(refunds).toHaveLength(2);
     expect(refunds.reduce((sum, r) => sum + Number(r.amount), 0)).toBe(100000);
   });
+
+  it('two concurrent refunds that together exceed the payment: exactly one succeeds, total never exceeds the payment amount', async () => {
+    // Regression test for a TOCTOU race — refundPayment used to read
+    // "remaining refundable" with no row lock, so two concurrent refund
+    // requests could both see the full remaining amount and both go
+    // through, refunding more than the payment ever had. Fired via
+    // Promise.all against the real HTTP server / real Postgres, not
+    // simulated — each request is for 60,000 against a 100,000 payment,
+    // so both fitting would over-refund by 20,000.
+    const paymentId = await createPaidPayment(100000);
+
+    const [first, second] = await Promise.all([
+      request(app.getHttpServer())
+        .post(`/api/admin/payments/${paymentId}/refund`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ amount: 60000, reason: 'concurrent refund attempt 1' }),
+      request(app.getHttpServer())
+        .post(`/api/admin/payments/${paymentId}/refund`)
+        .set('Authorization', `Bearer ${financeToken}`)
+        .send({ amount: 60000, reason: 'concurrent refund attempt 2' }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 400]);
+    const loser = first.status === 400 ? first : second;
+    expect(loser.body.message).toMatch(/remaining refundable amount/i);
+
+    const refunds = await prisma.refund.findMany({ where: { paymentId } });
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0].amount.toNumber()).toBe(60000);
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    expect(payment.status).toBe(PaymentStatus.PARTIALLY_REFUNDED);
+  });
 });
