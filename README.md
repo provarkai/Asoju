@@ -762,6 +762,14 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
 - A `RecurringSchedule` is unique per origin case — cancelling (`PATCH /api/cases/:caseId/recurrence`,
   `{"active":false}`) pauses it rather than deleting it; reactivating restores the exact time that was
   left until the next run when it was paused, not a fresh full cadence.
+- **`ServiceFamily` (additive layer, `docs/FRONTEND_HANDOFF_V1_GAP_MAP.md` §1 Option B)** — the real
+  `ServiceType` enum (12 values now — the original 10 plus `LEGAL_DOCUMENT_SERVICES`/
+  `HEALTHCARE_COORDINATION` from the Platform Expansion PRD — and every module keyed off it) is exactly
+  as it was; `backend/src/cases/service-family.ts`'s `SERVICE_TYPE_TO_FAMILY` is a derived, display-only
+  grouping into the six locked public families (Arrivals/Inspect/Build/Care/Verify/Assist). Genuinely
+  public `GET /service-families` (no auth), and `serviceFamily` now rides alongside the real
+  `serviceType` on every case response (`GET /cases`, `GET /cases/:id`, the beneficiary view too) —
+  additive, never replacing it.
 - **WhatsApp integration** (Zavu, docs.zavu.dev): set `WHATSAPP_WEBHOOK_SECRET` to accept inbound
   messages at `POST /api/webhooks/whatsapp` (shared-secret stand-in — Zavu's real inbound signature
   scheme isn't confirmed publicly enough to implement; see `WhatsappWebhookGuard`'s comment). Set

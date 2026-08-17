@@ -62,6 +62,31 @@ but flagging that A's blast radius includes every one of the ~10 backend
 modules and e2e specs above, which should be scoped as its own ticket
 rather than folded into frontend Sprint 1.
 
+**Closed, Option B (17 Aug 2026):** `A`'s full restructuring never got its
+own ticket; `B` — the additive layer — is now real, not just this table.
+`backend/src/cases/service-family.ts`'s `SERVICE_TYPE_TO_FAMILY` maps
+every real `ServiceType` value (12 now, not 10 — `LEGAL_DOCUMENT_SERVICES`/
+`HEALTHCARE_COORDINATION` were added by the Platform Expansion PRD after
+this table was first written, categorized here the same way: legal/
+document work with the other verification-shaped service, healthcare
+coordination with the other family-support ones) to exactly one of the six
+locked families, computed fresh rather than hand-duplicated. `GET
+/service-families` is genuinely public (no auth — same reasoning as the
+anonymous Concierge demo endpoint), and every case response
+(`GET /cases`, `GET /cases/:id`, including the beneficiary curated view)
+now carries a derived `serviceFamily` alongside the untouched real
+`serviceType` — additive, never replacing it. `ServiceType` itself, and
+every module keyed off its 12 granular values, is exactly as it was.
+Covered by `backend/test/service-family.e2e-spec.ts` (4 tests, including
+an exhaustiveness check that every real `ServiceType` value lands in
+exactly one family). `frontend/src/lib/services.ts`'s own
+`SERVICE_FAMILIES.serviceTypes` — previously acknowledged in its own
+comment as "display-only... not yet wired" — is kept hand-in-sync with
+this backend mapping (including the two newer service types it was
+missing), though it still isn't fetched from the new endpoint at render
+time; wiring the homepage/service pages to the live endpoint instead of
+the static list is a smaller, separate follow-up, not attempted here.
+
 ---
 
 ## 2. The one P0-blocking backend gap: Concierge requires auth today

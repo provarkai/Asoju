@@ -28,8 +28,19 @@ import { RaiseDisputeDto } from './dto/raise-dispute.dto';
 import { BENEFICIARY_CASE_SELECT, toBeneficiaryCaseDetail } from './beneficiary-case-view';
 import { slaHoursForCase } from './regional-sla';
 import { IdempotencyService } from '../common/idempotency/idempotency.service';
+import { familyForServiceType } from './service-family';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
+
+/** docs/FRONTEND_HANDOFF_V1_GAP_MAP.md §1's additive `ServiceFamily` layer
+ * — attaches the derived family alongside the real `serviceType` on every
+ * case shape this service returns, never replacing it. The `string` bound
+ * (rather than the real `ServiceType` enum) accommodates
+ * beneficiary-case-view.ts's own looser allowlist-projection typing; the
+ * value is always a real column value at runtime either way. */
+function withServiceFamily<T extends { serviceType: string }>(serviceCase: T): T & { serviceFamily: ReturnType<typeof familyForServiceType> } {
+  return { ...serviceCase, serviceFamily: familyForServiceType(serviceCase.serviceType as ServiceType) };
+}
 
 // P0 Tech Platform §24 "SLA & Alert Engine" — "P0 operating hypotheses
 // should be configurable, not hard-coded." Defaults are the spec's own
@@ -387,10 +398,11 @@ export class CasesService {
   async listCasesForUser(user: AuthenticatedUser) {
     if (user.role === Role.CUSTOMER) {
       const customer = await this.requireCustomerProfile(user.id);
-      return this.prisma.serviceCase.findMany({
+      const cases = await this.prisma.serviceCase.findMany({
         where: { customerId: customer.id },
         orderBy: { createdAt: 'desc' },
       });
+      return cases.map(withServiceFamily);
     }
 
     if (user.role === Role.BENEFICIARY) {
@@ -399,11 +411,12 @@ export class CasesService {
       // curated per-case view actually lives.
       const beneficiary = await this.prisma.beneficiary.findUnique({ where: { userId: user.id } });
       if (!beneficiary) return [];
-      return this.prisma.serviceCase.findMany({
+      const cases = await this.prisma.serviceCase.findMany({
         where: { beneficiaryId: beneficiary.id },
         select: { id: true, caseNumber: true, serviceType: true, status: true, location: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
       });
+      return cases.map(withServiceFamily);
     }
 
     if (user.role === Role.FIELD_AGENT || user.role === Role.PROVIDER) {
@@ -413,11 +426,12 @@ export class CasesService {
       const ownAssignmentFilter = {
         OR: [{ agent: { userId: user.id } }, { provider: { userId: user.id } }],
       };
-      return this.prisma.serviceCase.findMany({
+      const cases = await this.prisma.serviceCase.findMany({
         where: { assignments: { some: ownAssignmentFilter } },
         include: { assignments: { where: ownAssignmentFilter } },
         orderBy: { updatedAt: 'desc' },
       });
+      return cases.map(withServiceFamily);
     }
 
     // Ops Control Centre "case queue" (Section 5.3) is an org-wide
@@ -438,7 +452,7 @@ export class CasesService {
       // (see comment above), but for PII-restricted staff roles that
       // extends to the customer's name too — the case number is what they
       // work with, not who the customer is.
-      return cases.map((c) => ({ ...c, customer: redactCustomerName(c.customer, user.role) }));
+      return cases.map((c) => withServiceFamily({ ...c, customer: redactCustomerName(c.customer, user.role) }));
     }
 
     return [];
@@ -457,7 +471,7 @@ export class CasesService {
         select: BENEFICIARY_CASE_SELECT,
       });
       if (!beneficiaryCase) throw new NotFoundException('Case not found');
-      return toBeneficiaryCaseDetail(beneficiaryCase, (key) => this.storage.getViewUrl(key));
+      return withServiceFamily(await toBeneficiaryCaseDetail(beneficiaryCase, (key) => this.storage.getViewUrl(key)));
     }
 
     const serviceCase = await this.prisma.serviceCase.findUnique({
@@ -533,7 +547,7 @@ export class CasesService {
     serviceCase.documents = documentsWithView as typeof serviceCase.documents;
     serviceCase.evidence = evidenceWithView as typeof serviceCase.evidence;
 
-    return serviceCase;
+    return withServiceFamily(serviceCase);
   }
 
   /**
