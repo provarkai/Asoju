@@ -401,17 +401,18 @@ copy invented:
   render, and to guard against both fabricated-stats regressions, not
   just the fabricated-testimonials one it already caught).
 
-**Still genuinely open — confirmed, not resolved by this pass:**
-Arrivals provider/booking availability (§4 above). The zip's
-`99_Supplemental/ASOJU_Arrivals_Service_Page_Blueprint_v1.1.docx`
-supersedes the `07_Service_Pages` v1.0 copy and is far more specific
-about this than the original flag was: transport/accommodation
-"help secure and coordinate" is now the locked positioning, with a
-full arrangement-status state machine required (`requested` → `being
-sourced` → `awaiting confirmation` → `confirmed` → `changed`/
-`cancelled` → `completed`) that must be "backend/provider-authoritative"
-— "the frontend should never imply guaranteed availability before
-confirmation." This is real backend + frontend work (a booking/
-provider-availability model, not yet a line in `backend/prisma/
-schema.prisma`), out of scope for a copy/content pass — flagged here
-rather than attempted speculatively.
+**Closed (17 Aug 2026):** Arrivals provider/booking availability (§4
+above). `99_Supplemental/ASOJU_Arrivals_Service_Page_Blueprint_v1.1.docx`'s
+locked arrangement-status state machine (`requested` → `being sourced` →
+`awaiting confirmation` → `confirmed` → `changed`/`cancelled` →
+`completed`) is now real: `ArrivalArrangement` (`backend/prisma/
+schema.prisma`) + `arrival-arrangement-state-machine.ts` +
+`POST`/`PATCH cases/:caseId/arrival-arrangements[/:id]` — staff-only
+writes (no self-service vendor portal exists for ad hoc transport/
+accommodation, so this is genuinely "backend/provider-authoritative": a
+human coordinates off-platform and records the real state), customer
+read-only. See README's own entry for the full behavioral detail
+(required note on cancel/change, a change always re-requiring
+confirmation rather than staying `CONFIRMED` against stale detail).
+Covered by `backend/test/arrival.e2e-spec.ts`'s "Arrival arrangements"
+block (8 tests).

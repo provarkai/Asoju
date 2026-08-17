@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { apiFetch, ApiError } from '@/lib/api';
 import { uploadFile } from '@/lib/upload';
 import { useOpsGuard } from '@/lib/useOpsGuard';
-import { ADMIN_ROLES, CHECKLIST_STAFF_ROLES, FINANCE_ROLES } from '@/lib/roles';
+import { ADMIN_ROLES, ARRIVAL_STAFF_ROLES, CHECKLIST_STAFF_ROLES, FINANCE_ROLES } from '@/lib/roles';
 import { humanCaseStatus, humanServiceType } from '@/lib/case-status';
 
 const CASE_STATUSES = [
@@ -74,6 +74,38 @@ interface CaseTask {
   isComplete: boolean;
   completedAt: string | null;
 }
+
+interface ArrivalArrangement {
+  id: string;
+  type: 'AIRPORT_TRANSPORT' | 'ACCOMMODATION';
+  status: string;
+  detail: string | null;
+  note: string | null;
+  updatedAt: string;
+}
+
+// Mirrors backend/src/arrival/arrival-arrangement-state-machine.ts's
+// TRANSITIONS map — used only to render the right action buttons; the
+// backend re-validates every transition regardless.
+const ARRANGEMENT_NEXT_STATUSES: Record<string, string[]> = {
+  REQUESTED: ['BEING_SOURCED', 'CANCELLED'],
+  BEING_SOURCED: ['AWAITING_CONFIRMATION', 'CANCELLED'],
+  AWAITING_CONFIRMATION: ['CONFIRMED', 'CANCELLED'],
+  CONFIRMED: ['CHANGED', 'CANCELLED', 'COMPLETED'],
+  CHANGED: ['AWAITING_CONFIRMATION', 'CANCELLED'],
+  CANCELLED: [],
+  COMPLETED: [],
+};
+const ARRANGEMENT_NOTE_REQUIRED = new Set(['CANCELLED', 'CHANGED']);
+const ARRANGEMENT_STATUS_LABEL: Record<string, string> = {
+  REQUESTED: 'Requested',
+  BEING_SOURCED: 'Being sourced',
+  AWAITING_CONFIRMATION: 'Awaiting confirmation',
+  CONFIRMED: 'Confirmed',
+  CHANGED: 'Changed — awaiting reconfirmation',
+  CANCELLED: 'Cancelled',
+  COMPLETED: 'Completed',
+};
 
 interface ScopeDetail {
   id: string;
@@ -151,6 +183,9 @@ export default function OpsCaseDetailPage() {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editTaskLabel, setEditTaskLabel] = useState('');
   const [editTaskRequired, setEditTaskRequired] = useState(true);
+  const [arrangements, setArrangements] = useState<ArrivalArrangement[] | null>(null);
+  const [newArrangementType, setNewArrangementType] = useState<'AIRPORT_TRANSPORT' | 'ACCOMMODATION'>('AIRPORT_TRANSPORT');
+  const [arrangementNoteDrafts, setArrangementNoteDrafts] = useState<Record<string, string>>({});
 
   function load() {
     setError(null);
@@ -181,6 +216,18 @@ export default function OpsCaseDetailPage() {
     apiFetch<Provider[]>('/providers').then(setProviders).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, params.id]);
+
+  function loadArrangements() {
+    apiFetch<ArrivalArrangement[]>(`/cases/${params.id}/arrival-arrangements`).then(setArrangements).catch(() => {});
+  }
+
+  // Only ARRIVAL_SUPPORT cases have arrangements at all — the endpoint
+  // 400s for any other service type, so don't fetch it until `detail`
+  // confirms the service type.
+  useEffect(() => {
+    if (detail?.serviceType === 'ARRIVAL_SUPPORT') loadArrangements();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail?.serviceType, params.id]);
 
   async function run(key: string, fn: () => Promise<unknown>) {
     setBusy(key);
@@ -682,6 +729,88 @@ export default function OpsCaseDetailPage() {
             );
           })}
           {refundQueuedMessage && <p className="muted">{refundQueuedMessage}</p>}
+        </div>
+      )}
+
+      {detail.serviceType === 'ARRIVAL_SUPPORT' && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Transport &amp; accommodation</h2>
+          <p className="muted">
+            Coordinated directly with the real vendor (phone/email/WhatsApp) — status here is
+            provider-authoritative, never a guess at availability. The customer only ever sees what&apos;s
+            actually confirmed.
+          </p>
+          {arrangements === null && <p className="muted">Loading…</p>}
+          {arrangements && arrangements.length === 0 && <p className="muted">Nothing arranged yet.</p>}
+          {arrangements && arrangements.length > 0 && (
+            <ul>
+              {arrangements.map((a) => (
+                <li key={a.id} style={{ marginBottom: '0.75rem' }}>
+                  <strong>{a.type === 'AIRPORT_TRANSPORT' ? 'Airport transport' : 'Accommodation'}</strong>
+                  {' — '}
+                  <span className="badge">{ARRANGEMENT_STATUS_LABEL[a.status] ?? a.status}</span>
+                  {a.detail && <div className="muted">{a.detail}</div>}
+                  {a.note && <div className="muted">Note: {a.note}</div>}
+                  {user && ARRIVAL_STAFF_ROLES.includes(user.role) && ARRANGEMENT_NEXT_STATUSES[a.status]?.length > 0 && (
+                    <div className="actions-row" style={{ marginTop: '0.375rem' }}>
+                      {ARRANGEMENT_NEXT_STATUSES[a.status].map((next) => (
+                        <span key={next} className="actions-row" style={{ display: 'inline-flex' }}>
+                          {ARRANGEMENT_NOTE_REQUIRED.has(next) && (
+                            <input
+                              placeholder="Note (required)"
+                              value={arrangementNoteDrafts[a.id] ?? ''}
+                              onChange={(e) => setArrangementNoteDrafts((d) => ({ ...d, [a.id]: e.target.value }))}
+                            />
+                          )}
+                          <button
+                            className="btn btn--ghost"
+                            disabled={busy !== null || (ARRANGEMENT_NOTE_REQUIRED.has(next) && !arrangementNoteDrafts[a.id]?.trim())}
+                            onClick={() =>
+                              run(`arrangement-${a.id}-${next}`, async () => {
+                                await apiFetch(`/cases/${detail.id}/arrival-arrangements/${a.id}`, {
+                                  method: 'PATCH',
+                                  body: JSON.stringify({
+                                    status: next,
+                                    ...(ARRANGEMENT_NOTE_REQUIRED.has(next) ? { note: arrangementNoteDrafts[a.id] } : {}),
+                                  }),
+                                });
+                                loadArrangements();
+                              })
+                            }
+                          >
+                            {busy === `arrangement-${a.id}-${next}` ? 'Updating…' : ARRANGEMENT_STATUS_LABEL[next]}
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {user && ARRIVAL_STAFF_ROLES.includes(user.role) && (
+            <div className="actions-row">
+              <select value={newArrangementType} onChange={(e) => setNewArrangementType(e.target.value as 'AIRPORT_TRANSPORT' | 'ACCOMMODATION')}>
+                <option value="AIRPORT_TRANSPORT">Airport transport</option>
+                <option value="ACCOMMODATION">Accommodation</option>
+              </select>
+              <button
+                className="btn btn--secondary"
+                disabled={busy !== null}
+                onClick={() =>
+                  run('arrangement-add', async () => {
+                    await apiFetch(`/cases/${detail.id}/arrival-arrangements`, {
+                      method: 'POST',
+                      body: JSON.stringify({ type: newArrangementType }),
+                    });
+                    loadArrangements();
+                  })
+                }
+              >
+                {busy === 'arrangement-add' ? 'Requesting…' : 'Request arrangement'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

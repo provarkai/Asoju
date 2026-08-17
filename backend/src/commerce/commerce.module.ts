@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { CommerceService } from './commerce.service';
 import { CommerceController } from './commerce.controller';
 import { PaymentExpirySchedulerService } from './payment-expiry-scheduler.service';
+import { PaymentVerificationSchedulerService } from './payment-verification-scheduler.service';
 import { QuoteExpirySchedulerService } from './quote-expiry-scheduler.service';
 import { CasesModule } from '../cases/cases.module';
 import { CaseAccessGuard } from '../common/guards/case-access.guard';
@@ -16,7 +17,13 @@ import { IdempotencyModule } from '../common/idempotency/idempotency.module';
   // subscription-invoice webhook routing. ScopeService gates quote
   // creation on a confirmed scope existing — see CommerceService.
   imports: [CasesModule, PaymentsModule, ConciergeModule, ScopeModule, IdempotencyModule],
-  providers: [CommerceService, CaseAccessGuard, PaymentExpirySchedulerService, QuoteExpirySchedulerService],
+  providers: [
+    CommerceService,
+    CaseAccessGuard,
+    PaymentExpirySchedulerService,
+    PaymentVerificationSchedulerService,
+    QuoteExpirySchedulerService,
+  ],
   controllers: [CommerceController],
   exports: [CommerceService],
 })

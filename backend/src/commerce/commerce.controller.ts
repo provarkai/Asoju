@@ -177,6 +177,17 @@ export class CommerceController {
     return this.commerceService.runPaymentExpirySweep();
   }
 
+  /** Same on-demand-sweep pattern, for PaymentVerificationSchedulerService —
+   * the PROCESSING poll (Paystack's own transaction-verify endpoint) that
+   * catches a late/lost webhook, rather than waiting on its cron interval. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin/payments/run-verification-sweep')
+  runPaymentVerificationSweep() {
+    return this.commerceService.runPaymentVerificationSweep();
+  }
+
   /** Same on-demand-sweep pattern, for QuoteExpirySchedulerService. */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)

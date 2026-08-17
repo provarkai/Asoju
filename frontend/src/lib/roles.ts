@@ -20,6 +20,10 @@ export const FINANCE_ROLES = ['FINANCE', 'ADMIN', 'SUPER_ADMIN'];
 // service-type template.
 export const CHECKLIST_STAFF_ROLES = ['CASE_MANAGER', 'ADMIN', 'SUPER_ADMIN'];
 
+// Matches backend ArrivalArrangementsController's ARRIVAL_STAFF_ROLES —
+// who can create/transition a transport/accommodation arrangement.
+export const ARRIVAL_STAFF_ROLES = ['CASE_MANAGER', 'RELATIONSHIP_MANAGER', 'ADMIN', 'SUPER_ADMIN'];
+
 // Section 5.4 — Field Agent App / Provider Portal (shared workflow for MVP).
 export const FIELD_ROLES = ['FIELD_AGENT', 'PROVIDER'];
 
