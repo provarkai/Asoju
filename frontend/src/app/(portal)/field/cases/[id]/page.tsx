@@ -146,6 +146,53 @@ export default function FieldJobDetailPage() {
     });
   }
 
+  // #53 — a manual GPS ping while working a job, same offline handling as
+  // toggleTask/submitEvidence: queued locally on a network failure,
+  // replayed automatically once back online. Unlike check-in (one point in
+  // time), this can be tapped repeatedly through the job, so it carries
+  // its own idempotencyKey — a queued ping replayed after a dropped
+  // response updates the ops "active agents" feed exactly once, not twice.
+  async function reportLocation(assignmentId: string) {
+    if (!detail) return;
+    if (!navigator.geolocation) {
+      setError('Location is not available on this device');
+      return;
+    }
+    setBusy('location');
+    setError(null);
+
+    const position = await new Promise<GeolocationPosition | null>((resolve) => {
+      navigator.geolocation.getCurrentPosition(resolve, () => resolve(null), { timeout: 10000, enableHighAccuracy: true });
+    });
+    if (!position) {
+      setError("Couldn't get a GPS fix — try again somewhere with a clearer signal");
+      setBusy(null);
+      return;
+    }
+
+    const path = `/assignments/${assignmentId}/location`;
+    const body = {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      capturedAt: new Date(position.timestamp).toISOString(),
+      idempotencyKey: crypto.randomUUID(),
+    };
+
+    try {
+      await apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
+    } catch (err) {
+      if (!isNetworkFailure(err)) {
+        setError(err instanceof Error ? err.message : 'Action failed');
+      } else {
+        enqueue({ kind: 'location', caseId: detail.id, path, body });
+        refreshQueue();
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function toggleTask(taskId: string) {
     if (!detail) return;
     const path = `/cases/${detail.id}/tasks/${taskId}/complete`;
@@ -286,6 +333,11 @@ export default function FieldJobDetailPage() {
             {assignment.status === 'ACCEPTED' && !assignment.checkInAt && (
               <button className="btn" disabled={busy !== null} onClick={() => checkIn(assignment.id)}>
                 {busy === 'checkin' ? 'Checking in…' : 'Check in'}
+              </button>
+            )}
+            {assignment.checkInAt && canWork && (
+              <button className="btn btn--secondary" disabled={busy !== null} onClick={() => reportLocation(assignment.id)}>
+                {busy === 'location' ? 'Sending location…' : 'Update my location'}
               </button>
             )}
           </div>

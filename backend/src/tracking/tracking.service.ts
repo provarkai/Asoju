@@ -1,7 +1,8 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { IdempotencyOperation, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { IdempotencyService } from '../common/idempotency/idempotency.service';
 import { validateCoordinates, haversineDistanceMeters, MAX_ACCURACY_METERS } from '../common/geofence/geofence';
 
 export interface ReportLocationInput {
@@ -9,6 +10,7 @@ export interface ReportLocationInput {
   lng: number;
   accuracy?: number;
   capturedAt?: string;
+  idempotencyKey?: string;
 }
 
 /**
@@ -25,7 +27,10 @@ export interface ReportLocationInput {
  */
 @Injectable()
 export class TrackingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly idempotency: IdempotencyService,
+  ) {}
 
   private async requireActiveOwnedAssignment(actor: AuthenticatedUser, assignmentId: string) {
     const assignment = await this.prisma.assignment.findUnique({
@@ -62,6 +67,36 @@ export class TrackingService {
     const capturedAt = input.capturedAt ? new Date(input.capturedAt) : new Date();
     if (Number.isNaN(capturedAt.getTime())) {
       throw new BadRequestException('Invalid capturedAt timestamp');
+    }
+
+    // #53 — offline support. A live (online) ping has no idempotencyKey
+    // and just writes; a ping replayed from the offline queue carries one,
+    // and a replay after a dropped response returns the original ping
+    // instead of creating a second one at (almost) the same coordinates.
+    if (input.idempotencyKey) {
+      const check = await this.idempotency.begin(IdempotencyOperation.FIELD_LOCATION_REPORT, input.idempotencyKey, actor.id);
+      if (!check.shouldProceed) {
+        return check.resultReference
+          ? this.prisma.locationPing.findUnique({ where: { id: check.resultReference } })
+          : null;
+      }
+      try {
+        const ping = await this.prisma.locationPing.create({
+          data: {
+            assignmentId,
+            agentId: assignment.agentId,
+            latitude: input.lat,
+            longitude: input.lng,
+            accuracy: input.accuracy,
+            capturedAt,
+          },
+        });
+        await this.idempotency.complete(IdempotencyOperation.FIELD_LOCATION_REPORT, input.idempotencyKey, actor.id, ping.id);
+        return ping;
+      } catch (err) {
+        await this.idempotency.fail(IdempotencyOperation.FIELD_LOCATION_REPORT, input.idempotencyKey, actor.id);
+        throw err;
+      }
     }
 
     return this.prisma.locationPing.create({

@@ -2,17 +2,17 @@ import { apiFetch, ApiError } from './api';
 
 /**
  * Section 5.4 Field Agent App "offline support" — a poor-connectivity
- * agent shouldn't lose an in-progress checklist tick or evidence capture.
- * Deliberately scoped to those two actions (the ones the README committed
- * to), not every mutation on the job card: check-in wants a live
- * timestamp/GPS fix, and accept/decline/submit are meaningful only against
- * the assignment's current (online) state.
+ * agent shouldn't lose an in-progress checklist tick, evidence capture, or
+ * location ping. Deliberately scoped to these three actions, not every
+ * mutation on the job card: check-in wants a live timestamp/GPS fix, and
+ * accept/decline/submit are meaningful only against the assignment's
+ * current (online) state.
  *
  * Queued items persist to localStorage so a killed tab or reload before
  * reconnecting doesn't lose them either.
  */
 
-export type QueuedActionKind = 'task' | 'evidence';
+export type QueuedActionKind = 'task' | 'evidence' | 'location';
 
 export interface QueuedAction {
   id: string;

@@ -223,4 +223,53 @@ describe('Live GPS tracking — continuous location pings on an active assignmen
       .set('Authorization', `Bearer ${agentToken}`)
       .expect(403);
   });
+
+  /**
+   * #53 — offline support. frontend/src/lib/offlineQueue.ts queues a
+   * ping locally when a report fails offline and replays it once back
+   * online; a dropped response (the ping landed, the client just never
+   * saw the 201) means the SAME queued item gets sent twice. Without an
+   * idempotencyKey that creates two LocationPing rows for one real ping —
+   * this is what stops that.
+   */
+  it('is idempotent — a replayed ping with the same idempotencyKey never double-posts', async () => {
+    const { assignmentId, agentToken } = await setUpCheckedInAssignment('tracking-idempotent');
+
+    const body = { lat: 6.5, lng: 3.4, accuracy: 8, idempotencyKey: 'ping-offline-queue-1' };
+
+    const first = await request(app.getHttpServer())
+      .post(`/api/assignments/${assignmentId}/location`)
+      .set('Authorization', `Bearer ${agentToken}`)
+      .send(body)
+      .expect(201);
+
+    const replay = await request(app.getHttpServer())
+      .post(`/api/assignments/${assignmentId}/location`)
+      .set('Authorization', `Bearer ${agentToken}`)
+      .send(body)
+      .expect(201);
+
+    expect(replay.body.id).toBe(first.body.id);
+
+    const pingCount = await prisma.locationPing.count({ where: { assignmentId } });
+    expect(pingCount).toBe(1);
+  });
+
+  it('a ping with no idempotencyKey (the normal live/online path) behaves exactly as before', async () => {
+    const { assignmentId, agentToken } = await setUpCheckedInAssignment('tracking-no-key');
+
+    await request(app.getHttpServer())
+      .post(`/api/assignments/${assignmentId}/location`)
+      .set('Authorization', `Bearer ${agentToken}`)
+      .send({ lat: 6.5, lng: 3.4 })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/assignments/${assignmentId}/location`)
+      .set('Authorization', `Bearer ${agentToken}`)
+      .send({ lat: 6.51, lng: 3.41 })
+      .expect(201);
+
+    const pingCount = await prisma.locationPing.count({ where: { assignmentId } });
+    expect(pingCount).toBe(2);
+  });
 });
