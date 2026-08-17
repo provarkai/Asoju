@@ -855,6 +855,26 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   backend service) to create the first ADMIN and a FIELD_AGENT test account; it prints each generated
   password once, and re-running it is safe (existing accounts' passwords are left untouched). Every
   subsequent agent/provider account can then be onboarded through `/ops/agents` and `/ops/providers`.
+- **Demo/test data** — `npm run seed:demo --workspace=backend` (`backend/prisma/seed-demo.ts`), separate
+  from the bootstrap script above: creates a full set of obviously-synthetic staff accounts (admin,
+  finance, case manager, QC, RM, two field agents) and five diaspora customer accounts, all sharing one
+  known password (`AsojuDemo123!` by default, override via `SEED_DEMO_PASSWORD`), then drives seven
+  service cases through the real HTTP API — same "real app, no mocks" discipline as the e2e suite, not
+  raw inserts — spanning every major status (`SUBMITTED` through `COMPLETED`), two pricing zones, a
+  Concierge-tier subscription showing the membership discount, and two completed cases with contrasting
+  rating `publicConsent` (proving the `/trust` page's consent filter live, not just in tests). The only
+  direct-DB write is flipping a `Payment` to `PAID` — mirrors exactly what the real Paystack webhook
+  handler does (see `markPaid`'s comment), since nothing else can do that by design (Non-Negotiable #4).
+  Idempotent: safe to re-run, skips anything that already exists. Requires the backend already running
+  at `SEED_BASE_URL` (defaults to `http://localhost:3001/api`) and a `DATABASE_URL` this process can
+  actually reach — that second part is why this hasn't been run against the live Render deployment's
+  Postgres from a sandboxed CI-style environment: Render's external connection string is a plain TCP
+  Postgres connection, and an environment whose only permitted egress is HTTPS (proxied) can't reach it
+  no matter how the connection string is written. Run it from a machine with normal network access
+  instead, pointed at Render's external connection string
+  (`DATABASE_URL="<external string from the Render dashboard>" SEED_BASE_URL=https://asoju-backend.onrender.com/api npm run seed:demo --workspace=backend`).
+  The five demo customer accounts are already registered live (via the public `/auth/register` endpoint,
+  which needed no direct DB access) — only the staff accounts and the seven demo cases are still local-only.
 - A case's checklist is fixed at creation time from `backend/src/cases/checklist-templates.ts` — there's
   no UI yet to customize a checklist per case, only per service type.
 - A mistyped/expired referral code at registration is silently ignored rather than blocking signup —
