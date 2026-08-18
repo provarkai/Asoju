@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { CommerceService } from './commerce.service';
 import { CommerceController } from './commerce.controller';
 import { PaymentExpirySchedulerService } from './payment-expiry-scheduler.service';
@@ -10,13 +10,19 @@ import { PaymentsModule } from '../payments/payments.module';
 import { ConciergeModule } from '../concierge/concierge.module';
 import { ScopeModule } from '../scope/scope.module';
 import { IdempotencyModule } from '../common/idempotency/idempotency.module';
+import { PricingEngineModule } from '../pricing-engine/pricing-engine.module';
 
 @Module({
   // MembershipService (discount/SC application on quotes) comes in via
   // ConciergeModule's exports, already imported below for the
   // subscription-invoice webhook routing. ScopeService gates quote
   // creation on a confirmed scope existing — see CommerceService.
-  imports: [CasesModule, PaymentsModule, ConciergeModule, ScopeModule, IdempotencyModule],
+  // PricingEngineModule — docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 4
+  // — CommerceService.autoQuoteIfEligible calls PricingEngineService
+  // directly rather than duplicating its calculation. ScopeModule is
+  // forwardRef()'d — see that module's own comment on the reverse import
+  // (ScopeController calling into CommerceService after a confirm).
+  imports: [CasesModule, PaymentsModule, ConciergeModule, forwardRef(() => ScopeModule), IdempotencyModule, PricingEngineModule],
   providers: [
     CommerceService,
     CaseAccessGuard,

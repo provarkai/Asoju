@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
-import { AiEscalation, Role } from '@prisma/client';
+import { AiEscalation, Role, ServiceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { CasesService } from '../cases/cases.service';
 import { CONCIERGE_SYSTEM_PROMPT, PERSONAL_ASSISTANT_SYSTEM_PROMPT } from './system-prompt';
 import { scoreLead } from './scoring';
 import { ConciergeMessageDto } from './dto/concierge-message.dto';
@@ -13,6 +14,14 @@ import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 interface ConciergeTurnResult {
   reply_text: string;
   data_collected: {
+    // Constrained to the real ServiceType enum (plus null) in
+    // SUBMIT_TURN_TOOL's JSON schema below — the model can only ever
+    // return a real value here or null, never an arbitrary string. Kept
+    // as `string | null` on this interface (rather than `ServiceType | null`)
+    // because the raw tool-call JSON is parsed before any validation runs;
+    // completeIntake() re-validates against the enum before persisting,
+    // same "never trust external input unchecked" discipline as every
+    // other DTO in this codebase.
     service_type: string | null;
     location: string | null;
     scope_detail: string | null;
@@ -48,7 +57,13 @@ const SUBMIT_TURN_TOOL: Anthropic.Tool = {
       data_collected: {
         type: 'object',
         properties: {
-          service_type: { type: ['string', 'null'] },
+          // Constrained to the real ServiceType enum, not a free string —
+          // this is what lets a completed conversation ever reach past
+          // AutomationDecisionOutcome.CUSTOMER_INPUT (the eligibility
+          // evaluator requires a real serviceType before it will consider
+          // AUTO). completeIntake() still re-validates server-side rather
+          // than trusting this constraint alone.
+          service_type: { type: ['string', 'null'], enum: [...Object.values(ServiceType), null] },
           location: { type: ['string', 'null'] },
           scope_detail: { type: ['string', 'null'] },
           timeline: { type: ['string', 'null'], enum: ['immediate', 'near_term', 'exploring', null] },
@@ -78,6 +93,7 @@ export class AiService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly casesService: CasesService,
   ) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     this.client = apiKey ? new Anthropic({ apiKey }) : null;
@@ -195,6 +211,17 @@ export class AiService {
    * Tool-based AI action, Section 7.6: creates a ServiceRequest (never a
    * ServiceCase directly — that conversion is a separate, human/deterministic
    * step, per vertical slice 1) once the concierge conversation completes.
+   *
+   * docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3/4 — this is also now
+   * the one place the Concierge's structured capture actually reaches the
+   * automation eligibility engine. Previously this method wrote a bare
+   * ServiceRequest (rawDescription/location only) and never called
+   * AutomationEligibilityService, unlike CasesService.doCreateServiceRequest
+   * — meaning a completed Concierge conversation could never produce
+   * anything but the evaluator's default CUSTOMER_INPUT outcome (no
+   * serviceType == "not determined yet"). Populating serviceType/
+   * objective/timing here, then evaluating, is what lets a Concierge-
+   * originated request ever reach AUTO.
    */
   private async completeIntake(
     user: AuthenticatedUser,
@@ -215,6 +242,17 @@ export class AiService {
       engagementSubscore: turn.engagement_subscore,
     });
 
+    // Re-validate against the real enum server-side rather than trusting
+    // SUBMIT_TURN_TOOL's JSON-schema enum constraint alone — same "never
+    // trust external input unchecked" discipline as every DTO in this
+    // codebase, and defensive against a provider that doesn't actually
+    // enforce tool-call schemas strictly.
+    const rawServiceType = turn.data_collected.service_type;
+    const serviceType =
+      rawServiceType && (Object.values(ServiceType) as string[]).includes(rawServiceType)
+        ? (rawServiceType as ServiceType)
+        : null;
+
     const request = await this.prisma.serviceRequest.create({
       data: {
         customerId: customer.id,
@@ -224,6 +262,9 @@ export class AiService {
         leadScore: score,
         leadTag: tag,
         aiInteractionId,
+        serviceType,
+        objective: turn.data_collected.scope_detail,
+        timing: turn.data_collected.timeline,
       },
     });
 
@@ -231,8 +272,19 @@ export class AiService {
       actorId: user.id,
       actorType: 'ai',
       action: 'ai.service_request_created',
-      metadata: { serviceRequestId: request.id, leadScore: score, leadTag: tag },
+      metadata: { serviceRequestId: request.id, leadScore: score, leadTag: tag, serviceType },
     });
+
+    // Shared with CasesService.doCreateServiceRequest/updateServiceRequest
+    // — evaluates the automation decision and, if it comes back AUTO,
+    // creates the case immediately (docs/AUTOMATION_PRICING_ENGINE_SCOPE.md
+    // Phase 4). Routed through CasesService rather than calling
+    // AutomationEligibilityService directly so there's exactly one place
+    // that decides "AUTO means auto-convert now" — AutomationEligibilityService
+    // itself stays decision-and-audit-only, preserving its existing
+    // contract and tests ("AUTO never converts or creates anything" is
+    // still true of that service in isolation).
+    await this.casesService.evaluateAutomationAndMaybeConvert(request.id);
 
     return request.id;
   }

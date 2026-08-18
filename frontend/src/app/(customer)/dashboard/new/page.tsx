@@ -25,6 +25,7 @@ import {
 import { apiFetch } from '@/lib/api';
 import { naira } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { ConciergeChat } from '@/components/ConciergeChat';
 
 type ServiceType =
   | 'PROPERTY_INSPECTION'
@@ -68,15 +69,14 @@ const REGIONS = [
 
 const SERVICE_NAME: Record<ServiceType, string> = Object.fromEntries(SERVICES.map((s) => [s.type, s.name])) as Record<ServiceType, string>;
 
-// This wizard is a rich intake UI, but what it submits to is deliberately
-// thin: POST /service-requests only accepts rawDescription + location +
-// channel (CreateServiceRequestDto). serviceType/priority/tier are staff-
-// only fields set during triage (ConvertRequestDto, POST
-// /service-requests/:id/convert, gated to case-manager/RM/admin roles) —
-// a customer has no endpoint to set them directly. So every structured
-// choice made here (service, region, timeline, plan interest) gets folded
-// into one clear rawDescription for staff to read, rather than pretending
-// to set fields the backend won't let a customer set.
+// docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 4 — POST /service-requests
+// now accepts serviceType directly from a customer (CreateServiceRequestDto),
+// and setting it is what lets a request ever reach an AUTO eligibility
+// decision instead of defaulting to CUSTOMER_INPUT. This step already
+// collects a real, fixed service selection — send it. priority/tier
+// still stay staff-only (ConvertRequestDto, POST
+// /service-requests/:id/convert), so region/timeline/plan interest still
+// fold into rawDescription for a human to read, same as before.
 export default function NewRequestPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
@@ -92,9 +92,21 @@ export default function NewRequestPage() {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 4 — the Concierge chat
+  // is now this page's actual first step, not the service-type grid.
+  // `chatDone` covers both ways it can resolve: `autoCreated` (the pilot
+  // service type's AUTO decision already created a real Case — nothing
+  // left for the customer to fill in) or a normal handoff into the
+  // step wizard below, pre-filled with the conversation.
+  const [showChat, setShowChat] = useState(true);
+  const [autoCreated, setAutoCreated] = useState(false);
+
   // Pre-fill from a Concierge chat draft (carried via sessionStorage when
   // the visitor tried the landing-page demo before signing in — see
-  // AiConciergeDemo's CapturedCard / the "request captured" flow).
+  // AiConciergeDemo's CapturedCard / the "request captured" flow). Also
+  // skips straight past this page's own chat step in that case — the
+  // visitor already had one Concierge conversation pre-login, no need to
+  // ask them to repeat it.
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem('asoju-concierge-draft');
@@ -103,6 +115,7 @@ export default function NewRequestPage() {
       const d = JSON.parse(raw) as Record<string, unknown>;
       if (typeof d.description === 'string') setDescription(d.description);
       if (typeof d.location === 'string') setLocation(d.location);
+      setShowChat(false);
     } catch {
       /* malformed draft — ignore */
     }
@@ -132,7 +145,7 @@ export default function NewRequestPage() {
 
       await apiFetch('/service-requests', {
         method: 'POST',
-        body: JSON.stringify({ rawDescription, location: fullLocation, channel: 'web' }),
+        body: JSON.stringify({ rawDescription, location: fullLocation, channel: 'web', serviceType }),
       });
       setSubmitted(true);
     } catch (e) {
@@ -141,6 +154,24 @@ export default function NewRequestPage() {
       setSubmitting(false);
     }
   };
+
+  if (autoCreated) {
+    return (
+      <div className="mx-auto max-w-lg rounded-3xl border border-forest/10 bg-white p-8 text-center shadow-lg shadow-forest/5">
+        <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-forest/8 text-forest">
+          <Sparkles className="size-7" />
+        </span>
+        <h1 className="mt-5 font-display text-2xl font-semibold text-forest">Your case is already underway</h1>
+        <p className="mt-2 text-sm text-forest/60">
+          Everything you told the Concierge was enough for us to get started right away — no need to fill
+          anything else in. Your team will confirm the details and send a transparent quote shortly.
+        </p>
+        <Button className="mt-6 bg-forest text-ivory hover:bg-forest-deep" onClick={() => router.push('/dashboard')}>
+          View my cases
+        </Button>
+      </div>
+    );
+  }
 
   if (submitted) {
     return (
@@ -156,6 +187,38 @@ export default function NewRequestPage() {
         <Button className="mt-6 bg-forest text-ivory hover:bg-forest-deep" onClick={() => router.push('/dashboard')}>
           Back to my dashboard
         </Button>
+      </div>
+    );
+  }
+
+  if (showChat) {
+    return (
+      <div className="mx-auto max-w-3xl">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="flex items-center gap-2 text-sm font-semibold text-clay">
+              <MessageCircle className="size-4" />
+              ASOJU Concierge
+            </p>
+            <h1 className="mt-1 font-display text-3xl font-semibold text-forest">What would you like us to handle?</h1>
+            <p className="mt-1.5 text-sm text-forest/60">Tell me in your own words — I&apos;ll ask what else we need.</p>
+          </div>
+          <Badge className="hidden border-gold/40 bg-gold/10 text-clay sm:inline-flex">
+            <Sparkles className="size-3" />
+            AI-assisted intake
+          </Badge>
+        </div>
+
+        <div className="mt-6">
+          <ConciergeChat
+            onAutoCreated={() => setAutoCreated(true)}
+            onHandoff={(draft) => {
+              setDescription(draft.description);
+              setShowChat(false);
+            }}
+            onSkip={() => setShowChat(false)}
+          />
+        </div>
       </div>
     );
   }

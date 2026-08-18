@@ -6,11 +6,13 @@ import { Role } from '@prisma/client';
 
 /**
  * docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3 "Structured Request +
- * Eligibility Decision". Per the scope doc's own instruction: "resolve
- * AUTO at first to 'still requires staff convert' ... land the
- * decision-making and audit trail without yet removing the human from
- * case creation." Every test here confirms exactly that boundary: no
- * decision, however permissive, ever creates or converts a Case.
+ * Eligibility Decision", extended by Phase 4 "automated case creation".
+ * Most tests here confirm the Phase 3 boundary still holds in isolation
+ * (a decision alone, or an AUTO reached without every field
+ * `autoConvert` itself needs — e.g. no `location` — never creates or
+ * converts a Case). The "Phase 4" describe block below confirms the
+ * opposite is now also true: a fully-eligible AUTO request really does
+ * become a real, unclaimed Case with no staff action.
  */
 describe('Automation eligibility engine (Phase 3)', () => {
   let app: INestApplication;
@@ -282,5 +284,103 @@ describe('Automation eligibility engine (Phase 3)', () => {
     const after = await getDecision(res.body.id, customerToken).expect(200);
     expect(after.body.outcome).toBe('AUTO');
     expect(capRes.body.serviceType).toBe('HEALTHCARE_COORDINATION');
+  });
+
+  /**
+   * docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 4 — an AUTO decision
+   * with everything CasesService.autoConvert actually needs (crucially,
+   * `location`, which the other tests above deliberately never supply)
+   * really does create a real Case with no staff action. Uses
+   * ARRIVAL_SUPPORT rather than this project's actual pilot service type
+   * (BUSINESS_VERIFICATION) purely to avoid colliding with the
+   * AutomationCapability another test above already creates for that
+   * type in this same file/DB — the mechanism under test here (any
+   * enabled capability + satisfied rules -> AUTO -> real case) is
+   * identical regardless of which service type exercises it.
+   */
+  describe('Phase 4 — automated case creation', () => {
+    it('a fully-eligible AUTO decision creates a real, unclaimed Case that staff can then claim normally', async () => {
+      const capRes = await request(app.getHttpServer())
+        .post('/api/admin/automation/capabilities')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ serviceType: 'ARRIVAL_SUPPORT', enabled: true })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/admin/automation/capabilities/${capRes.body.id}/rules`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ kind: 'REQUIRED_FIELDS', config: { fields: ['objective', 'timing', 'location'] } })
+        .expect(201);
+
+      const res = await createRequest({ serviceType: 'ARRIVAL_SUPPORT' }).expect(201);
+      await patchRequest(res.body.id, {
+        objective: 'Airport pickup and welcome-home coordination',
+        timing: 'This week',
+        location: 'Lagos',
+      }).expect(200);
+
+      const decision = await getDecision(res.body.id, customerToken).expect(200);
+      expect(decision.body.outcome).toBe('AUTO');
+
+      const converted = await prisma.serviceRequest.findUniqueOrThrow({ where: { id: res.body.id } });
+      expect(converted.convertedCaseId).not.toBeNull();
+
+      const serviceCase = await prisma.serviceCase.findUniqueOrThrow({ where: { id: converted.convertedCaseId! } });
+      expect(serviceCase.status).toBe('DRAFT');
+      expect(serviceCase.serviceType).toBe('ARRIVAL_SUPPORT');
+      expect(serviceCase.location).toBe('Lagos');
+
+      // No CaseCollaborator — auto-converted, no human actor to attach.
+      const collaborators = await prisma.caseCollaborator.findMany({ where: { caseId: serviceCase.id } });
+      expect(collaborators).toHaveLength(0);
+
+      // Checklist still seeded exactly like a staff conversion would.
+      const tasks = await prisma.caseTask.findMany({ where: { caseId: serviceCase.id } });
+      expect(tasks.length).toBeGreaterThan(0);
+
+      // The audit trail distinguishes this from a staff conversion.
+      const auditRow = await prisma.auditEvent.findFirst({
+        where: { caseId: serviceCase.id, action: 'case.auto_converted' },
+      });
+      expect(auditRow?.actorType).toBe('system');
+
+      // And it's a completely normal case from here — staff claim it
+      // exactly like any other unclaimed request, no special path.
+      await request(app.getHttpServer())
+        .post(`/api/cases/${serviceCase.id}/claim`)
+        .set('Authorization', `Bearer ${caseManagerToken}`)
+        .expect(201);
+
+      const afterClaim = await prisma.caseCollaborator.findMany({ where: { caseId: serviceCase.id } });
+      expect(afterClaim).toHaveLength(1);
+
+      // The Ops case page's "Automated" badge (Phase 4) reads exactly
+      // this field off the real case-detail endpoint, not a separate one.
+      const caseDetail = await request(app.getHttpServer())
+        .get(`/api/cases/${serviceCase.id}`)
+        .set('Authorization', `Bearer ${caseManagerToken}`)
+        .expect(200);
+      expect(caseDetail.body.originRequest?.automationDecision?.outcome).toBe('AUTO');
+    });
+
+    it('never auto-converts when the capability is disabled (ESCALATE), even with every field autoConvert needs present', async () => {
+      await request(app.getHttpServer())
+        .post('/api/admin/automation/capabilities')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ serviceType: 'BEREAVEMENT_SUPPORT', enabled: false })
+        .expect(201);
+
+      const res = await createRequest({ serviceType: 'BEREAVEMENT_SUPPORT' }).expect(201);
+      await patchRequest(res.body.id, {
+        objective: 'Coordinate logistics',
+        timing: 'This week',
+        location: 'Abuja',
+      }).expect(200);
+
+      const decision = await getDecision(res.body.id, customerToken).expect(200);
+      expect(decision.body.outcome).toBe('ESCALATE');
+
+      const stillOpen = await prisma.serviceRequest.findUniqueOrThrow({ where: { id: res.body.id } });
+      expect(stillOpen.convertedCaseId).toBeNull();
+    });
   });
 });
