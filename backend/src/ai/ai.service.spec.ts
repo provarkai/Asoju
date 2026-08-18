@@ -42,6 +42,7 @@ function textResponse(text: string | null) {
 describe('AiService — prompt-injection / tool-authorization boundaries', () => {
   let prisma: any;
   let audit: any;
+  let casesService: any;
   let service: AiService;
   const user = { id: 'user-1', role: Role.CUSTOMER, email: 'customer@example.com' };
   let fetchMock: jest.Mock;
@@ -57,7 +58,13 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
       serviceRequest: { create: jest.fn().mockResolvedValue({ id: 'request-1' }) },
     };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
-    service = new AiService(prisma, audit);
+    // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 4 — completeIntake now
+    // routes eligibility evaluation (and any resulting auto-conversion)
+    // through CasesService instead of calling AutomationEligibilityService
+    // directly; these tests only need to confirm it's called, not exercise
+    // CasesService's own behavior (that's automation-eligibility.e2e-spec.ts's job).
+    casesService = { evaluateAutomationAndMaybeConvert: jest.fn().mockResolvedValue({ outcome: 'CUSTOMER_INPUT' }) };
+    service = new AiService(prisma, audit, casesService);
   });
 
   it('never lets the model set a ServiceRequest.customerId — it always comes from the authenticated session, not tool output', async () => {
@@ -156,7 +163,7 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
 
   it('fails closed with no OPENROUTER_API_KEY rather than silently degrading', async () => {
     delete process.env.OPENROUTER_API_KEY;
-    const unconfigured = new AiService(prisma, audit);
+    const unconfigured = new AiService(prisma, audit, casesService);
 
     await expect(unconfigured.converse(user as any, { message: 'hi' } as any)).rejects.toThrow(
       'AI Concierge is not configured',
@@ -176,6 +183,7 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
 describe('AiService.assistantReply — personal assistant boundaries', () => {
   let prisma: any;
   let audit: any;
+  let casesService: any;
   let service: AiService;
   const user = { id: 'user-1', role: Role.CUSTOMER, email: 'customer@example.com' };
   let fetchMock: jest.Mock;
@@ -198,7 +206,8 @@ describe('AiService.assistantReply — personal assistant boundaries', () => {
       },
     };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
-    service = new AiService(prisma, audit);
+    casesService = { evaluateAutomationAndMaybeConvert: jest.fn().mockResolvedValue({ outcome: 'CUSTOMER_INPUT' }) };
+    service = new AiService(prisma, audit, casesService);
   });
 
   it("only ever queries the calling user's own customer record — never accepts a target customer id from the request", async () => {
@@ -229,7 +238,7 @@ describe('AiService.assistantReply — personal assistant boundaries', () => {
 
   it('fails closed with no OPENROUTER_API_KEY', async () => {
     delete process.env.OPENROUTER_API_KEY;
-    const unconfigured = new AiService(prisma, audit);
+    const unconfigured = new AiService(prisma, audit, casesService);
     await expect(unconfigured.assistantReply(user as any, { message: 'hi' } as any)).rejects.toThrow(
       'AI Assistant is not configured',
     );

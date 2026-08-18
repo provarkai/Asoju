@@ -4,6 +4,7 @@ import {
   ApprovalAction,
   AssignmentRole,
   AssignmentStatus,
+  AutomationDecisionOutcome,
   CasePriority,
   CaseStatus,
   CollaboratorRole,
@@ -151,11 +152,11 @@ export class CasesService {
       metadata: { serviceRequestId: request.id, channel: dto.channel },
     });
 
-    // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3 — "wire the
-    // eligibility check into the existing... service-request flow."
-    // Decision-and-audit only in this phase: nothing here creates,
-    // converts, or acts on anything.
-    await this.automationEligibility.evaluateAndRecord(request.id);
+    // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3/4 — "wire the
+    // eligibility check into the existing... service-request flow," now
+    // extended to actually act on an AUTO decision (see
+    // evaluateAutomationAndMaybeConvert below).
+    await this.evaluateAutomationAndMaybeConvert(request.id);
 
     return request;
   }
@@ -196,7 +197,7 @@ export class CasesService {
       metadata: { serviceRequestId: requestId, fields: Object.keys(dto) },
     });
 
-    await this.automationEligibility.evaluateAndRecord(requestId);
+    await this.evaluateAutomationAndMaybeConvert(requestId);
 
     return updated;
   }
@@ -221,7 +222,7 @@ export class CasesService {
   async recomputeAutomationDecision(requestId: string) {
     const request = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
     if (!request) throw new NotFoundException('Service request not found');
-    return this.automationEligibility.evaluateAndRecord(requestId);
+    return this.evaluateAutomationAndMaybeConvert(requestId);
   }
 
   async listServiceRequests(user: AuthenticatedUser) {
@@ -370,6 +371,107 @@ export class CasesService {
     });
 
     return serviceCase;
+  }
+
+  /**
+   * docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3/4 — the one place that
+   * decides "an AUTO decision actually creates the case now." Shared by
+   * doCreateServiceRequest, updateServiceRequest, recomputeAutomationDecision,
+   * and AiService.completeIntake (via CasesModule) so there's exactly one
+   * call site making this decision, not four copies of the same `if`.
+   * AutomationEligibilityService itself stays decision-and-audit-only —
+   * its own contract ("AUTO never converts or creates anything") is
+   * unchanged; this method is what turns that decision into an action.
+   */
+  async evaluateAutomationAndMaybeConvert(requestId: string) {
+    const decision = await this.automationEligibility.evaluateAndRecord(requestId);
+    if (decision.outcome === AutomationDecisionOutcome.AUTO) {
+      await this.autoConvert(requestId);
+    }
+    return decision;
+  }
+
+  /**
+   * docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 4 — the automated
+   * counterpart to convertToCase, invoked only via
+   * evaluateAutomationAndMaybeConvert above. Deliberately mirrors
+   * convertToCase's own validation and creation logic rather than a
+   * parallel path, minus the parts that need a human actor:
+   * - No beneficiary/property/asset attachment — Concierge intake doesn't
+   *   collect these yet, so there's nothing to validate.
+   * - No CaseCollaborator self-attach — there's no actor to attach. The
+   *   case lands unclaimed in the Ops triage queue exactly like any case
+   *   does before a human first acts on it (same `GET /cases` unconverted
+   *   queue, same `POST /cases/:caseId/claim` self-attach staff already
+   *   use for a request they triage manually).
+   * If the request is missing something convertToCase would otherwise
+   * require (e.g. a future service type added to
+   * VERIFIED_POA_REQUIRED_SERVICE_TYPES with no verified PoA on file),
+   * this silently declines rather than throwing — same "not eligible yet,
+   * fall back to staff" contract as PricingEngineService's {ok:false}
+   * result elsewhere in this automation effort. A human converting
+   * manually afterward is always the safety net, never a broken automated
+   * path.
+   */
+  private async autoConvert(requestId: string): Promise<void> {
+    const request = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
+    if (!request || request.convertedCaseId) return; // already converted, or gone — nothing to do
+    if (!request.serviceType || !request.location) return; // shouldn't happen if AUTO passed REQUIRED_FIELDS, but never assume
+
+    if (VERIFIED_POA_REQUIRED_SERVICE_TYPES.includes(request.serviceType)) {
+      const verifiedPoa = await this.prisma.verifiedAsset.findFirst({
+        where: { customerId: request.customerId, type: VaultCategory.POWER_OF_ATTORNEY, verified: true },
+      });
+      if (!verifiedPoa) return;
+    }
+
+    const activeSubscription = await this.prisma.subscription.findFirst({
+      where: { customerId: request.customerId, status: 'ACTIVE' },
+    });
+    const tier = activeSubscription ? activeSubscription.tier : undefined;
+    const priority = SERVICE_TYPE_DEFAULT_PRIORITY[request.serviceType] ?? CasePriority.STANDARD;
+
+    const created = await this.prisma.serviceCase.create({
+      data: {
+        caseNumber: `PENDING-${randomUUID()}`,
+        customerId: request.customerId,
+        serviceType: request.serviceType,
+        description: request.objective ?? request.rawDescription,
+        location: request.location,
+        priority,
+        tier,
+        status: CaseStatus.DRAFT,
+        originRequest: { connect: { id: request.id } },
+        slaTargetAt: new Date(Date.now() + slaHoursForCase(slaHoursForPriority(priority), request.location) * 60 * 60 * 1000),
+      },
+    });
+
+    const caseNumber = `${CASE_NUMBER_PREFIX}-${String(created.seq).padStart(6, '0')}`;
+    const serviceCase = await this.prisma.serviceCase.update({
+      where: { id: created.id },
+      data: { caseNumber },
+    });
+
+    const checklist = CHECKLIST_TEMPLATES[request.serviceType];
+    await this.prisma.caseTask.createMany({
+      data: checklist.map((item, index) => ({
+        caseId: serviceCase.id,
+        label: item.label,
+        milestoneGroup: item.milestoneGroup,
+        sortOrder: index,
+      })),
+    });
+
+    await this.prisma.caseStatusHistory.create({
+      data: { caseId: serviceCase.id, toStatus: CaseStatus.DRAFT },
+    });
+
+    await this.audit.record({
+      caseId: serviceCase.id,
+      actorType: 'system',
+      action: 'case.auto_converted',
+      metadata: { serviceRequestId: request.id },
+    });
   }
 
   /**
@@ -572,6 +674,13 @@ export class CasesService {
         approvals: { orderBy: { createdAt: 'asc' } },
         rating: true,
         recurringSchedule: true,
+        // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 4 — the only extra
+        // data the Ops case page's "Automated" badge needs (see
+        // `autoConverted` below): whether the request this case came from
+        // ever got an AUTO decision. Nothing here changes for a case with
+        // no originRequest (recurring-schedule spawns) or one whose
+        // request was never automation-eligible — outcome is just absent.
+        originRequest: { select: { automationDecision: { select: { outcome: true } } } },
         /// P0 Technical Build Spec Section 22 "Job Card Engine" — "Generated
         /// only from approved scope... Contains exact tasks and
         /// exclusions... Contains evidence requirements." Full version

@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import {
+  AutomationDecisionOutcome,
   CaseStatus,
   CaseTier,
   IdempotencyOperation,
@@ -18,6 +19,7 @@ import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { PaystackService } from '../payments/paystack.service';
 import { MembershipService } from '../concierge/membership.service';
 import { ScopeService } from '../scope/scope.service';
+import { PricingEngineService } from '../pricing-engine/pricing-engine.service';
 import { CreateQuoteDto } from './dto/create-quote.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { ResolveReconciliationDto } from './dto/resolve-reconciliation.dto';
@@ -108,6 +110,7 @@ export class CommerceService {
     private readonly membership: MembershipService,
     private readonly scope: ScopeService,
     private readonly idempotency: IdempotencyService,
+    private readonly pricingEngine: PricingEngineService,
   ) {}
 
   /**
@@ -221,6 +224,95 @@ export class CommerceService {
     );
 
     return quote;
+  }
+
+  /**
+   * docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 4 — called from
+   * ScopeController the instant a customer confirms scope (see
+   * scope.module.ts's own comment for why the reverse import needs
+   * forwardRef()). Mirrors createQuote's essential steps for a single
+   * ASOJU_SERVICE_FEE line computed by the already-built
+   * PricingEngineService, but with a system actor
+   * (CasesService.systemTransitionCase, actorType 'system') since a
+   * customer's own confirm action has no staff AuthenticatedUser behind
+   * it to attribute a price to.
+   *
+   * Deliberately scoped to only the cases this automation effort actually
+   * owns: the case's originating ServiceRequest must itself carry an AUTO
+   * AutomationDecision (i.e. this is a pilot-service-type case that was
+   * auto-converted — see CasesService.autoConvert). Any ordinary
+   * staff-triaged case — even one in a fully priced zone/service, even
+   * one with no collaborator yet — is untouched; a real e2e test caught
+   * exactly this gap in an earlier draft (pricing-engine.e2e-spec.ts's
+   * "persists priceBookId on the issued quote when the calculated preview
+   * is submitted" started failing once auto-quote fired unconditionally
+   * for every priced Lagos case, not just automated ones — staff still
+   * expect to type/submit the quote themselves for every case they
+   * triaged by hand, regardless of whether pricing happens to be
+   * configured for it).
+   *
+   * The remaining checks make this a no-op rather than an error, all
+   * intentional:
+   * - The case isn't UNDER_REVIEW yet. An auto-created case lands in
+   *   DRAFT and still needs a staff member to draft the CaseScope and
+   *   move the case along — this method only removes the "staff types
+   *   the price" step, never the "staff drafts what the scope is" step.
+   * - PricingEngineService has no price for this case's service+zone
+   *   ({ok: false}) — same "not eligible yet, fall back to staff"
+   *   contract as everywhere else the pricing engine returns that shape.
+   *
+   * Never throws: confirming scope must never fail because pricing had a
+   * problem (same "notification failures never block the primary
+   * action" convention as NotificationsService.attemptChannelFanOut).
+   */
+  async autoQuoteIfEligible(caseId: string): Promise<void> {
+    try {
+      const serviceCase = await this.prisma.serviceCase.findUnique({
+        where: { id: caseId },
+        include: { customer: true, originRequest: { include: { automationDecision: true } } },
+      });
+      if (!serviceCase || serviceCase.status !== CaseStatus.UNDER_REVIEW) return;
+      if (serviceCase.originRequest?.automationDecision?.outcome !== AutomationDecisionOutcome.AUTO) return;
+
+      const pricing = await this.pricingEngine.calculateServiceFeeLine(caseId);
+      if (!pricing.ok) return;
+
+      const latestScope = await this.scope.getLatest(caseId);
+      if (!latestScope || !latestScope.confirmedAt) return; // defensive — confirm() only ever calls this right after confirming
+
+      const quote = await this.prisma.quote.create({
+        data: {
+          caseId,
+          amount: pricing.amountNgn,
+          currency: 'NGN',
+          expiresAt: new Date(Date.now() + quoteValidityHours() * 60 * 60 * 1000),
+          scopeId: latestScope.id,
+          baseAmount: pricing.amountNgn,
+          nonServiceFeeAmount: 0,
+          lockedFxRate: pricing.fxRate,
+          sourceCurrency: 'USD',
+          fxLockExpiry: new Date(Date.now() + fxLockHours() * 60 * 60 * 1000),
+          priceBookId: pricing.priceBookId,
+          lines: { create: [{ category: QuoteLineCategory.ASOJU_SERVICE_FEE, label: pricing.label, amount: pricing.amountNgn }] },
+        },
+        include: { lines: true },
+      });
+
+      await this.casesService.systemTransitionCase(caseId, CaseStatus.QUOTED, 'Quote auto-generated');
+      await this.audit.record({
+        caseId,
+        actorType: 'system',
+        action: 'quote.auto_generated',
+        metadata: { quoteId: quote.id, amount: quote.amount, currency: quote.currency, priceRuleId: pricing.priceRuleId },
+      });
+      await this.notifications.notify(
+        serviceCase.customer.userId,
+        'Your quote is ready',
+        `We've put together a quote of ${quote.currency} ${Number(quote.amount).toLocaleString()} for ${serviceCase.caseNumber}. Review and accept it to get scheduled.`,
+      );
+    } catch (err) {
+      this.logger.warn(`autoQuoteIfEligible failed for case ${caseId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
