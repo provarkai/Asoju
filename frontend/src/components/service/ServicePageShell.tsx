@@ -8,7 +8,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import AiConciergeDemo from '@/components/landing/AiConciergeDemo';
 import { useAuth } from '@/lib/useAuth';
-import { naira } from '@/lib/format';
 import type { ServiceFamily } from '@/lib/services';
 import { SERVICE_FAMILIES } from '@/lib/services';
 
@@ -113,12 +112,12 @@ export function ServicePageShell({ service }: { service: ServiceFamily }) {
             <h1 className="font-display text-4xl font-semibold leading-[1.08] tracking-tight text-forest sm:text-5xl">
               {service.tagline}
             </h1>
-            {service.fromNgn !== undefined && (
-              <p className="mt-5 text-lg leading-relaxed text-forest/70">
-                Starting from <span className="font-semibold text-forest">{naira(service.fromNgn)}</span> — a
-                transparent quote confirms the exact price before anything is scheduled.
-              </p>
-            )}
+            {/* "Starting from" price intentionally not shown per business
+                decision — a quote is confirmed per case, not advertised as a
+                flat rate. ServiceFamily.fromNgn still carries the figure. */}
+            <p className="mt-5 text-lg leading-relaxed text-forest/70">
+              A transparent quote confirms the exact price before anything is scheduled.
+            </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Button size="lg" className="bg-forest text-ivory hover:bg-forest-deep" onClick={startRequest}>
                 Start a request

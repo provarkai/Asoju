@@ -27,7 +27,6 @@ import {
 import AiConciergeDemo from '@/components/landing/AiConciergeDemo';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/lib/useAuth';
-import { naira } from '@/lib/format';
 import { SERVICE_FAMILIES } from '@/lib/services';
 
 const fadeUp = {
@@ -284,11 +283,10 @@ export default function Landing() {
                 </div>
                 <h3 className="mt-5 font-display text-xl font-semibold text-forest">{s.name}</h3>
                 <p className="mt-3 text-sm leading-relaxed text-forest/65">{s.tagline}</p>
-                {s.fromNgn !== undefined && (
-                  <p className="mt-5 text-sm text-forest/50">
-                    from <span className="font-semibold text-forest">{naira(s.fromNgn)}</span>
-                  </p>
-                )}
+                {/* "from" price intentionally not shown per business decision — a
+                    quote is confirmed per case, not advertised as a flat rate.
+                    ServiceFamily.fromNgn (lib/services.ts) still carries the
+                    figure; only this render was removed. */}
                 <button
                   onClick={() => go(`/${s.slug}`)}
                   className="mt-5 flex items-center gap-1.5 text-sm font-semibold text-forest underline decoration-gold decoration-2 underline-offset-4 hover:decoration-forest"

@@ -23,7 +23,6 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
-import { naira } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { ConciergeChat } from '@/components/ConciergeChat';
 
@@ -271,7 +270,9 @@ export default function NewRequestPage() {
                 <s.icon className={cn('size-6', serviceType === s.type ? 'text-gold-light' : 'text-forest')} />
                 <p className="mt-3 font-display text-base font-semibold">{s.name}</p>
                 <p className="mt-1 text-xs opacity-70">{s.desc}</p>
-                <p className="mt-3 text-xs font-medium opacity-60">from {naira(s.from)}</p>
+                {/* "from" price intentionally not shown per business decision
+                    — a quote is confirmed per case, not advertised as a flat
+                    rate. SERVICES[].from still carries the figure. */}
               </button>
             ))}
           </div>
