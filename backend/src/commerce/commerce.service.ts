@@ -83,6 +83,18 @@ function refundApprovalThresholdNgn(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_REFUND_APPROVAL_THRESHOLD_NGN;
 }
 
+const DEFAULT_PAYMENT_VERIFICATION_MIN_AGE_MINUTES = 5;
+
+/** How long a PENDING payment must sit before the verification sweep below
+ * asks Paystack about it directly — gives the webhook (the primary, faster
+ * path) a real chance to land first, so this never races it. Configurable
+ * per environment, same pattern as PAYMENT_EXPIRY_HOURS. */
+function paymentVerificationMinAgeMinutes(): number {
+  const configured = process.env.PAYMENT_VERIFICATION_MIN_AGE_MINUTES;
+  const parsed = configured ? Number(configured) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PAYMENT_VERIFICATION_MIN_AGE_MINUTES;
+}
+
 @Injectable()
 export class CommerceService {
   private readonly logger = new Logger(CommerceService.name);
@@ -778,7 +790,12 @@ export class CommerceService {
   async runPaymentExpirySweep(): Promise<{ expired: number }> {
     const cutoff = new Date(Date.now() - paymentExpiryHours() * 60 * 60 * 1000);
     const stale = await this.prisma.payment.findMany({
-      where: { status: PaymentStatus.PENDING, createdAt: { lt: cutoff } },
+      // PROCESSING included alongside PENDING — runPaymentVerificationSweep
+      // can move a payment there when Paystack itself reports it still in
+      // flight, but that isn't a promise it will ever resolve; one that's
+      // been "processing" past the same window gets the same recovery path
+      // as an ordinary abandoned checkout.
+      where: { status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] }, createdAt: { lt: cutoff } },
       include: { invoice: { include: { case: { include: { customer: true } } } } },
     });
 
@@ -798,6 +815,74 @@ export class CommerceService {
     }
 
     return { expired: stale.length };
+  }
+
+  /**
+   * P0 Technical Build Spec Section 21 "Payment States" — `PROCESSING`
+   * existed in the enum with nothing in the app ever setting it (the
+   * webhook was the only thing that ever moved a Payment off PENDING).
+   * This polls Paystack's own transaction-verify endpoint directly for
+   * anything old enough that the webhook has had a fair chance to land
+   * (`paymentVerificationMinAgeMinutes`) but not yet past the expiry
+   * window (`runPaymentExpirySweep` owns anything past that) — the
+   * recovery path for a late or lost webhook, not a replacement for it.
+   * Reuses the exact same PAID/FAILED transitions the webhook itself uses
+   * (`handleVerifiedCasePayment`/`handleFailedCasePayment`) so there is
+   * exactly one place either transition can actually happen from; this
+   * method only ever writes `PROCESSING` directly. Without
+   * `PAYSTACK_SECRET_KEY` there's no live provider to ask —
+   * `PaystackService.verifyTransaction` dry-runs and this sweep is a
+   * no-op, same as every other integration in this repo without
+   * credentials configured; `PROCESSING` never appears from thin air.
+   */
+  async runPaymentVerificationSweep(): Promise<{ checked: number; processing: number; paid: number; failed: number }> {
+    const minAgeCutoff = new Date(Date.now() - paymentVerificationMinAgeMinutes() * 60 * 1000);
+    const expiryCutoff = new Date(Date.now() - paymentExpiryHours() * 60 * 60 * 1000);
+
+    const candidates = await this.prisma.payment.findMany({
+      where: {
+        status: { in: [PaymentStatus.PENDING, PaymentStatus.PROCESSING] },
+        createdAt: { lt: minAgeCutoff, gte: expiryCutoff },
+      },
+    });
+
+    let processing = 0;
+    let paid = 0;
+    let failed = 0;
+
+    for (const payment of candidates) {
+      let result;
+      try {
+        result = await this.paystack.verifyTransaction(payment.providerReference);
+      } catch (err) {
+        this.logger.warn(`Payment verification poll failed for ${payment.providerReference}: ${(err as Error).message}`);
+        continue;
+      }
+      if (result.dryRun || !result.status) continue; // nothing to report without a real provider
+
+      try {
+        if (result.status === 'success') {
+          await this.handleVerifiedCasePayment(payment.providerReference, result.amountKobo!);
+          paid++;
+        } else if (result.status === 'failed' || result.status === 'abandoned' || result.status === 'reversed') {
+          await this.handleFailedCasePayment(payment.providerReference, result.gatewayResponse);
+          failed++;
+        } else if (payment.status !== PaymentStatus.PROCESSING) {
+          // pending | ongoing | queued — genuinely still in flight at Paystack.
+          await this.prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.PROCESSING } });
+          await this.audit.record({
+            actorType: 'system',
+            action: 'payment.processing',
+            metadata: { paymentId: payment.id, providerReference: payment.providerReference, paystackStatus: result.status },
+          });
+          processing++;
+        }
+      } catch (err) {
+        this.logger.warn(`Payment verification sweep failed to apply result for ${payment.providerReference}: ${(err as Error).message}`);
+      }
+    }
+
+    return { checked: candidates.length, processing, paid, failed };
   }
 
   /**

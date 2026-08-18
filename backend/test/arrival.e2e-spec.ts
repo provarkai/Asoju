@@ -176,4 +176,169 @@ describe('ASOJU Arrival', () => {
     const events = await prisma.auditEvent.findMany({ where: { caseId, action: 'arrival_profile.upserted' } });
     expect(events).toHaveLength(1);
   });
+
+  /**
+   * ASOJU_Arrivals_Service_Page_Blueprint_v1.1 — backend/provider-
+   * authoritative transport/accommodation arrangements: "the frontend
+   * should never imply guaranteed availability before confirmation."
+   */
+  describe('Arrival arrangements', () => {
+    it('staff create an arrangement, defaulting to REQUESTED', async () => {
+      const caseId = await createArrivalCase();
+      const res = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ type: 'AIRPORT_TRANSPORT', detail: 'BA075 landing 14:20' })
+        .expect(201);
+      expect(res.body.status).toBe('REQUESTED');
+      expect(res.body.type).toBe('AIRPORT_TRANSPORT');
+    });
+
+    it("the customer can read arrangement status but never create or transition one", async () => {
+      const caseId = await createArrivalCase();
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ type: 'ACCOMMODATION' })
+        .expect(201);
+
+      const list = await request(app.getHttpServer())
+        .get(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .expect(200);
+      expect(list.body).toHaveLength(1);
+
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({ type: 'ACCOMMODATION' })
+        .expect(403);
+    });
+
+    it('walks the full locked state machine: requested -> sourcing -> awaiting confirmation -> confirmed -> completed', async () => {
+      const caseId = await createArrivalCase();
+      const created = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ type: 'AIRPORT_TRANSPORT' })
+        .expect(201);
+      const arrangementId = created.body.id;
+
+      const path: string[] = ['BEING_SOURCED', 'AWAITING_CONFIRMATION', 'CONFIRMED', 'COMPLETED'];
+      for (const status of path) {
+        const res = await request(app.getHttpServer())
+          .patch(`/api/cases/${caseId}/arrival-arrangements/${arrangementId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ status })
+          .expect(200);
+        expect(res.body.status).toBe(status);
+      }
+    });
+
+    it('never lets a status skip a step (REQUESTED straight to CONFIRMED)', async () => {
+      const caseId = await createArrivalCase();
+      const created = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ type: 'AIRPORT_TRANSPORT' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .patch(`/api/cases/${caseId}/arrival-arrangements/${created.body.id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'CONFIRMED' })
+        .expect(400);
+    });
+
+    it('requires a note to CANCEL or mark CHANGED — never a silent downgrade from CONFIRMED', async () => {
+      const caseId = await createArrivalCase();
+      const created = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ type: 'ACCOMMODATION' })
+        .expect(201);
+      const arrangementId = created.body.id;
+
+      for (const status of ['BEING_SOURCED', 'AWAITING_CONFIRMATION', 'CONFIRMED']) {
+        await request(app.getHttpServer())
+          .patch(`/api/cases/${caseId}/arrival-arrangements/${arrangementId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ status })
+          .expect(200);
+      }
+
+      // No note — rejected.
+      await request(app.getHttpServer())
+        .patch(`/api/cases/${caseId}/arrival-arrangements/${arrangementId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'CHANGED' })
+        .expect(400);
+
+      // With a note — accepted, and lands back at AWAITING_CONFIRMATION
+      // per the locked machine (a change needs re-confirming, never stays
+      // CONFIRMED against stale detail).
+      const changed = await request(app.getHttpServer())
+        .patch(`/api/cases/${caseId}/arrival-arrangements/${arrangementId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'CHANGED', note: 'Flight rebooked a day later' })
+        .expect(200);
+      expect(changed.body.status).toBe('CHANGED');
+
+      const reConfirming = await request(app.getHttpServer())
+        .patch(`/api/cases/${caseId}/arrival-arrangements/${arrangementId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'AWAITING_CONFIRMATION' })
+        .expect(200);
+      expect(reConfirming.body.status).toBe('AWAITING_CONFIRMATION');
+    });
+
+    it('rejects any transition out of a terminal status (COMPLETED)', async () => {
+      const caseId = await createArrivalCase();
+      const created = await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ type: 'AIRPORT_TRANSPORT' })
+        .expect(201);
+      const arrangementId = created.body.id;
+
+      for (const status of ['BEING_SOURCED', 'AWAITING_CONFIRMATION', 'CONFIRMED', 'COMPLETED']) {
+        await request(app.getHttpServer())
+          .patch(`/api/cases/${caseId}/arrival-arrangements/${arrangementId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ status })
+          .expect(200);
+      }
+
+      await request(app.getHttpServer())
+        .patch(`/api/cases/${caseId}/arrival-arrangements/${arrangementId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'BEING_SOURCED' })
+        .expect(400);
+    });
+
+    it('rejects creating or transitioning an arrangement on a non-Arrival case', async () => {
+      const caseId = await createNonArrivalCase();
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ type: 'AIRPORT_TRANSPORT' })
+        .expect(400);
+    });
+
+    it("a different customer cannot even read another customer's arrangements", async () => {
+      const caseId = await createArrivalCase();
+      await request(app.getHttpServer())
+        .post(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ type: 'AIRPORT_TRANSPORT' })
+        .expect(201);
+
+      const other = await createCustomer('arrival-arr-other');
+      const otherToken = await login(app, other.email);
+      await request(app.getHttpServer())
+        .get(`/api/cases/${caseId}/arrival-arrangements`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .expect(403);
+    });
+  });
 });

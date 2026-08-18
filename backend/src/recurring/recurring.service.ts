@@ -72,12 +72,31 @@ export class RecurringService {
     const schedule = await this.prisma.recurringSchedule.findUnique({ where: { originCaseId: caseId } });
     if (!schedule) throw new NotFoundException('No recurring schedule on this case');
 
+    if (active === schedule.active) {
+      throw new BadRequestException(
+        active ? 'This schedule is already active' : 'This schedule is already paused',
+      );
+    }
+
+    const now = new Date();
+    // Resuming restores the exact time remaining until `nextRunAt` at the
+    // moment it was paused, instead of resetting the full cadence from
+    // "now" — a schedule paused with 2 days left still has 2 days left
+    // when it comes back, not a fresh `cadenceDays`-long wait. A schedule
+    // that was already overdue when paused (remaining <= 0) becomes due
+    // immediately on resume, same as any other overdue schedule.
+    let nextRunAt = schedule.nextRunAt;
+    if (active && schedule.pausedAt) {
+      const remainingMs = Math.max(0, schedule.nextRunAt.getTime() - schedule.pausedAt.getTime());
+      nextRunAt = new Date(now.getTime() + remainingMs);
+    }
+
     const updated = await this.prisma.recurringSchedule.update({
       where: { id: schedule.id },
       data: {
         active,
-        // Reactivating resets the clock from now, not from whenever it was cancelled.
-        nextRunAt: active ? new Date(Date.now() + schedule.cadenceDays * 24 * 60 * 60 * 1000) : schedule.nextRunAt,
+        nextRunAt,
+        pausedAt: active ? null : now,
       },
     });
 

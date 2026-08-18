@@ -50,6 +50,8 @@ function RegisterForm() {
         user: { id: string; email: string; role: string };
         accessToken: string;
         refreshToken: string;
+        referralCodeApplied?: boolean;
+        partnerCodeApplied?: boolean;
       }>('/auth/register', {
         method: 'POST',
         body: JSON.stringify({
@@ -64,6 +66,18 @@ function RegisterForm() {
         }),
       });
       setSession(result.accessToken, result.refreshToken, result.user);
+      // A bad referral/partner code never blocks signup — the account
+      // above is already created — but the visitor should still find out
+      // it didn't count, rather than assuming it silently worked.
+      const unrecognized: string[] = [];
+      if (result.referralCodeApplied === false) unrecognized.push('referral code');
+      if (result.partnerCodeApplied === false) unrecognized.push('partner code');
+      if (unrecognized.length) {
+        sessionStorage.setItem(
+          'asoju:post-register-notice',
+          `We couldn't recognize the ${unrecognized.join(' and ')} you entered, so it wasn't applied to your account. Everything else went through fine.`,
+        );
+      }
       const returnTo = searchParams.get('returnTo');
       router.push(returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/dashboard');
     } catch (err) {

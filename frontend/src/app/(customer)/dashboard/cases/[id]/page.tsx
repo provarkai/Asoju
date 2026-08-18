@@ -63,6 +63,24 @@ interface InvoiceItem {
   payments: { id: string; provider: string; providerReference: string; status: string }[];
 }
 
+interface ArrivalArrangement {
+  id: string;
+  type: 'AIRPORT_TRANSPORT' | 'ACCOMMODATION';
+  status: string;
+  detail: string | null;
+}
+
+const ARRANGEMENT_STATUS_LABEL: Record<string, string> = {
+  REQUESTED: 'Requested',
+  BEING_SOURCED: 'Being sourced',
+  AWAITING_CONFIRMATION: 'Awaiting confirmation',
+  CONFIRMED: 'Confirmed',
+  CHANGED: 'Changed — awaiting reconfirmation',
+  CANCELLED: 'Cancelled',
+  COMPLETED: 'Completed',
+};
+const ARRANGEMENT_CONFIRMED_STATUSES = new Set(['CONFIRMED', 'COMPLETED']);
+
 interface CaseDetail {
   id: string;
   caseNumber: string;
@@ -98,6 +116,7 @@ export default function CaseDetailPage() {
 
   const [kase, setKase] = useState<CaseDetail | null>(null);
   const [messages, setMessages] = useState<MessageItem[]>([]);
+  const [arrangements, setArrangements] = useState<ArrivalArrangement[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [disputeOpen, setDisputeOpen] = useState(false);
@@ -118,6 +137,17 @@ export default function CaseDetailPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
+
+  // Only ARRIVAL_SUPPORT cases have arrangements — fetched separately
+  // once `kase` confirms the service type, same reasoning as the Ops
+  // case page. Read-only here by design: "the frontend should never
+  // imply guaranteed availability before confirmation" — a customer only
+  // ever reads what staff actually confirmed, never sets it themselves.
+  useEffect(() => {
+    if (kase?.serviceType !== 'ARRIVAL_SUPPORT') return;
+    apiFetch<ArrivalArrangement[]>(`/cases/${caseId}/arrival-arrangements`).then(setArrangements).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kase?.serviceType, caseId]);
 
   if (error && !kase) return <ErrorState message={error} onRetry={load} />;
   if (!kase) {
@@ -363,6 +393,33 @@ export default function CaseDetailPage() {
               <p className="mt-3 text-sm text-forest/50">The checklist populates once your case moves past triage.</p>
             )}
           </section>
+
+          {kase.serviceType === 'ARRIVAL_SUPPORT' && arrangements && arrangements.length > 0 && (
+            <section className="rounded-2xl border border-forest/10 bg-white p-5 shadow-sm">
+              <h2 className="font-display text-lg font-semibold text-forest">Transport &amp; accommodation</h2>
+              <p className="mt-1 text-sm text-forest/50">
+                We coordinate this directly and only show it here once it&apos;s actually confirmed — never a
+                guess at availability.
+              </p>
+              <ul className="mt-3 space-y-2">
+                {arrangements.map((a) => (
+                  <li key={a.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-forest/70">{a.type === 'AIRPORT_TRANSPORT' ? 'Airport transport' : 'Accommodation'}</span>
+                    <Badge
+                      className={cn(
+                        'border',
+                        ARRANGEMENT_CONFIRMED_STATUSES.has(a.status)
+                          ? 'border-emerald-200 bg-emerald-100 text-emerald-800'
+                          : 'border-amber-200 bg-amber-100 text-amber-800',
+                      )}
+                    >
+                      {ARRANGEMENT_STATUS_LABEL[a.status] ?? a.status}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <section className="rounded-2xl border border-forest/10 bg-white p-5 shadow-sm">
             <h2 className="mb-5 font-display text-lg font-semibold text-forest">Case timeline</h2>

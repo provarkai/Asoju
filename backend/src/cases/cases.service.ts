@@ -28,8 +28,21 @@ import { RaiseDisputeDto } from './dto/raise-dispute.dto';
 import { BENEFICIARY_CASE_SELECT, toBeneficiaryCaseDetail } from './beneficiary-case-view';
 import { slaHoursForCase } from './regional-sla';
 import { IdempotencyService } from '../common/idempotency/idempotency.service';
+import { familyForServiceType } from './service-family';
+import { AutomationEligibilityService } from '../automation/automation-eligibility.service';
+import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
 
 const CASE_NUMBER_PREFIX = 'ASJ';
+
+/** docs/FRONTEND_HANDOFF_V1_GAP_MAP.md §1's additive `ServiceFamily` layer
+ * — attaches the derived family alongside the real `serviceType` on every
+ * case shape this service returns, never replacing it. The `string` bound
+ * (rather than the real `ServiceType` enum) accommodates
+ * beneficiary-case-view.ts's own looser allowlist-projection typing; the
+ * value is always a real column value at runtime either way. */
+function withServiceFamily<T extends { serviceType: string }>(serviceCase: T): T & { serviceFamily: ReturnType<typeof familyForServiceType> } {
+  return { ...serviceCase, serviceFamily: familyForServiceType(serviceCase.serviceType as ServiceType) };
+}
 
 // P0 Tech Platform §24 "SLA & Alert Engine" — "P0 operating hypotheses
 // should be configurable, not hard-coded." Defaults are the spec's own
@@ -86,6 +99,7 @@ export class CasesService {
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
     private readonly idempotency: IdempotencyService,
+    private readonly automationEligibility: AutomationEligibilityService,
   ) {}
 
   // -- Service requests (pre-case intake) ------------------------------
@@ -126,6 +140,7 @@ export class CasesService {
         rawDescription: dto.rawDescription,
         location: dto.location,
         channel: dto.channel,
+        serviceType: dto.serviceType,
       },
     });
 
@@ -136,7 +151,77 @@ export class CasesService {
       metadata: { serviceRequestId: request.id, channel: dto.channel },
     });
 
+    // docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3 — "wire the
+    // eligibility check into the existing... service-request flow."
+    // Decision-and-audit only in this phase: nothing here creates,
+    // converts, or acts on anything.
+    await this.automationEligibility.evaluateAndRecord(request.id);
+
     return request;
+  }
+
+  /**
+   * Progressive enrichment of the same ServiceRequest a Concierge
+   * conversation started (resolved decision #1 — this is
+   * `StructuredRequest`). Re-evaluates the automation decision every
+   * time, so a request that started CUSTOMER_INPUT for a missing field
+   * can reach AUTO/ESCALATE/BLOCKED as soon as that field arrives.
+   * Blocked once the request has already converted to a real Case — at
+   * that point this is history, not a draft still being assembled.
+   */
+  async updateServiceRequest(user: AuthenticatedUser, requestId: string, dto: UpdateServiceRequestDto) {
+    const customer = await this.requireCustomerProfile(user.id);
+    const request = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
+    if (!request || request.customerId !== customer.id) throw new NotFoundException('Service request not found');
+    if (request.convertedCaseId) {
+      throw new BadRequestException('This request has already been converted to a case');
+    }
+
+    const updated = await this.prisma.serviceRequest.update({
+      where: { id: requestId },
+      data: {
+        ...(dto.serviceType !== undefined ? { serviceType: dto.serviceType } : {}),
+        ...(dto.objective !== undefined ? { objective: dto.objective } : {}),
+        ...(dto.subject !== undefined ? { subject: dto.subject } : {}),
+        ...(dto.timing !== undefined ? { timing: dto.timing } : {}),
+        ...(dto.location !== undefined ? { location: dto.location } : {}),
+        ...(dto.requirements !== undefined ? { requirements: dto.requirements as any } : {}),
+      },
+    });
+
+    await this.audit.record({
+      actorId: user.id,
+      actorType: 'user',
+      action: 'service_request.updated',
+      metadata: { serviceRequestId: requestId, fields: Object.keys(dto) },
+    });
+
+    await this.automationEligibility.evaluateAndRecord(requestId);
+
+    return updated;
+  }
+
+  /** Read-only — the current decision for one request. Customer (own
+   * request only) or staff. */
+  async getAutomationDecision(user: AuthenticatedUser, requestId: string) {
+    const request = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
+    if (!request) throw new NotFoundException('Service request not found');
+    if (user.role === Role.CUSTOMER) {
+      const customer = await this.requireCustomerProfile(user.id);
+      if (request.customerId !== customer.id) throw new NotFoundException('Service request not found');
+    }
+    return this.automationEligibility.getDecision(requestId);
+  }
+
+  /** Staff-only, on-demand — same "recompute without waiting" pattern as
+   * every other sweep/recompute trigger in this codebase (e.g.
+   * RiskEngineService's "Recompute risk level"). Useful after an
+   * AutomationCapability/rule change to see its effect on an existing
+   * request immediately. */
+  async recomputeAutomationDecision(requestId: string) {
+    const request = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
+    if (!request) throw new NotFoundException('Service request not found');
+    return this.automationEligibility.evaluateAndRecord(requestId);
   }
 
   async listServiceRequests(user: AuthenticatedUser) {
@@ -387,10 +472,11 @@ export class CasesService {
   async listCasesForUser(user: AuthenticatedUser) {
     if (user.role === Role.CUSTOMER) {
       const customer = await this.requireCustomerProfile(user.id);
-      return this.prisma.serviceCase.findMany({
+      const cases = await this.prisma.serviceCase.findMany({
         where: { customerId: customer.id },
         orderBy: { createdAt: 'desc' },
       });
+      return cases.map(withServiceFamily);
     }
 
     if (user.role === Role.BENEFICIARY) {
@@ -399,11 +485,12 @@ export class CasesService {
       // curated per-case view actually lives.
       const beneficiary = await this.prisma.beneficiary.findUnique({ where: { userId: user.id } });
       if (!beneficiary) return [];
-      return this.prisma.serviceCase.findMany({
+      const cases = await this.prisma.serviceCase.findMany({
         where: { beneficiaryId: beneficiary.id },
         select: { id: true, caseNumber: true, serviceType: true, status: true, location: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
       });
+      return cases.map(withServiceFamily);
     }
 
     if (user.role === Role.FIELD_AGENT || user.role === Role.PROVIDER) {
@@ -413,11 +500,12 @@ export class CasesService {
       const ownAssignmentFilter = {
         OR: [{ agent: { userId: user.id } }, { provider: { userId: user.id } }],
       };
-      return this.prisma.serviceCase.findMany({
+      const cases = await this.prisma.serviceCase.findMany({
         where: { assignments: { some: ownAssignmentFilter } },
         include: { assignments: { where: ownAssignmentFilter } },
         orderBy: { updatedAt: 'desc' },
       });
+      return cases.map(withServiceFamily);
     }
 
     // Ops Control Centre "case queue" (Section 5.3) is an org-wide
@@ -438,7 +526,7 @@ export class CasesService {
       // (see comment above), but for PII-restricted staff roles that
       // extends to the customer's name too — the case number is what they
       // work with, not who the customer is.
-      return cases.map((c) => ({ ...c, customer: redactCustomerName(c.customer, user.role) }));
+      return cases.map((c) => withServiceFamily({ ...c, customer: redactCustomerName(c.customer, user.role) }));
     }
 
     return [];
@@ -457,7 +545,7 @@ export class CasesService {
         select: BENEFICIARY_CASE_SELECT,
       });
       if (!beneficiaryCase) throw new NotFoundException('Case not found');
-      return toBeneficiaryCaseDetail(beneficiaryCase, (key) => this.storage.getViewUrl(key));
+      return withServiceFamily(await toBeneficiaryCaseDetail(beneficiaryCase, (key) => this.storage.getViewUrl(key)));
     }
 
     const serviceCase = await this.prisma.serviceCase.findUnique({
@@ -533,7 +621,7 @@ export class CasesService {
     serviceCase.documents = documentsWithView as typeof serviceCase.documents;
     serviceCase.evidence = evidenceWithView as typeof serviceCase.evidence;
 
-    return serviceCase;
+    return withServiceFamily(serviceCase);
   }
 
   /**
@@ -813,6 +901,93 @@ export class CasesService {
     });
 
     return updated;
+  }
+
+  /**
+   * "A case's checklist is fixed at creation time from checklist-templates.ts
+   * — there's no UI yet to customize a checklist per case, only per service
+   * type" (README). Every case still gets seeded from its service type's
+   * template first — this only ever adds *on top* of that, for the
+   * case-specific step no template could have predicted. Blocked once the
+   * case is done (COMPLETED/CLOSED) — same reasoning as holdCase not
+   * accepting a terminal-status case.
+   */
+  async addTask(actor: AuthenticatedUser, caseId: string, label: string, isRequired?: boolean) {
+    const serviceCase = await this.prisma.serviceCase.findUnique({ where: { id: caseId } });
+    if (!serviceCase) throw new NotFoundException('Case not found');
+    if (serviceCase.status === CaseStatus.COMPLETED || serviceCase.status === CaseStatus.CLOSED) {
+      throw new BadRequestException(`Cannot add a checklist item to a case in status ${serviceCase.status}`);
+    }
+
+    const maxSortOrder = await this.prisma.caseTask.aggregate({ where: { caseId }, _max: { sortOrder: true } });
+    const task = await this.prisma.caseTask.create({
+      data: {
+        caseId,
+        label,
+        isRequired: isRequired ?? true,
+        sortOrder: (maxSortOrder._max.sortOrder ?? 0) + 1,
+      },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case_task.added',
+      metadata: { taskId: task.id, label, isRequired: task.isRequired },
+    });
+
+    return task;
+  }
+
+  /** Editing is only meaningful before the item is done — once a field
+   * agent has actually completed a step, rewriting what it says (or
+   * whether it was ever required) would rewrite the record of what
+   * happened, not just plan ahead. completeTask (EvidenceService) is the
+   * only way isComplete/completedAt ever change. */
+  async updateTask(actor: AuthenticatedUser, caseId: string, taskId: string, label?: string, isRequired?: boolean) {
+    const task = await this.prisma.caseTask.findUnique({ where: { id: taskId } });
+    if (!task || task.caseId !== caseId) throw new NotFoundException('Checklist item not found on this case');
+    if (task.isComplete) throw new BadRequestException('Cannot edit a checklist item that is already complete');
+    if (label === undefined && isRequired === undefined) {
+      throw new BadRequestException('Nothing to update — provide label and/or isRequired');
+    }
+
+    const updated = await this.prisma.caseTask.update({
+      where: { id: taskId },
+      data: { ...(label !== undefined ? { label } : {}), ...(isRequired !== undefined ? { isRequired } : {}) },
+    });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case_task.updated',
+      metadata: { taskId, label, isRequired },
+    });
+
+    return updated;
+  }
+
+  /** Same "never touch a completed item" guard as updateTask — removing a
+   * checklist item that's already been done would destroy the record that
+   * it happened, not just tidy up the plan. */
+  async removeTask(actor: AuthenticatedUser, caseId: string, taskId: string) {
+    const task = await this.prisma.caseTask.findUnique({ where: { id: taskId } });
+    if (!task || task.caseId !== caseId) throw new NotFoundException('Checklist item not found on this case');
+    if (task.isComplete) throw new BadRequestException('Cannot remove a checklist item that is already complete');
+
+    await this.prisma.caseTask.delete({ where: { id: taskId } });
+
+    await this.audit.record({
+      caseId,
+      actorId: actor.id,
+      actorType: 'user',
+      action: 'case_task.removed',
+      metadata: { taskId, label: task.label },
+    });
+
+    return { removed: true };
   }
 
   /** Section 3.1 — customer rejects the delivered report. Only reachable
