@@ -4,6 +4,7 @@ import { AiEscalation, Role, ServiceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CasesService } from '../cases/cases.service';
+import { AiKnowledgeService } from '../ai-knowledge/ai-knowledge.service';
 import { CONCIERGE_SYSTEM_PROMPT, PERSONAL_ASSISTANT_SYSTEM_PROMPT } from './system-prompt';
 import { scoreLead } from './scoring';
 import { ConciergeMessageDto } from './dto/concierge-message.dto';
@@ -94,6 +95,7 @@ export class AiService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly casesService: CasesService,
+    private readonly aiKnowledge: AiKnowledgeService,
   ) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     this.client = apiKey ? new Anthropic({ apiKey }) : null;
@@ -121,6 +123,18 @@ export class AiService {
       throw new Error('AI Concierge is not configured (missing ANTHROPIC_API_KEY).');
     }
 
+    // "Teach the AI the prices and customer service, and deep knowledge
+    // of what we are doing" — rebuilt fresh on every turn (never baked
+    // into CONCIERGE_SYSTEM_PROMPT itself) so a staff edit to the
+    // knowledge base or a live price change shows up in the very next
+    // reply. Appended to the top-level `system` string rather than as a
+    // second message with role "system" in `messages` — the Anthropic
+    // Messages API's system prompt is a request-level field, not a
+    // message-array role, and mid-conversation system messages (a
+    // different feature) aren't supported on Sonnet 5, the default model
+    // here. Omitted entirely when there's nothing real to say yet.
+    const knowledgeBlock = await this.aiKnowledge.buildContextBlock();
+
     const messages: Anthropic.MessageParam[] = [
       ...(dto.history ?? []).map((turn) => ({ role: turn.role, content: turn.content }) as Anthropic.MessageParam),
       { role: 'user', content: dto.message },
@@ -129,7 +143,7 @@ export class AiService {
     const response = await this.client.messages.create({
       model: process.env.AI_CONCIERGE_MODEL ?? 'claude-sonnet-5',
       max_tokens: 1024,
-      system: CONCIERGE_SYSTEM_PROMPT,
+      system: knowledgeBlock ? `${CONCIERGE_SYSTEM_PROMPT}\n\n${knowledgeBlock}` : CONCIERGE_SYSTEM_PROMPT,
       messages,
       tools: [SUBMIT_TURN_TOOL],
       tool_choice: { type: 'tool', name: 'submit_turn' },
@@ -320,6 +334,8 @@ export class AiService {
     });
     if (!customer) throw new Error('No customer profile for this user');
 
+    const knowledgeBlock = await this.aiKnowledge.buildContextBlock();
+
     const context = {
       customer_name: customer.fullName,
       cases: customer.serviceCases.map((c) => ({
@@ -347,7 +363,7 @@ export class AiService {
     const response = await this.client.messages.create({
       model: process.env.AI_CONCIERGE_MODEL ?? 'claude-sonnet-5',
       max_tokens: 1024,
-      system: PERSONAL_ASSISTANT_SYSTEM_PROMPT,
+      system: knowledgeBlock ? `${PERSONAL_ASSISTANT_SYSTEM_PROMPT}\n\n${knowledgeBlock}` : PERSONAL_ASSISTANT_SYSTEM_PROMPT,
       messages,
     });
 
