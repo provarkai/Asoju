@@ -2510,3 +2510,38 @@ enum ConciergeAnalyticsEventName {
   MESSAGE_FAILED
   RETRY_CLICKED
 }
+
+/// "There should be a way we tell/teach the AI the prices and customer
+/// service, and deep knowledge of what we are doing" — staff-authored
+/// facts the AI Concierge and personal assistant ground their replies in,
+/// editable without a code change or a system-prompt review (system-prompt.ts
+/// stays the frozen behavioural contract; this is the business-knowledge
+/// data it's allowed to read). Real pricing itself is never duplicated
+/// here — AiKnowledgeService.buildContextBlock() pulls that live from
+/// PricingEngineService's own PriceBook/PriceRule data (see
+/// PricingEngineService.getActivePricingCatalogSummary) so the AI can
+/// never go stale against an actual price change. PRICING-category
+/// entries are for policy around pricing (deposits, refund windows,
+/// what's included) — not the numbers themselves.
+enum AiKnowledgeCategory {
+  PRICING
+  POLICY
+  SERVICE_INFO
+  FAQ
+  GENERAL
+}
+
+model AiKnowledgeEntry {
+  id        String              @id @default(uuid())
+  category  AiKnowledgeCategory
+  title     String
+  content   String
+  /// Soft-disable, not delete — same "prove it worked, don't destroy the
+  /// audit trail" reasoning as AutomationCapability.enabled and
+  /// PriceBook/PriceRule.active.
+  isActive  Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([category, isActive])
+}

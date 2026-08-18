@@ -43,6 +43,7 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
   let prisma: any;
   let audit: any;
   let casesService: any;
+  let aiKnowledge: any;
   let service: AiService;
   const user = { id: 'user-1', role: Role.CUSTOMER, email: 'customer@example.com' };
   let fetchMock: jest.Mock;
@@ -64,7 +65,12 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
     // directly; these tests only need to confirm it's called, not exercise
     // CasesService's own behavior (that's automation-eligibility.e2e-spec.ts's job).
     casesService = { evaluateAutomationAndMaybeConvert: jest.fn().mockResolvedValue({ outcome: 'CUSTOMER_INPUT' }) };
-    service = new AiService(prisma, audit, casesService);
+    // "Teach the AI" feature — null by default (no knowledge base content
+    // configured), so existing tests exercise the unchanged prompt shape.
+    // The dedicated test below overrides this to prove the block is
+    // actually threaded through when present.
+    aiKnowledge = { buildContextBlock: jest.fn().mockResolvedValue(null) };
+    service = new AiService(prisma, audit, casesService, aiKnowledge);
   });
 
   it('never lets the model set a ServiceRequest.customerId — it always comes from the authenticated session, not tool output', async () => {
@@ -163,7 +169,7 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
 
   it('fails closed with no OPENROUTER_API_KEY rather than silently degrading', async () => {
     delete process.env.OPENROUTER_API_KEY;
-    const unconfigured = new AiService(prisma, audit, casesService);
+    const unconfigured = new AiService(prisma, audit, casesService, aiKnowledge);
 
     await expect(unconfigured.converse(user as any, { message: 'hi' } as any)).rejects.toThrow(
       'AI Concierge is not configured',
@@ -178,12 +184,64 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  // "Teach the AI the prices and customer service, and deep knowledge of
+  // what we are doing" — proves the block actually reaches the model as
+  // a system message, not just that AiKnowledgeService exists.
+  it('threads the staff-authored knowledge block into the model request as a system message when present', async () => {
+    aiKnowledge.buildContextBlock.mockResolvedValue(
+      'BUSINESS KNOWLEDGE (staff-maintained...):\n\n## LIVE PRICING\n- PROPERTY_INSPECTION in LAGOS: Property Inspection — $150',
+    );
+    fetchMock.mockResolvedValue(
+      toolCallResponse({
+        reply_text: 'A property inspection in Lagos starts from $150.',
+        data_collected: {
+          service_type: null,
+          location: null,
+          scope_detail: null,
+          timeline: null,
+          payment_method: null,
+        },
+        escalate: 'none',
+        conversation_complete: false,
+        engagement_subscore: 2,
+      }),
+    );
+
+    await service.converse(user as any, { message: 'how much is a property inspection in Lagos?' } as any);
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const systemMessages = requestBody.messages.filter((m: { role: string }) => m.role === 'system');
+    expect(systemMessages).toHaveLength(2); // the frozen prompt, then the dynamic knowledge block
+    expect(systemMessages[1].content).toContain('LIVE PRICING');
+    expect(systemMessages[1].content).toContain('$150');
+  });
+
+  it('omits the knowledge system message entirely when there is nothing to teach yet', async () => {
+    // aiKnowledge.buildContextBlock already resolves null from beforeEach.
+    fetchMock.mockResolvedValue(
+      toolCallResponse({
+        reply_text: 'Hi!',
+        data_collected: { service_type: null, location: null, scope_detail: null, timeline: null, payment_method: null },
+        escalate: 'none',
+        conversation_complete: false,
+        engagement_subscore: 1,
+      }),
+    );
+
+    await service.converse(user as any, { message: 'hi' } as any);
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const systemMessages = requestBody.messages.filter((m: { role: string }) => m.role === 'system');
+    expect(systemMessages).toHaveLength(1);
+  });
 });
 
 describe('AiService.assistantReply — personal assistant boundaries', () => {
   let prisma: any;
   let audit: any;
   let casesService: any;
+  let aiKnowledge: any;
   let service: AiService;
   const user = { id: 'user-1', role: Role.CUSTOMER, email: 'customer@example.com' };
   let fetchMock: jest.Mock;
@@ -207,7 +265,8 @@ describe('AiService.assistantReply — personal assistant boundaries', () => {
     };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     casesService = { evaluateAutomationAndMaybeConvert: jest.fn().mockResolvedValue({ outcome: 'CUSTOMER_INPUT' }) };
-    service = new AiService(prisma, audit, casesService);
+    aiKnowledge = { buildContextBlock: jest.fn().mockResolvedValue(null) };
+    service = new AiService(prisma, audit, casesService, aiKnowledge);
   });
 
   it("only ever queries the calling user's own customer record — never accepts a target customer id from the request", async () => {
@@ -238,7 +297,7 @@ describe('AiService.assistantReply — personal assistant boundaries', () => {
 
   it('fails closed with no OPENROUTER_API_KEY', async () => {
     delete process.env.OPENROUTER_API_KEY;
-    const unconfigured = new AiService(prisma, audit, casesService);
+    const unconfigured = new AiService(prisma, audit, casesService, aiKnowledge);
     await expect(unconfigured.assistantReply(user as any, { message: 'hi' } as any)).rejects.toThrow(
       'AI Assistant is not configured',
     );
@@ -250,5 +309,17 @@ describe('AiService.assistantReply — personal assistant boundaries', () => {
       'AI Assistant is customer-facing only.',
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("threads the staff-authored knowledge block into the model request when present, alongside this customer's own CONTEXT", async () => {
+    aiKnowledge.buildContextBlock.mockResolvedValue('BUSINESS KNOWLEDGE (staff-maintained...):\n\n## POLICY\n- Refunds: within 14 days');
+    fetchMock.mockResolvedValue(textResponse('Refunds are available within 14 days.'));
+
+    await service.assistantReply(user as any, { message: 'what is your refund policy?' } as any);
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const systemMessages = requestBody.messages.filter((m: { role: string }) => m.role === 'system');
+    expect(systemMessages).toHaveLength(2);
+    expect(systemMessages[1].content).toContain('Refunds: within 14 days');
   });
 });

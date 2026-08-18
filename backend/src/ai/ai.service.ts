@@ -3,6 +3,7 @@ import { AiEscalation, Role, ServiceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CasesService } from '../cases/cases.service';
+import { AiKnowledgeService } from '../ai-knowledge/ai-knowledge.service';
 import { CONCIERGE_SYSTEM_PROMPT, PERSONAL_ASSISTANT_SYSTEM_PROMPT } from './system-prompt';
 import { scoreLead } from './scoring';
 import { ConciergeMessageDto } from './dto/concierge-message.dto';
@@ -130,6 +131,7 @@ export class AiService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly casesService: CasesService,
+    private readonly aiKnowledge: AiKnowledgeService,
   ) {
     this.configured = Boolean(process.env.OPENROUTER_API_KEY);
     if (!this.configured) {
@@ -184,8 +186,17 @@ export class AiService {
       throw new Error('AI Concierge is not configured (missing OPENROUTER_API_KEY).');
     }
 
+    // "Teach the AI the prices and customer service, and deep knowledge
+    // of what we are doing" — a second, dynamic system message appended
+    // after the frozen behavioural prompt, rebuilt fresh on every turn
+    // (never baked into CONCIERGE_SYSTEM_PROMPT itself) so a staff edit
+    // to the knowledge base or a live price change shows up in the very
+    // next reply. Omitted entirely when there's nothing real to say yet.
+    const knowledgeBlock = await this.aiKnowledge.buildContextBlock();
+
     const messages: ChatMessage[] = [
       { role: 'system', content: CONCIERGE_SYSTEM_PROMPT },
+      ...(knowledgeBlock ? [{ role: 'system', content: knowledgeBlock } as ChatMessage] : []),
       ...(dto.history ?? []).map((turn) => ({ role: turn.role, content: turn.content }) as ChatMessage),
       { role: 'user', content: dto.message },
     ];
@@ -383,6 +394,8 @@ export class AiService {
     });
     if (!customer) throw new Error('No customer profile for this user');
 
+    const knowledgeBlock = await this.aiKnowledge.buildContextBlock();
+
     const context = {
       customer_name: customer.fullName,
       cases: customer.serviceCases.map((c) => ({
@@ -402,6 +415,7 @@ export class AiService {
 
     const messages: ChatMessage[] = [
       { role: 'system', content: PERSONAL_ASSISTANT_SYSTEM_PROMPT },
+      ...(knowledgeBlock ? [{ role: 'system', content: knowledgeBlock } as ChatMessage] : []),
       { role: 'user', content: `CONTEXT (this customer's own account — nothing outside this exists):\n${JSON.stringify(context)}` },
       { role: 'assistant', content: "Understood — I'll answer only from that context." },
       ...(dto.history ?? []).map((turn) => ({ role: turn.role, content: turn.content }) as ChatMessage),

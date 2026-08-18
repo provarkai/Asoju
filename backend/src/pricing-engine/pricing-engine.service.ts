@@ -94,6 +94,39 @@ export class PricingEngineService {
     return this.prisma.multiplierRule.findMany({ where: { priceBookId } });
   }
 
+  /// "Teach the AI the prices" (docs/AUTOMATION_PRICING_ENGINE_SCOPE.md) —
+  /// the one place the AI Concierge/personal assistant are allowed to read
+  /// real pricing from, so a price change here is reflected in what the AI
+  /// says on the very next conversation, with nothing to keep in sync by
+  /// hand. Deliberately independent of calculateServiceFeeLine (which
+  /// needs a real case + confirmed scope): this reads the raw catalog for
+  /// a general "what does X cost" answer, before any case exists. Returns
+  /// null with the same "don't invent a number" discipline as
+  /// calculateServiceFeeLine's `{ok: false}` — no active book means
+  /// nothing real to tell the AI, not a made-up placeholder.
+  async getActivePricingCatalogSummary(): Promise<string | null> {
+    const activeBook = await this.prisma.priceBook.findFirst({ where: { active: true } });
+    if (!activeBook) return null;
+
+    const rules = await this.prisma.priceRule.findMany({
+      where: { priceBookId: activeBook.id, active: true },
+      orderBy: [{ serviceType: 'asc' }, { zone: 'asc' }],
+    });
+    if (rules.length === 0) return null;
+
+    const fxRate = usdToNgnRate();
+    const lines = rules.map((rule) => {
+      const amountNgn = Math.round(Number(rule.value) * fxRate);
+      return `- ${rule.serviceType} in ${rule.zone}: ${rule.label} — $${Number(rule.value)} (≈ ₦${amountNgn.toLocaleString()}) before any urgency multiplier`;
+    });
+
+    return [
+      `Base service fees (${activeBook.currency}, current price book, version ${activeBook.version}):`,
+      ...lines,
+      'These are base fees only — final price on a specific case can include an urgency multiplier and any non-service-fee line items (e.g. travel, third-party costs), and a zone/service combination not listed above has no configured price yet.',
+    ].join('\n');
+  }
+
   private async requirePriceBook(priceBookId: string) {
     const book = await this.prisma.priceBook.findUnique({ where: { id: priceBookId } });
     if (!book) throw new NotFoundException('Price book not found');
