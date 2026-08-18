@@ -408,10 +408,19 @@ button {
  * "link" variants (button.tsx — deliberately no base bg, same
  * assumption Preflight normally covers), so without this they render
  * with a visible white box around light-colored text. Scoped to
- * .aam-page so it can never affect anything outside these pages;
- * explicit bg-* utilities (higher specificity than this bare `button`
- * selector) still win wherever a button sets one. */
-.aam-page button {
+ * .aam-page so it can never affect anything outside these pages.
+ *
+ * `:where(...)` wraps the whole selector so this rule always carries
+ * ZERO specificity — a bare `.aam-page button` (class + element =
+ * specificity 0,1,1) actually OUTRANKS a single utility class like
+ * `.bg-forest` (0,1,0), element-selector count included, regardless of
+ * source order. That's exactly the bug a live user hit: any selected
+ * button meant to render `bg-forest text-ivory` (dark-green fill, cream
+ * text) instead kept this rule's transparent background, leaving
+ * cream-on-white — unreadable "white text" on light-colored buttons
+ * across the customer portal. :where() is the standard fix for "reset
+ * rule that must never beat a utility class". */
+:where(.aam-page button) {
   background-color: transparent;
 }
 
@@ -419,8 +428,11 @@ button {
  * `a { color: var(--asoju-green) }` rule (near the top of this file) —
  * a real declared rule beats plain inheritance, so any <a> here that
  * relies on a parent's text-forest/text-ivory color (nav links, footer
- * links) instead of setting its own would show ASOJU green instead. */
-.aam-page a {
+ * links) instead of setting its own would show ASOJU green instead.
+ * Same :where() fix as above and for the same reason: `.aam-page a`
+ * (0,1,1) would otherwise outrank a single `text-*` utility (0,1,0) on
+ * the link itself. */
+:where(.aam-page a) {
   color: inherit;
 }
 
