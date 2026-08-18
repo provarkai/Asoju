@@ -217,10 +217,19 @@ export class CommerceService {
       ? ` (includes your membership discount and SC on the service fee — ${quote.currency} ${serviceFeeTotal.toLocaleString()} before benefits)`
       : '';
     const externalNote = nonServiceFeeTotal > 0 ? ` This includes ${quote.currency} ${nonServiceFeeTotal.toLocaleString()} in external/third-party costs, separate from our fee.` : '';
+    // actionUrl — same relative-path convention as AgentSosService's
+    // notify() call — deep-links straight to the case, where the customer
+    // reviews and accepts the quote to pay (CasesService's own case-detail
+    // page is where payNow() lives). NotificationsService resolves this
+    // to an absolute URL when it fans out to WhatsApp, so "sent through
+    // their dashboard and WhatsApp with links to make payment" holds for
+    // every quote a human staff member issues, on any service — not just
+    // the pilot automation service type below.
     await this.notifications.notify(
       serviceCase.customer.userId,
       'Your quote is ready',
       `We've put together a quote of ${quote.currency} ${Number(quote.amount).toLocaleString()} for ${serviceCase.caseNumber}${benefitNote}.${externalNote} Review and accept it to get scheduled.`,
+      `/dashboard/cases/${serviceCase.id}`,
     );
 
     return quote;
@@ -309,6 +318,7 @@ export class CommerceService {
         serviceCase.customer.userId,
         'Your quote is ready',
         `We've put together a quote of ${quote.currency} ${Number(quote.amount).toLocaleString()} for ${serviceCase.caseNumber}. Review and accept it to get scheduled.`,
+        `/dashboard/cases/${caseId}`,
       );
     } catch (err) {
       this.logger.warn(`autoQuoteIfEligible failed for case ${caseId}: ${err instanceof Error ? err.message : String(err)}`);

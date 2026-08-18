@@ -64,7 +64,6 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
           location: 'Lagos',
           scope_detail: 'Inspect my property',
           timeline: 'immediate',
-          payment_method: 'cash_ready',
         },
         escalate: 'none',
         conversation_complete: true,
@@ -98,7 +97,6 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
           location: 'Lagos',
           scope_detail: 'Inspect',
           timeline: 'immediate',
-          payment_method: 'cash_ready',
         },
         escalate: 'none',
         conversation_complete: true,
@@ -110,9 +108,9 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
 
     const data = prisma.serviceRequest.create.mock.calls[0][0].data;
     // scoreLead() clamps engagement to [0,15] — max possible score with
-    // immediate/cash_ready/no stated value is 5+30+20+15 = 70, still WARM,
-    // never HOT. A leadScore of 999 (also attacker-supplied) is never used.
-    expect(data.leadScore).toBeLessThanOrEqual(70);
+    // immediate/no stated value is 6+40+15 = 61, still WARM, never HOT.
+    // A leadScore of 999 (also attacker-supplied) is never used.
+    expect(data.leadScore).toBeLessThanOrEqual(61);
     expect(data.leadScore).not.toBe(999);
   });
 
@@ -136,7 +134,6 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
           location: 'Lagos',
           scope_detail: 'Inspect',
           timeline: 'immediate',
-          payment_method: 'cash_ready',
         },
         escalate: 'none',
         conversation_complete: true,
@@ -186,7 +183,6 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
           location: null,
           scope_detail: null,
           timeline: null,
-          payment_method: null,
         },
         escalate: 'none',
         conversation_complete: false,
@@ -206,7 +202,7 @@ describe('AiService — prompt-injection / tool-authorization boundaries', () =>
     mockCreate.mockResolvedValue(
       toolUseResponse({
         reply_text: 'Hi!',
-        data_collected: { service_type: null, location: null, scope_detail: null, timeline: null, payment_method: null },
+        data_collected: { service_type: null, location: null, scope_detail: null, timeline: null },
         escalate: 'none',
         conversation_complete: false,
         engagement_subscore: 1,

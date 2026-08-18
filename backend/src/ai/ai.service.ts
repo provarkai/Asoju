@@ -27,7 +27,6 @@ interface ConciergeTurnResult {
     location: string | null;
     scope_detail: string | null;
     timeline: 'immediate' | 'near_term' | 'exploring' | null;
-    payment_method: 'cash_ready' | 'diaspora_plan' | 'financing' | null;
   };
   escalate: 'none' | 'human_requested' | 'vip' | 'frustration' | 'legal_question';
   conversation_complete: boolean;
@@ -68,12 +67,8 @@ const SUBMIT_TURN_TOOL: Anthropic.Tool = {
           location: { type: ['string', 'null'] },
           scope_detail: { type: ['string', 'null'] },
           timeline: { type: ['string', 'null'], enum: ['immediate', 'near_term', 'exploring', null] },
-          payment_method: {
-            type: ['string', 'null'],
-            enum: ['cash_ready', 'diaspora_plan', 'financing', null],
-          },
         },
-        required: ['service_type', 'location', 'scope_detail', 'timeline', 'payment_method'],
+        required: ['service_type', 'location', 'scope_detail', 'timeline'],
       },
       escalate: {
         type: 'string',
@@ -252,7 +247,6 @@ export class AiService {
       statedValue: null, // Section 7.4 sub-signal, not yet collected by this conversational flow
       servicePriceBand: DEFAULT_SERVICE_PRICE_BAND_NGN,
       timeline: turn.data_collected.timeline,
-      paymentMethod: turn.data_collected.payment_method,
       engagementSubscore: turn.engagement_subscore,
     });
 
