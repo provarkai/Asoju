@@ -7,15 +7,19 @@ import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ScLedgerService } from './sc-ledger.service';
 import { MembershipService } from './membership.service';
 import { PlanConfigService } from './plan-config.service';
+import { SubscriptionBillingService } from './subscription-billing.service';
 import { usdToNgnRate } from './membership-plans';
 
 /**
  * Section 12 P1 "Concierge workflow" — the subscription/relationship-
  * management side of the two-tier pricing model (Section 2: ASOJU
  * Essential vs ASOJU Concierge). Kept deliberately simple for MVP: no
- * billing integration, no proration — a Subscription row is the source of
- * truth for "is this customer Concierge right now", and an RM is assigned
- * at the customer level (their whole portfolio), not per case.
+ * proration, no plan changes mid-cycle, no multiple tiers — a Subscription
+ * row is the source of truth for "is this customer Concierge right now",
+ * and an RM is assigned at the customer level (their whole portfolio), not
+ * per case. Billing itself is NOT simplified, though — see subscribe()'s
+ * own comment; a real Paystack payment gates every subscription, same as
+ * every renewal and every case payment.
  */
 @Injectable()
 export class ConciergeService {
@@ -26,47 +30,77 @@ export class ConciergeService {
     private readonly scLedger: ScLedgerService,
     private readonly membership: MembershipService,
     private readonly planConfig: PlanConfigService,
+    private readonly subscriptionBilling: SubscriptionBillingService,
   ) {}
 
-  /** P0 Technical Build Spec Section 17 — Priority ($99/mo, $50 SC, 10%
-   * discount, 2 eligible requests/mo) or Premium ($299/mo, $150 SC, 15%,
-   * 5/mo). Locks the plan's USD price and the current FX rate onto the
-   * subscription row at subscribe time (never recomputed retroactively —
-   * see the schema comment), and grants the first period's SC immediately
-   * so a new member doesn't wait for the first renewal sweep to have any. */
+  /** "The subscriptions are not connected to Paystack" fix — P0 Technical
+   * Build Spec Section 17: Priority ($99/mo, $50 SC, 10% discount, 2
+   * eligible requests/mo) or Premium ($299/mo, $150 SC, 15%, 5/mo). Locks
+   * the plan's USD price and the current FX rate onto the subscription
+   * row at signup time (never recomputed retroactively — see the schema
+   * comment), same as before. What changed: this used to create the
+   * subscription ACTIVE and grant its SC immediately, with no payment
+   * step at all. It now creates it PENDING — invisible to every
+   * `status: ACTIVE` check (getActiveSubscription, runBillingSweep, this
+   * method's own "already subscribed" guard) — and hands back a real
+   * Paystack checkout link. SubscriptionBillingService.handleVerifiedSubscriptionPayment
+   * is what actually flips it ACTIVE and grants SC, only once the payment
+   * is verified by webhook (Non-Negotiable #4 — the same verified-webhook-
+   * only rule as every other payment in this app). */
   async subscribe(user: AuthenticatedUser, plan: MembershipPlan = MembershipPlan.PRIORITY) {
-    const customer = await this.requireCustomer(user.id);
+    const customer = await this.prisma.customer.findUnique({ where: { userId: user.id }, include: { user: true } });
+    if (!customer) throw new NotFoundException('No customer profile for this user');
 
     const existing = await this.prisma.subscription.findFirst({
-      where: { customerId: customer.id, status: SubscriptionStatus.ACTIVE },
+      where: { customerId: customer.id, status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PENDING] } },
+      orderBy: { startedAt: 'desc' },
     });
-    if (existing) throw new BadRequestException('Already subscribed to Concierge');
+    if (existing?.status === SubscriptionStatus.ACTIVE) {
+      throw new BadRequestException('Already subscribed to Concierge');
+    }
 
-    const planConfig = await this.planConfig.getConfig(plan);
-    const fxRate = usdToNgnRate();
+    // A pending checkout for the same plan is resumed (a fresh payment
+    // link on the same row) rather than piling up a second Subscription
+    // every time a customer abandons Paystack checkout and clicks
+    // Subscribe again. A pending checkout for a *different* plan is left
+    // alone — harmless, unpaid, and never activates on its own.
+    let subscription =
+      existing?.status === SubscriptionStatus.PENDING && existing.plan === plan ? existing : null;
 
-    const subscription = await this.prisma.subscription.create({
-      data: {
-        customerId: customer.id,
-        tier: CaseTier.CONCIERGE,
-        plan,
-        status: SubscriptionStatus.ACTIVE,
-        priceUsd: planConfig.priceUsd,
-        fxRate,
-        amount: Math.round(planConfig.priceUsd * fxRate),
-      },
+    if (!subscription) {
+      const planConfig = await this.planConfig.getConfig(plan);
+      const fxRate = usdToNgnRate();
+
+      subscription = await this.prisma.subscription.create({
+        data: {
+          customerId: customer.id,
+          tier: CaseTier.CONCIERGE,
+          plan,
+          status: SubscriptionStatus.PENDING,
+          priceUsd: planConfig.priceUsd,
+          fxRate,
+          amount: Math.round(planConfig.priceUsd * fxRate),
+          // renewsAt stays null — there is no current period yet; it's
+          // set to the first period's end only once payment is verified.
+        },
+      });
+
+      await this.audit.record({
+        actorId: user.id,
+        actorType: 'user',
+        action: 'concierge.subscription_initiated',
+        metadata: { subscriptionId: subscription.id, plan, priceUsd: planConfig.priceUsd },
+      });
+    }
+
+    const { authorizationUrl, dryRun } = await this.subscriptionBilling.initiateFirstPayment({
+      id: subscription.id,
+      amount: subscription.amount,
+      currency: subscription.currency,
+      customer: { userId: customer.userId, user: { id: customer.user.id, email: customer.user.email } },
     });
 
-    await this.scLedger.grant(subscription.id, planConfig.scGrantUsd);
-
-    await this.audit.record({
-      actorId: user.id,
-      actorType: 'user',
-      action: 'concierge.subscribed',
-      metadata: { subscriptionId: subscription.id, plan, priceUsd: planConfig.priceUsd, scGrantUsd: planConfig.scGrantUsd },
-    });
-
-    return subscription;
+    return { ...subscription, authorizationUrl, dryRun };
   }
 
   /** Enriched with the same computed fields the customer's Membership
@@ -110,8 +144,13 @@ export class ConciergeService {
 
   async cancelSubscription(user: AuthenticatedUser) {
     const customer = await this.requireCustomer(user.id);
+    // Also cancellable while PENDING — a customer who wants to back out
+    // before ever paying shouldn't be stuck waiting for the payment to
+    // fail on its own (or told there's "no active Concierge subscription"
+    // when there's clearly an unpaid one sitting there).
     const active = await this.prisma.subscription.findFirst({
-      where: { customerId: customer.id, status: SubscriptionStatus.ACTIVE },
+      where: { customerId: customer.id, status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PENDING] } },
+      orderBy: { startedAt: 'desc' },
     });
     if (!active) throw new NotFoundException('No active Concierge subscription');
 

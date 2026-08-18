@@ -95,3 +95,25 @@ export async function createPartnerContact(prefix: string) {
   await prisma.partnerContact.create({ data: { userId: user.id, partnerId: partner.id } });
   return { user, partner, email };
 }
+
+/** "The subscriptions are not connected to Paystack" fix — POST
+ * /me/subscription now only creates a PENDING subscription + a real
+ * Paystack checkout link; nothing (SC grant, discount, eligible-request
+ * cap) is live until a verified webhook call activates it. Every spec
+ * that subscribes a test customer and then relies on that benefit being
+ * live needs to call this right after — there's no live Paystack account
+ * to sign a real webhook against (test env leaves PAYSTACK_SECRET_KEY
+ * unset, same as every other Paystack-dependent spec in this suite — see
+ * payment-verification.e2e-spec.ts's own comment), so this reaches
+ * SubscriptionBillingService directly via the app's DI container,
+ * bypassing only the HTTP/signature layer — everything else (Prisma
+ * writes, SC grant, audit trail) runs for real. */
+export async function verifySubscriptionFirstPayment(app: INestApplication, subscriptionId: string) {
+  const { SubscriptionBillingService } = await import('../../src/concierge/subscription-billing.service');
+  const invoice = await prisma.subscriptionInvoice.findFirstOrThrow({
+    where: { subscriptionId },
+    orderBy: { createdAt: 'desc' },
+  });
+  const amountKobo = Math.round(Number(invoice.amount) * 100);
+  return app.get(SubscriptionBillingService).handleVerifiedSubscriptionPayment(invoice.paystackReference!, amountKobo);
+}

@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
-import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma, verifySubscriptionFirstPayment } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -28,6 +28,12 @@ describe('Membership / SC ledger', () => {
   let adminToken: string;
   let financeToken: string;
   let subscriptionId: string;
+
+  // See test/utils/fixtures.ts's verifySubscriptionFirstPayment for why
+  // this indirection exists — subscribe() no longer activates anything by
+  // itself, so every test relying on SC/discount/eligible-request benefits
+  // needs to explicitly confirm the (dry-run, in this env) payment first.
+  const verifyFirstPayment = (id: string) => verifySubscriptionFirstPayment(app, id);
 
   /** Fast-forwards a fresh CONCIERGE-tier case to UNDER_REVIEW with a
    * confirmed scope (now a prerequisite for quoting — see
@@ -117,7 +123,7 @@ describe('Membership / SC ledger', () => {
     await prisma.$disconnect();
   });
 
-  it('subscribes to Priority and grants $50 SC immediately, before any renewal', async () => {
+  it('creates a PENDING subscription with a Paystack checkout link — no SC until payment is verified', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/me/subscription')
       .set('Authorization', `Bearer ${customerToken}`)
@@ -125,12 +131,25 @@ describe('Membership / SC ledger', () => {
       .expect(201);
     expect(res.body.plan).toBe('PRIORITY');
     expect(Number(res.body.priceUsd)).toBe(99);
+    expect(res.body.status).toBe('PENDING');
+    expect(res.body.dryRun).toBe(true); // no PAYSTACK_SECRET_KEY in this test env
     subscriptionId = res.body.id;
+
+    // Not active, no benefit, nothing to spend yet.
+    const pending = await request(app.getHttpServer())
+      .get('/api/me/subscription')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .expect(200);
+    expect(pending.body.status).toBe('PENDING');
+    expect(pending.body.scBalanceUsd).toBe(0);
+
+    await verifyFirstPayment(subscriptionId);
 
     const mine = await request(app.getHttpServer())
       .get('/api/me/subscription')
       .set('Authorization', `Bearer ${customerToken}`)
       .expect(200);
+    expect(mine.body.status).toBe('ACTIVE');
     expect(mine.body.scBalanceUsd).toBe(50);
     expect(mine.body.eligibleRemainingThisPeriod).toBe(2);
 
@@ -141,6 +160,127 @@ describe('Membership / SC ledger', () => {
     expect(ledger.body).toHaveLength(1);
     expect(ledger.body[0].type).toBe('GRANT');
     expect(Number(ledger.body[0].amountUsd)).toBe(50);
+  });
+
+  it('cancels a PENDING subscription so the customer can retry, and a failed first payment does the same automatically', async () => {
+    const backOutCustomer = await createCustomer('membership-backout');
+    const backOutToken = await login(app, backOutCustomer.email);
+
+    const subRes = await request(app.getHttpServer())
+      .post('/api/me/subscription')
+      .set('Authorization', `Bearer ${backOutToken}`)
+      .send({ plan: 'PRIORITY' })
+      .expect(201);
+    expect(subRes.body.status).toBe('PENDING');
+
+    // Changed their mind before ever paying.
+    await request(app.getHttpServer())
+      .post('/api/me/subscription/cancel')
+      .set('Authorization', `Bearer ${backOutToken}`)
+      .expect(200);
+    const cancelled = await prisma.subscription.findUniqueOrThrow({ where: { id: subRes.body.id } });
+    expect(cancelled.status).toBe('CANCELLED');
+
+    // Free to subscribe again afterward — a stale PENDING/CANCELLED row
+    // never blocks a fresh attempt the way an ACTIVE one does.
+    const secondAttempt = await request(app.getHttpServer())
+      .post('/api/me/subscription')
+      .set('Authorization', `Bearer ${backOutToken}`)
+      .send({ plan: 'PRIORITY' })
+      .expect(201);
+    expect(secondAttempt.body.status).toBe('PENDING');
+
+    // A failed webhook (rather than a customer-initiated cancel) reaches
+    // the same end state automatically — no permanent PENDING limbo.
+    const invoice = await prisma.subscriptionInvoice.findFirstOrThrow({
+      where: { subscriptionId: secondAttempt.body.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    const { SubscriptionBillingService } = await import('../src/concierge/subscription-billing.service');
+    await app.get(SubscriptionBillingService).handleFailedSubscriptionPayment(invoice.paystackReference!, 'insufficient_funds');
+    const failed = await prisma.subscription.findUniqueOrThrow({ where: { id: secondAttempt.body.id } });
+    expect(failed.status).toBe('CANCELLED');
+
+    // Confirms subscribing again still isn't blocked by that dead row.
+    await request(app.getHttpServer())
+      .post('/api/me/subscription')
+      .set('Authorization', `Bearer ${backOutToken}`)
+      .send({ plan: 'PRIORITY' })
+      .expect(201);
+  });
+
+  it('resumes the same PENDING subscription (not a duplicate row) when subscribing again for the same plan before paying', async () => {
+    const resumeCustomer = await createCustomer('membership-resume');
+    const resumeToken = await login(app, resumeCustomer.email);
+
+    const first = await request(app.getHttpServer())
+      .post('/api/me/subscription')
+      .set('Authorization', `Bearer ${resumeToken}`)
+      .send({ plan: 'PRIORITY' })
+      .expect(201);
+
+    const second = await request(app.getHttpServer())
+      .post('/api/me/subscription')
+      .set('Authorization', `Bearer ${resumeToken}`)
+      .send({ plan: 'PRIORITY' })
+      .expect(201);
+
+    expect(second.body.id).toBe(first.body.id);
+    const rows = await prisma.subscription.count({ where: { customerId: resumeCustomer.customer.id } });
+    expect(rows).toBe(1);
+  });
+
+  it('sets renewsAt ~30 days out at subscribe time, and the billing sweep only bills once it is actually due', async () => {
+    // Regression test — subscribe() used to never set renewsAt at all.
+    // runBillingSweep() only selects `renewsAt: { lte: now }`, and NULL
+    // never satisfies that in SQL, so an unset renewsAt silently excluded
+    // the subscription from ever being billed again after the signup SC
+    // grant. Confirms both halves: a fresh subscription has a real future
+    // renewsAt (not null, and not already due), and backdating it makes
+    // the sweep actually pick it up and bill it.
+    //
+    // Uses its own customer/subscription rather than the shared
+    // `subscriptionId` above — this test mutates renewsAt directly, and
+    // the eligible-request-allowance tests below key their "this period"
+    // window off that same field, so reusing it risks coupling this test's
+    // side effects into theirs.
+    const billingCustomer = await createCustomer('membership-billing-sweep');
+    const billingToken = await login(app, billingCustomer.email);
+    const subRes = await request(app.getHttpServer())
+      .post('/api/me/subscription')
+      .set('Authorization', `Bearer ${billingToken}`)
+      .send({ plan: 'PRIORITY' })
+      .expect(201);
+    const billingSubscriptionId = subRes.body.id;
+    await verifyFirstPayment(billingSubscriptionId); // renewsAt is only set on activation, not at signup
+
+    const subscription = await prisma.subscription.findUniqueOrThrow({ where: { id: billingSubscriptionId } });
+    expect(subscription.status).toBe('ACTIVE');
+    expect(subscription.renewsAt).not.toBeNull();
+    const daysOut = (subscription.renewsAt!.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    expect(daysOut).toBeGreaterThan(29);
+    expect(daysOut).toBeLessThan(31);
+
+    await request(app.getHttpServer())
+      .post('/api/admin/subscriptions/run-billing')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    // Not due yet — the sweep must leave it alone. One invoice already
+    // exists (the first-period one created by subscribe()/verifyFirstPayment
+    // above, now PAID) — the sweep must not add a second.
+    expect(await prisma.subscriptionInvoice.count({ where: { subscriptionId: billingSubscriptionId } })).toBe(1);
+
+    await prisma.subscription.update({ where: { id: billingSubscriptionId }, data: { renewsAt: new Date(Date.now() - 1000) } });
+    const sweepRes = await request(app.getHttpServer())
+      .post('/api/admin/subscriptions/run-billing')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(sweepRes.body.billed).toBeGreaterThanOrEqual(1);
+    // Now the renewal invoice, alongside the original first-period one.
+    expect(await prisma.subscriptionInvoice.count({ where: { subscriptionId: billingSubscriptionId } })).toBe(2);
+
+    const rebilled = await prisma.subscription.findUniqueOrThrow({ where: { id: billingSubscriptionId } });
+    expect(rebilled.renewsAt!.getTime()).toBeGreaterThan(Date.now());
   });
 
   it('rejects subscribing twice while already active', async () => {

@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
-import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma, verifySubscriptionFirstPayment } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -145,6 +145,10 @@ describe('Membership plan pricing configuration', () => {
       // The already-updated scGrantUsd (200, not the original 150) is what
       // a *new* subscription's first-grant reads live at subscribe time.
       const subscriptionId = subRes.body.id;
+      // subscribe() only creates a PENDING subscription now — the
+      // discount/benefit logic this test exercises only applies to an
+      // ACTIVE one, so confirm the (dry-run, in this env) payment first.
+      await verifySubscriptionFirstPayment(app, subscriptionId);
 
       // Now Finance drops the price to $199 and bumps discount to 25%.
       await request(app.getHttpServer())

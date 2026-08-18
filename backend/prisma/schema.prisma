@@ -303,6 +303,14 @@ enum CollaboratorRole {
 }
 
 enum SubscriptionStatus {
+  /// "The subscriptions are not connected to Paystack" fix — a
+  /// subscription is created here at signup (locking its price/FX rate)
+  /// but grants no benefit and is invisible to every `status: ACTIVE`
+  /// query until the first period's Paystack payment is verified by
+  /// webhook (SubscriptionBillingService.handleVerifiedSubscriptionPayment).
+  /// A failed first payment moves it straight to CANCELLED rather than
+  /// leaving it stuck here.
+  PENDING
   ACTIVE
   PAUSED
   CANCELLED
