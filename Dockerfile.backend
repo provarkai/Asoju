@@ -47,4 +47,10 @@ EXPOSE 3001
 # Same startCommand shape as railway.json — migrate on every boot, then
 # start. `prisma migrate deploy` takes its own advisory lock, so this
 # stays safe even if this ever scales past one machine.
-CMD ["sh", "-c", "npm run prisma:deploy --workspace=backend && npm run start:prod --workspace=backend"]
+#
+# prisma:resolve-stuck runs first: a no-op on every normal boot, it only
+# does anything if a specific known migration is stuck in a failed state
+# from an interrupted earlier deploy (see prisma/resolve-stuck-migrations.js) —
+# left in permanently since it's cheap and self-limiting, not a general
+# "ignore migration failures" escape hatch.
+CMD ["sh", "-c", "npm run prisma:resolve-stuck --workspace=backend && npm run prisma:deploy --workspace=backend && npm run start:prod --workspace=backend"]
