@@ -52,7 +52,16 @@ export class NotificationsService {
 
     if (user.preferredChannel === 'whatsapp' && user.phone && this.whatsappSender.isConfigured()) {
       channel = 'whatsapp';
-      result = await this.whatsappSender.sendMessage(user.phone, `${notification.title}\n\n${notification.body}`);
+      // actionUrl is a same-origin relative path (see the doc comment on
+      // notify() above) — fine for NotificationBell's Next.js <Link>, but
+      // meaningless typed into WhatsApp outside the app. Resolve it
+      // against FRONTEND_URL here so a WhatsApp message with a payment
+      // or case link actually contains a real, clickable URL, not a bare
+      // path — the one gap "quote sent via WhatsApp with a link to pay"
+      // otherwise had: the link existed in the notification row, but
+      // never made it into the WhatsApp text itself.
+      const link = notification.actionUrl ? `\n\n${this.frontendUrl()}${notification.actionUrl}` : '';
+      result = await this.whatsappSender.sendMessage(user.phone, `${notification.title}\n\n${notification.body}${link}`);
     } else if (user.preferredChannel === 'email' && user.email && this.emailService.isConfigured()) {
       channel = 'email';
       result = await this.emailService.sendEmail(user.email, notification.title, `<p>${notification.body}</p>`);
@@ -123,5 +132,13 @@ export class NotificationsService {
       where: { userId, readAt: null },
       data: { readAt: new Date() },
     });
+  }
+
+  // Same "FRONTEND_URL, defaulting to localhost:3000" convention as
+  // AuthService/ProfileService's own private helpers of the same name —
+  // duplicated rather than shared because it's one line and none of
+  // these modules otherwise depend on each other.
+  private frontendUrl(): string {
+    return process.env.FRONTEND_URL || 'http://localhost:3000';
   }
 }
