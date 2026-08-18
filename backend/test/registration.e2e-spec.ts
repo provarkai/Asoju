@@ -61,6 +61,26 @@ describe('Registration', () => {
       .expect(409);
   });
 
+  // A real user hit this live: `phone` is optional but @unique at the DB
+  // level (schema.prisma), and register() only pre-checked email — a
+  // second registration reusing a phone already on file skipped straight
+  // to prisma.user.create(), which threw an uncaught P2002 that NestJS's
+  // default filter turned into a bare 500 instead of a normal 409.
+  it('rejects a duplicate phone number with a friendly 409, not a 500', async () => {
+    const phone = `+234803${Math.floor(1_000_000 + Math.random() * 8_999_999)}`;
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ fullName: 'First', email: uniqueRegisterEmail(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom', phone })
+      .expect(201);
+
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ fullName: 'Second', email: uniqueRegisterEmail(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom', phone })
+      .expect(409);
+
+    expect(res.body.message).toMatch(/phone/i);
+  });
+
   describe('referral code', () => {
     it('applies a valid referral code and reports it as applied', async () => {
       const { customer } = await createCustomer('referrer');
