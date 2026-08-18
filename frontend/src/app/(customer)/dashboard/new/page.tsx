@@ -55,15 +55,15 @@ const TIMELINES = [
 
 const PLANS = [
   { key: 'PAY_AS_YOU_GO', label: 'Pay As You Go', desc: 'Pay-per-service. AI intake, verified representative, evidence & report.', icon: ClipboardCheck },
-  { key: 'ESSENTIAL', label: 'Essential · $49/mo', desc: '$30 Special Credit monthly + 5% off out-of-pocket cases.', icon: Sparkles },
-  { key: 'PRIORITY', label: 'Priority · $99/mo', desc: '$60 Special Credit monthly + 12% off out-of-pocket cases.', icon: Sparkles, badge: 'Best value' },
-  { key: 'PREMIUM', label: 'Premium · $199/mo', desc: '$100 Special Credit monthly + 15% off out-of-pocket cases.', icon: Sparkles },
+  { key: 'ESSENTIAL', label: 'Essential · $49/mo', desc: '$30 Service Credit monthly + 5% off out-of-pocket cases.', icon: Sparkles },
+  { key: 'PRIORITY', label: 'Priority · $99/mo', desc: '$60 Service Credit monthly + 12% off out-of-pocket cases.', icon: Sparkles, badge: 'Best value' },
+  { key: 'PREMIUM', label: 'Premium · $199/mo', desc: '$100 Service Credit monthly + 15% off out-of-pocket cases.', icon: Sparkles },
 ] as const;
 
 const REGIONS = [
   { key: 'LAGOS', label: 'Lagos zone', hint: 'Optimised cost base' },
   { key: 'SOUTH_WEST', label: 'South-West (excl. Lagos)', hint: 'Oyo · Ogun · Osun · Ondo · Ekiti · Kwara' },
-  { key: 'OTHER', label: 'Other locations', hint: 'Case-manager scoped · no Special Credit' },
+  { key: 'OTHER', label: 'Other locations', hint: 'Case-manager scoped · no Service Credit' },
 ] as const;
 
 const SERVICE_NAME: Record<ServiceType, string> = Object.fromEntries(SERVICES.map((s) => [s.type, s.name])) as Record<ServiceType, string>;

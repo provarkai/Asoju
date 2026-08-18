@@ -57,7 +57,7 @@ function RegisterForm() {
         body: JSON.stringify({
           fullName,
           email,
-          phone: phone || undefined,
+          phone,
           password,
           countryOfResidence,
           preferredChannel,
@@ -107,8 +107,8 @@ function RegisterForm() {
                 <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="phone">Phone (optional)</Label>
-                <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+44..." />
+                <Label htmlFor="phone">Phone</Label>
+                <Input id="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+44..." required />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="password">Password</Label>
