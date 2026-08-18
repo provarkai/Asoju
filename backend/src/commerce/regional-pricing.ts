@@ -1,14 +1,17 @@
 import { CasePriority, PricingZone } from '@prisma/client';
 
-/** Platform Expansion PRD §2.2 — "Base Regional Pricing": Lagos $50,
- * South-West (excl. Lagos) $80, Other Locations TBD (a Case Manager sets
- * the actual fee by hand — this deliberately returns null rather than a
- * made-up number, so staff can't miss that it's unpriced). Figures are
- * USD, same as the membership plan pricing (MembershipPlanConfig.priceUsd)
- * — converted at quote time via the same usdToNgnRate() used everywhere
- * else currency crosses from USD to the NGN a customer actually pays. */
+/** Platform Expansion PRD §2.2 — "Base Regional Pricing": Lagos $40 (our
+ * starting point — was $50; South-West/Other untouched), South-West
+ * (excl. Lagos) $80, Other Locations TBD (a Case Manager sets the actual
+ * fee by hand — this deliberately returns null rather than a made-up
+ * number, so staff can't miss that it's unpriced). Figures are USD, same
+ * as the membership plan pricing (MembershipPlanConfig.priceUsd) —
+ * converted at quote time via the same usdToNgnRate() used everywhere
+ * else currency crosses from USD to the NGN a customer actually pays
+ * (Paystack settles NGN only — the customer's own billingCurrency only
+ * ever changes what a quote is *displayed* as, see FxRateService). */
 const BASE_RATE_USD: Record<Exclude<PricingZone, 'OTHER'>, number> = {
-  [PricingZone.LAGOS]: 50,
+  [PricingZone.LAGOS]: 40,
   [PricingZone.SOUTH_WEST]: 80,
 };
 

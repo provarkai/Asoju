@@ -1,10 +1,11 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
-import { AssignmentStatus, CaseStatus, Role } from '@prisma/client';
+import { AssignmentStatus, BillingCurrency, CaseStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { WhatsappSenderService } from '../whatsapp/whatsapp-sender.service';
 import { ScLedgerService } from '../concierge/sc-ledger.service';
+import { FxRateService } from '../fx/fx-rate.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CreateBeneficiaryDto } from './dto/beneficiary.dto';
 import { CreatePropertyDto } from './dto/property.dto';
@@ -47,6 +48,7 @@ export class ProfileService {
     private readonly audit: AuditService,
     private readonly whatsappSender: WhatsappSenderService,
     private readonly scLedger: ScLedgerService,
+    private readonly fxRate: FxRateService,
   ) {}
 
   /**
@@ -173,11 +175,27 @@ export class ProfileService {
     const [userRow, customer] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: user.id },
-        select: { preferredChannel: true, phone: true, countryOfResidence: true },
+        select: { preferredChannel: true, phone: true, countryOfResidence: true, billingCurrency: true },
       }),
       this.prisma.customer.findUnique({ where: { userId: user.id }, select: { fullName: true } }),
     ]);
     return { ...userRow, fullName: customer?.fullName ?? null };
+  }
+
+  /** "converted at the current rate" — live USD -> the signed-in
+   * customer's own `billingCurrency`, for display next to a quote's NGN
+   * total (never a payable amount itself; see FxRateService's own
+   * comment on why this is never locked/stored the way
+   * Quote.lockedFxRate is). `to` defaults to the customer's own
+   * billingCurrency; a caller can still ask for a different one (e.g. to
+   * preview before saving a preference change). USD -> USD is always 1,
+   * no live call made. */
+  async getFxRate(user: AuthenticatedUser, to?: BillingCurrency) {
+    const userRow = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { billingCurrency: true } });
+    const currency = to ?? userRow.billingCurrency ?? BillingCurrency.USD;
+    if (currency === BillingCurrency.USD) return { currency, rate: 1 };
+    const rate = await this.fxRate.getRate(currency);
+    return { currency, rate };
   }
 
   async updatePreferences(user: AuthenticatedUser, dto: UpdatePreferencesDto) {

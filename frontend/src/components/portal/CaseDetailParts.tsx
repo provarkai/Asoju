@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { apiFetch } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -81,6 +82,13 @@ export interface QuoteData {
   lines: QuoteLineData[];
   expiresAt: string | null;
   acceptedAt: string | null;
+  // "converted at the current rate" — USD->NGN rate this quote's
+  // baseAmount was locked against (informational only, see
+  // Quote.lockedFxRate's schema comment). Used below to show the
+  // customer's own billingCurrency equivalent — never a second payable
+  // amount, the NGN total above stays authoritative.
+  lockedFxRate: number | null;
+  sourceCurrency: string | null;
 }
 
 const LINE_TONE: Record<string, string> = {
@@ -106,6 +114,34 @@ export function QuoteCard({ quote, onAccept, busy, accepted }: { quote: QuoteDat
   const expired = Boolean(quote.expiresAt && new Date(quote.expiresAt).getTime() < Date.now());
   const discountAmount = quote.discountAmount ?? 0;
   const scApplied = quote.scAppliedNgn ?? 0;
+
+  // "converted at the current rate" — only meaningful when this quote has
+  // a real USD service-fee portion (baseAmount/lockedFxRate, set
+  // whenever there's an ASOJU_SERVICE_FEE line) and the signed-in
+  // customer's own billingCurrency isn't USD (GET /me/fx-rate returns
+  // {currency:'USD', rate:1} for USD/unset accounts — skip the fetch
+  // rather than show a redundant "≈ $X" next to an already-USD-priced
+  // figure... except this quote's own total is NGN, so USD still shows
+  // once; only a second non-USD conversion would be redundant).
+  const [converted, setConverted] = useState<{ currency: string; amount: number } | null>(null);
+  useEffect(() => {
+    setConverted(null);
+    if (!quote.lockedFxRate || quote.sourceCurrency !== 'USD' || !quote.baseAmount) return;
+    let cancelled = false;
+    apiFetch<{ currency: string; rate: number }>('/me/fx-rate')
+      .then((res) => {
+        if (cancelled || res.currency === 'USD') return;
+        const usdEquivalent = quote.baseAmount! / quote.lockedFxRate!;
+        setConverted({ currency: res.currency, amount: usdEquivalent * res.rate });
+      })
+      .catch(() => {
+        // Live FX unavailable — this is purely informational, so fail
+        // silently rather than showing an error next to a real quote.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [quote.lockedFxRate, quote.sourceCurrency, quote.baseAmount]);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-forest/10 bg-white shadow-sm">
@@ -143,10 +179,17 @@ export function QuoteCard({ quote, onAccept, busy, accepted }: { quote: QuoteDat
         <span className="text-sm text-forest/60">
           Service fee {naira(quote.baseAmount ?? quote.amount)} · pass-through {naira(quote.nonServiceFeeAmount ?? 0)}
         </span>
-        <p className="font-display text-2xl font-bold text-forest">
-          {naira(quote.amount)}
-          <span className="ml-1 text-xs font-medium text-forest/45">{quote.currency}</span>
-        </p>
+        <div className="text-right">
+          <p className="font-display text-2xl font-bold text-forest">
+            {naira(quote.amount)}
+            <span className="ml-1 text-xs font-medium text-forest/45">{quote.currency}</span>
+          </p>
+          {converted && (
+            <p className="text-xs text-forest/50">
+              ≈ {converted.currency} {converted.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            </p>
+          )}
+        </div>
       </div>
       <div className="px-5 pb-5">
         {accepted ? (

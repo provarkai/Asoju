@@ -143,15 +143,17 @@ describe('Region-based quoting engine', () => {
     expect(scope.zone).toBe('OTHER');
   });
 
-  it('regional-pricing-hint: Lagos $50, South-West $80, Other unpriced — with the 1.5x urgency multiplier on URGENT', async () => {
+  it('regional-pricing-hint: Lagos $40, South-West $80, Other unpriced — with the 1.5x urgency multiplier on URGENT', async () => {
     const { caseId: lagosStandard } = await createConciergeCaseWithScope('Lagos');
     const lagosHint = await request(app.getHttpServer())
       .get(`/api/cases/${lagosStandard}/regional-pricing-hint`)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
     expect(lagosHint.body.zone).toBe('LAGOS');
-    expect(lagosHint.body.baseRateUsd).toBe(50);
-    expect(lagosHint.body.suggestedServiceFeeUsd).toBe(50);
+    // Platform Expansion — Lagos base price is $40 (was $50), "our
+    // starting point" for the multi-currency display work.
+    expect(lagosHint.body.baseRateUsd).toBe(40);
+    expect(lagosHint.body.suggestedServiceFeeUsd).toBe(40);
     expect(lagosHint.body.scEligible).toBe(true);
 
     const { caseId: lagosUrgent } = await createConciergeCaseWithScope('Lagos', 'URGENT');
@@ -159,7 +161,7 @@ describe('Region-based quoting engine', () => {
       .get(`/api/cases/${lagosUrgent}/regional-pricing-hint`)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
-    expect(urgentHint.body.suggestedServiceFeeUsd).toBe(75); // 50 * 1.5
+    expect(urgentHint.body.suggestedServiceFeeUsd).toBe(60); // 40 * 1.5
     expect(urgentHint.body.urgencyMultiplierApplied).toBe(true);
 
     const { caseId: swCase } = await createConciergeCaseWithScope('Ibadan, Oyo State');

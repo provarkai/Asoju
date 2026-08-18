@@ -47,7 +47,14 @@ describe('Registration', () => {
     const email = uniqueRegisterEmail();
     const res = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ fullName: 'New Customer', email, phone: uniqueRegisterPhone(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom' })
+      .send({
+        fullName: 'New Customer',
+        email,
+        phone: uniqueRegisterPhone(),
+        password: DEFAULT_PASSWORD,
+        countryOfResidence: 'United Kingdom',
+        billingCurrency: 'GBP',
+      })
       .expect(201);
 
     expect(res.body.user.email).toBe(email);
@@ -67,7 +74,30 @@ describe('Registration', () => {
   it('rejects registration with no phone number', async () => {
     await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ fullName: 'No Phone', email: uniqueRegisterEmail(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom' })
+      .send({ fullName: 'No Phone', email: uniqueRegisterEmail(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom', billingCurrency: 'USD' })
+      .expect(400);
+  });
+
+  // "charging in dollars, pounds and euros depending on the currency they
+  // chose in their account setup" — compulsory, same tier as phone above.
+  it('rejects registration with no billing currency', async () => {
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ fullName: 'No Currency', email: uniqueRegisterEmail(), phone: uniqueRegisterPhone(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom' })
+      .expect(400);
+  });
+
+  it('rejects registration with an unsupported billing currency', async () => {
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({
+        fullName: 'Bad Currency',
+        email: uniqueRegisterEmail(),
+        phone: uniqueRegisterPhone(),
+        password: DEFAULT_PASSWORD,
+        countryOfResidence: 'United Kingdom',
+        billingCurrency: 'NGN',
+      })
       .expect(400);
   });
 
@@ -75,7 +105,14 @@ describe('Registration', () => {
     const { email } = await createCustomer('dup');
     await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ fullName: 'Duplicate', email, phone: uniqueRegisterPhone(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom' })
+      .send({
+        fullName: 'Duplicate',
+        email,
+        phone: uniqueRegisterPhone(),
+        password: DEFAULT_PASSWORD,
+        countryOfResidence: 'United Kingdom',
+        billingCurrency: 'USD',
+      })
       .expect(409);
   });
 
@@ -88,12 +125,12 @@ describe('Registration', () => {
     const phone = uniqueRegisterPhone();
     await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ fullName: 'First', email: uniqueRegisterEmail(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom', phone })
+      .send({ fullName: 'First', email: uniqueRegisterEmail(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom', billingCurrency: 'USD', phone })
       .expect(201);
 
     const res = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ fullName: 'Second', email: uniqueRegisterEmail(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom', phone })
+      .send({ fullName: 'Second', email: uniqueRegisterEmail(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom', billingCurrency: 'USD', phone })
       .expect(409);
 
     expect(res.body.message).toMatch(/phone/i);
@@ -112,6 +149,7 @@ describe('Registration', () => {
           phone: uniqueRegisterPhone(),
           password: DEFAULT_PASSWORD,
           countryOfResidence: 'United Kingdom',
+          billingCurrency: 'USD',
           referralCode: customer.referralCode,
         })
         .expect(201);
@@ -133,6 +171,7 @@ describe('Registration', () => {
           phone: uniqueRegisterPhone(),
           password: DEFAULT_PASSWORD,
           countryOfResidence: 'United Kingdom',
+          billingCurrency: 'USD',
           referralCode: 'NOTAREALCODE',
         })
         .expect(201);
@@ -160,6 +199,7 @@ describe('Registration', () => {
           phone: uniqueRegisterPhone(),
           password: DEFAULT_PASSWORD,
           countryOfResidence: 'United Kingdom',
+          billingCurrency: 'USD',
           partnerCode: partner.code,
         })
         .expect(201);
@@ -184,6 +224,7 @@ describe('Registration', () => {
           phone: uniqueRegisterPhone(),
           password: DEFAULT_PASSWORD,
           countryOfResidence: 'United Kingdom',
+          billingCurrency: 'USD',
           partnerCode: partner.code,
         })
         .expect(201);
