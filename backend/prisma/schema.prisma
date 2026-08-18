@@ -94,6 +94,16 @@ enum CasePriority {
   URGENT
 }
 
+/// Platform Expansion — "charging in dollars, pounds and euros depending
+/// on the currency they chose." User.billingCurrency's domain. See
+/// backend/src/fx/fx-rate.service.ts (live rate lookup) — display-only,
+/// never the currency actually charged (that's always NGN via Paystack).
+enum BillingCurrency {
+  USD
+  GBP
+  EUR
+}
+
 /// Platform Expansion PRD §2.2 "Variable Quoting Engine (Region-Based
 /// Pricing)" — CaseScope.zone's domain. See backend/src/scope/
 /// pricing-zone.ts (classification) and backend/src/commerce/
@@ -358,6 +368,15 @@ model User {
   isActive           Boolean  @default(true)
   countryOfResidence String?
   preferredChannel   String? // e.g. whatsapp | email | sms
+  /// Platform Expansion — "charging in dollars, pounds and euros depending
+  /// on the currency they chose in their account setup." Required at
+  /// registration going forward (RegisterDto), but nullable here — same
+  /// precedent as `phone` above — so existing rows don't need backfilling.
+  /// NGN is never a value here: it's the settlement currency Paystack
+  /// actually charges (see PaystackService/regional-pricing.ts's own
+  /// comments) — this field only controls what currency a quote's service
+  /// fee is *displayed* in, never what's actually charged.
+  billingCurrency    BillingCurrency?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

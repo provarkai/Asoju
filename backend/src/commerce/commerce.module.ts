@@ -11,6 +11,7 @@ import { ConciergeModule } from '../concierge/concierge.module';
 import { ScopeModule } from '../scope/scope.module';
 import { IdempotencyModule } from '../common/idempotency/idempotency.module';
 import { PricingEngineModule } from '../pricing-engine/pricing-engine.module';
+import { FxModule } from '../fx/fx.module';
 
 @Module({
   // MembershipService (discount/SC application on quotes) comes in via
@@ -22,7 +23,7 @@ import { PricingEngineModule } from '../pricing-engine/pricing-engine.module';
   // directly rather than duplicating its calculation. ScopeModule is
   // forwardRef()'d — see that module's own comment on the reverse import
   // (ScopeController calling into CommerceService after a confirm).
-  imports: [CasesModule, PaymentsModule, ConciergeModule, forwardRef(() => ScopeModule), IdempotencyModule, PricingEngineModule],
+  imports: [CasesModule, PaymentsModule, ConciergeModule, forwardRef(() => ScopeModule), IdempotencyModule, PricingEngineModule, FxModule],
   providers: [
     CommerceService,
     CaseAccessGuard,

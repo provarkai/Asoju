@@ -19,7 +19,8 @@ const selectClassName =
 
 // Same real registration (POST /auth/register, self-rolled JWT) as
 // before — only the visual design changed. Section 5.1 progressive
-// disclosure: name, country, phone/email, preferred channel only.
+// disclosure: name, country, phone/email, preferred channel, billing
+// currency only.
 function RegisterForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -28,6 +29,7 @@ function RegisterForm() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [countryOfResidence, setCountryOfResidence] = useState('United Kingdom');
+  const [billingCurrency, setBillingCurrency] = useState('USD');
   const [preferredChannel, setPreferredChannel] = useState('whatsapp');
   const [referralCode, setReferralCode] = useState('');
   const [partnerCode, setPartnerCode] = useState('');
@@ -60,6 +62,7 @@ function RegisterForm() {
           phone,
           password,
           countryOfResidence,
+          billingCurrency,
           preferredChannel,
           referralCode: referralCode || undefined,
           partnerCode: partnerCode || undefined,
@@ -132,6 +135,14 @@ function RegisterForm() {
                     <option value="sms">SMS</option>
                   </select>
                 </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="currency">Billing currency</Label>
+                <select id="currency" className={selectClassName} value={billingCurrency} onChange={(e) => setBillingCurrency(e.target.value)}>
+                  <option value="USD">US Dollar ($)</option>
+                  <option value="GBP">British Pound (£)</option>
+                  <option value="EUR">Euro (€)</option>
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">

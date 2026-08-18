@@ -1,4 +1,5 @@
-import { IsEmail, IsIn, IsOptional, IsPhoneNumber, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsIn, IsOptional, IsPhoneNumber, IsString, MinLength } from 'class-validator';
+import { BillingCurrency } from '@prisma/client';
 
 /**
  * Public self-registration is for customers only (Section 5.1 onboarding —
@@ -28,6 +29,13 @@ export class RegisterDto {
 
   @IsString()
   countryOfResidence: string;
+
+  /** "charging in dollars, pounds and euros depending on the currency they
+   * chose in their account setup" — compulsory at signup, same tier as
+   * `phone` above. Never NGN: that's the settlement currency, not
+   * customer-selectable (see User.billingCurrency's schema comment). */
+  @IsEnum(BillingCurrency)
+  billingCurrency: BillingCurrency;
 
   @IsOptional()
   @IsIn(['whatsapp', 'email', 'sms'])

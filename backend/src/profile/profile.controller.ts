@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BillingCurrency, Role } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -29,6 +29,16 @@ export class ProfileController {
   @Get('referral')
   getReferral(@CurrentUser() user: AuthenticatedUser) {
     return this.profileService.getReferralSummary(user);
+  }
+
+  /** "converted at the current rate" — live USD -> {billingCurrency}
+   * rate, for display next to a quote's authoritative NGN total. */
+  @Get('fx-rate')
+  getFxRate(@CurrentUser() user: AuthenticatedUser, @Query('to') to?: string) {
+    if (to !== undefined && !Object.values(BillingCurrency).includes(to as BillingCurrency)) {
+      throw new BadRequestException(`Unsupported currency: ${to}`);
+    }
+    return this.profileService.getFxRate(user, to as BillingCurrency | undefined);
   }
 
   /** Customer portfolio dashboard (strategic-suggestions pass) — one

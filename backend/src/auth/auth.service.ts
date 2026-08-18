@@ -98,6 +98,7 @@ export class AuthService {
         role: Role.CUSTOMER,
         countryOfResidence: dto.countryOfResidence,
         preferredChannel: dto.preferredChannel,
+        billingCurrency: dto.billingCurrency,
         customer: { create: { fullName: dto.fullName, referralCode, referredByCustomerId, referredByPartnerId } },
       },
       include: { customer: true },

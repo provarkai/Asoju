@@ -81,9 +81,12 @@ describe('Deterministic pricing engine', () => {
   }
 
   /** Creates an active price book seeded with PROPERTY_INSPECTION rules
-   * for LAGOS ($50) and SOUTH_WEST ($80), matching regional-pricing.ts's
-   * BASE_RATE_USD exactly, plus a 1.5x URGENCY multiplier for URGENT —
-   * so these tests exercise the same real numbers, not invented ones. */
+   * for LAGOS ($50) and SOUTH_WEST ($80), plus a 1.5x URGENCY multiplier
+   * for URGENT. This is the independent, staff-configured PriceBook/
+   * PriceRule catalog PricingEngineService resolves against — a
+   * genuinely separate mechanism from regional-pricing.ts's flat
+   * BASE_RATE_USD (the staff-facing quote *hint*, not this engine's
+   * source of truth), so these figures don't need to track each other. */
   async function seedActivePriceBook(): Promise<string> {
     const bookRes = await request(app.getHttpServer())
       .post('/api/admin/pricing/price-books')

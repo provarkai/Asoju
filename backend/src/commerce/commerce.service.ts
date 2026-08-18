@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { randomBytes } from 'crypto';
 import {
   AutomationDecisionOutcome,
+  BillingCurrency,
   CaseStatus,
   CaseTier,
   IdempotencyOperation,
@@ -27,6 +28,7 @@ import { RecordDirectCostDto } from './dto/record-direct-cost.dto';
 import { suggestRegionalServiceFee } from './regional-pricing';
 import { usdToNgnRate } from '../concierge/membership-plans';
 import { IdempotencyService } from '../common/idempotency/idempotency.service';
+import { FxRateService } from '../fx/fx-rate.service';
 
 /** Prefix distinguishing case-invoice Paystack references from subscription
  * ones so a single webhook endpoint can route both (see PaystackService). */
@@ -111,7 +113,32 @@ export class CommerceService {
     private readonly scope: ScopeService,
     private readonly idempotency: IdempotencyService,
     private readonly pricingEngine: PricingEngineService,
+    private readonly fxRate: FxRateService,
   ) {}
+
+  /** "converted at the current rate" — the customer-facing currency note
+   * appended to a quote-ready notification (createQuote/autoQuoteIfEligible
+   * below), e.g. " (≈ £29.60)". `baseAmountNgn`/`lockedFxRate` are the same
+   * pair already stored on the Quote (USD->NGN, informational — see
+   * Quote.lockedFxRate's schema comment); this only ever covers the
+   * ASOJU_SERVICE_FEE portion, never external/third-party cost lines. Never
+   * throws — an FX outage should never block a quote notification from
+   * going out, same "notification failures never block the primary action"
+   * convention as NotificationsService itself. Empty string when there's
+   * nothing to convert (no service-fee portion, or the customer's
+   * billingCurrency is USD/unset). */
+  private async currencyNote(baseAmountNgn: number, lockedFxRate: number | null, billingCurrency: BillingCurrency | null): Promise<string> {
+    if (!lockedFxRate || !billingCurrency || billingCurrency === BillingCurrency.USD) return '';
+    try {
+      const usdEquivalent = baseAmountNgn / lockedFxRate;
+      const rate = await this.fxRate.getRate(billingCurrency);
+      const converted = (usdEquivalent * rate).toLocaleString(undefined, { maximumFractionDigits: 2 });
+      return ` (≈ ${billingCurrency} ${converted})`;
+    } catch (err) {
+      this.logger.warn(`currencyNote skipped — FX rate unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      return '';
+    }
+  }
 
   /**
    * Vertical slice 2, step 1: Case -> Quote. Requires the case to already
@@ -121,7 +148,7 @@ export class CommerceService {
   async createQuote(actor: AuthenticatedUser, caseId: string, dto: CreateQuoteDto) {
     const serviceCase = await this.prisma.serviceCase.findUnique({
       where: { id: caseId },
-      include: { customer: true },
+      include: { customer: { include: { user: { select: { billingCurrency: true } } } } },
     });
     if (!serviceCase) throw new NotFoundException('Case not found');
     if (serviceCase.status !== CaseStatus.UNDER_REVIEW) {
@@ -217,6 +244,7 @@ export class CommerceService {
       ? ` (includes your membership discount and SC on the service fee — ${quote.currency} ${serviceFeeTotal.toLocaleString()} before benefits)`
       : '';
     const externalNote = nonServiceFeeTotal > 0 ? ` This includes ${quote.currency} ${nonServiceFeeTotal.toLocaleString()} in external/third-party costs, separate from our fee.` : '';
+    const currencyNote = await this.currencyNote(serviceFeeTotal, fxRate, serviceCase.customer.user.billingCurrency);
     // actionUrl — same relative-path convention as AgentSosService's
     // notify() call — deep-links straight to the case, where the customer
     // reviews and accepts the quote to pay (CasesService's own case-detail
@@ -228,7 +256,7 @@ export class CommerceService {
     await this.notifications.notify(
       serviceCase.customer.userId,
       'Your quote is ready',
-      `We've put together a quote of ${quote.currency} ${Number(quote.amount).toLocaleString()} for ${serviceCase.caseNumber}${benefitNote}.${externalNote} Review and accept it to get scheduled.`,
+      `We've put together a quote of ${quote.currency} ${Number(quote.amount).toLocaleString()} for ${serviceCase.caseNumber}${currencyNote}${benefitNote}.${externalNote} Review and accept it to get scheduled.`,
       `/dashboard/cases/${serviceCase.id}`,
     );
 
@@ -278,7 +306,10 @@ export class CommerceService {
     try {
       const serviceCase = await this.prisma.serviceCase.findUnique({
         where: { id: caseId },
-        include: { customer: true, originRequest: { include: { automationDecision: true } } },
+        include: {
+          customer: { include: { user: { select: { billingCurrency: true } } } },
+          originRequest: { include: { automationDecision: true } },
+        },
       });
       if (!serviceCase || serviceCase.status !== CaseStatus.UNDER_REVIEW) return;
       if (serviceCase.originRequest?.automationDecision?.outcome !== AutomationDecisionOutcome.AUTO) return;
@@ -314,10 +345,11 @@ export class CommerceService {
         action: 'quote.auto_generated',
         metadata: { quoteId: quote.id, amount: quote.amount, currency: quote.currency, priceRuleId: pricing.priceRuleId },
       });
+      const currencyNote = await this.currencyNote(pricing.amountNgn, pricing.fxRate, serviceCase.customer.user.billingCurrency);
       await this.notifications.notify(
         serviceCase.customer.userId,
         'Your quote is ready',
-        `We've put together a quote of ${quote.currency} ${Number(quote.amount).toLocaleString()} for ${serviceCase.caseNumber}. Review and accept it to get scheduled.`,
+        `We've put together a quote of ${quote.currency} ${Number(quote.amount).toLocaleString()} for ${serviceCase.caseNumber}${currencyNote}. Review and accept it to get scheduled.`,
         `/dashboard/cases/${caseId}`,
       );
     } catch (err) {
