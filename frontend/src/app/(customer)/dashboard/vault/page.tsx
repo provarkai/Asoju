@@ -10,10 +10,10 @@ import { ErrorState } from '@/components/portal/ui';
 
 interface VaultDocument {
   id: string;
-  label: string;
-  category: string | null;
+  name: string;
+  category: VaultCategory;
   createdAt: string;
-  viewUrl: string;
+  downloadUrl: string | null;
 }
 
 function formatSize(bytes?: number) {
@@ -23,7 +23,18 @@ function formatSize(bytes?: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const CATEGORIES = ['Title deed', 'CAC certificate', 'Identity', 'Other'];
+// Real backend enum (backend/prisma/schema.prisma's VaultCategory) — not
+// a free string. POWER_OF_ATTORNEY is deliberately excluded here per this
+// page's own comment below (that's the separate staff-verified asset
+// workflow, not a plain document category).
+type VaultCategory = 'TITLE_DEED' | 'CAC_CERT' | 'IDENTITY' | 'OTHER';
+const CATEGORIES: { value: VaultCategory; label: string }[] = [
+  { value: 'TITLE_DEED', label: 'Title deed' },
+  { value: 'CAC_CERT', label: 'CAC certificate' },
+  { value: 'IDENTITY', label: 'Identity' },
+  { value: 'OTHER', label: 'Other' },
+];
+const CATEGORY_LABEL: Record<VaultCategory, string> = Object.fromEntries(CATEGORIES.map((c) => [c.value, c.label])) as Record<VaultCategory, string>;
 
 // Ported from asoju-app-main's VaultView, Documents section only. The
 // prototype also had a separate "Power of attorney & verified assets"
@@ -37,14 +48,14 @@ export default function VaultPage() {
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [label, setLabel] = useState('');
-  const [category, setCategory] = useState<string>('Other');
+  const [category, setCategory] = useState<VaultCategory>('OTHER');
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = () => {
     setError(null);
-    apiFetch<VaultDocument[]>('/me/vault')
+    apiFetch<VaultDocument[]>('/me/vault-documents')
       .then(setDocuments)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load your vault'));
   };
@@ -64,7 +75,10 @@ export default function VaultPage() {
     setError(null);
     try {
       const storageKey = await uploadVaultFile(file);
-      await apiFetch('/me/vault', { method: 'POST', body: JSON.stringify({ label: label.trim(), category, storageKey }) });
+      await apiFetch('/me/vault-documents', {
+        method: 'POST',
+        body: JSON.stringify({ name: label.trim(), category, storageKey, fileName: file.name, fileSize: file.size }),
+      });
       setLabel('');
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -82,7 +96,7 @@ export default function VaultPage() {
     setBusy('del');
     setError(null);
     try {
-      await apiFetch(`/me/vault/${id}`, { method: 'DELETE' });
+      await apiFetch(`/me/vault-documents/${id}`, { method: 'DELETE' });
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
@@ -135,23 +149,25 @@ export default function VaultPage() {
                       <FileText className="size-4.5" />
                     </span>
                     <div>
-                      <p className="text-sm font-semibold text-forest">{d.label}</p>
+                      <p className="text-sm font-semibold text-forest">{d.name}</p>
                       <p className="text-[11px] text-forest/45">
-                        {d.category ?? 'Other'} · {new Date(d.createdAt).toLocaleDateString('en-GB')}
+                        {CATEGORY_LABEL[d.category] ?? 'Other'} · {new Date(d.createdAt).toLocaleDateString('en-GB')}
                       </p>
                     </div>
                   </div>
                 </div>
                 <div className="mt-3 flex items-center gap-2 border-t border-forest/8 pt-3">
-                  <a
-                    href={d.viewUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1.5 rounded-lg border border-forest/20 px-3 py-1.5 text-xs font-semibold text-forest transition-colors hover:border-forest/50 hover:bg-forest/5"
-                  >
-                    <Download className="size-3.5" />
-                    Download
-                  </a>
+                  {d.downloadUrl && (
+                    <a
+                      href={d.downloadUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-1.5 rounded-lg border border-forest/20 px-3 py-1.5 text-xs font-semibold text-forest transition-colors hover:border-forest/50 hover:bg-forest/5"
+                    >
+                      <Download className="size-3.5" />
+                      Download
+                    </a>
+                  )}
                   <button
                     type="button"
                     onClick={() => remove(d.id)}
@@ -204,15 +220,15 @@ export default function VaultPage() {
               <div className="flex flex-wrap gap-2">
                 {CATEGORIES.map((c) => (
                   <button
-                    key={c}
+                    key={c.value}
                     type="button"
-                    onClick={() => setCategory(c)}
+                    onClick={() => setCategory(c.value)}
                     className={cn(
                       'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                      category === c ? 'border-forest bg-forest text-ivory' : 'border-forest/15 text-forest/60 hover:border-forest/35',
+                      category === c.value ? 'border-forest bg-forest text-ivory' : 'border-forest/15 text-forest/60 hover:border-forest/35',
                     )}
                   >
-                    {c}
+                    {c.label}
                   </button>
                 ))}
               </div>

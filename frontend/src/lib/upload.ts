@@ -39,9 +39,9 @@ export async function uploadFile(kind: 'evidence' | 'documents', caseId: string,
 }
 
 /** Same presign-then-PUT flow as uploadFile above, for the customer-level
- * Vault (not case-scoped — see ProfileService.createVaultUploadUrl). */
+ * Vault (not case-scoped — see VaultService.createUploadUrl). */
 export async function uploadVaultFile(file: File): Promise<string> {
-  const { storageKey, uploadUrl }: UploadUrlResponse = await apiFetch('/me/vault/upload-url', {
+  const { storageKey, uploadUrl }: UploadUrlResponse = await apiFetch('/me/vault-documents/upload-url', {
     method: 'POST',
     body: JSON.stringify({ fileName: file.name, contentType: file.type || 'application/octet-stream' }),
   });

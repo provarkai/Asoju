@@ -35,11 +35,19 @@ describe('Registration', () => {
     return `register-${randomBytes(4).toString('hex')}@e2e.test`;
   }
 
+  // Real Nigerian mobile prefix + random trailing digits — libphonenumber-js
+  // (IsPhoneNumber's underlying validator) rejects arbitrary digit strings,
+  // confirmed earlier against this exact shape (see registration.e2e-spec.ts
+  // git history / the duplicate-phone test below).
+  function uniqueRegisterPhone(): string {
+    return `+234803${Math.floor(1_000_000 + Math.random() * 8_999_999)}`;
+  }
+
   it('creates a real account and issues a working session with no codes supplied', async () => {
     const email = uniqueRegisterEmail();
     const res = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ fullName: 'New Customer', email, password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom' })
+      .send({ fullName: 'New Customer', email, phone: uniqueRegisterPhone(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom' })
       .expect(201);
 
     expect(res.body.user.email).toBe(email);
@@ -53,21 +61,31 @@ describe('Registration', () => {
       .expect(200);
   });
 
+  // Phone is compulsory at account setup — WhatsApp delivery (quote-ready
+  // notices, payment links) and the WhatsApp front-door itself both key
+  // off it, so a phone-less account can never receive either.
+  it('rejects registration with no phone number', async () => {
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ fullName: 'No Phone', email: uniqueRegisterEmail(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom' })
+      .expect(400);
+  });
+
   it('rejects a duplicate email', async () => {
     const { email } = await createCustomer('dup');
     await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ fullName: 'Duplicate', email, password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom' })
+      .send({ fullName: 'Duplicate', email, phone: uniqueRegisterPhone(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom' })
       .expect(409);
   });
 
-  // A real user hit this live: `phone` is optional but @unique at the DB
-  // level (schema.prisma), and register() only pre-checked email — a
-  // second registration reusing a phone already on file skipped straight
-  // to prisma.user.create(), which threw an uncaught P2002 that NestJS's
+  // A real user hit this live: `phone` is @unique at the DB level
+  // (schema.prisma), and register() only pre-checked email — a second
+  // registration reusing a phone already on file skipped straight to
+  // prisma.user.create(), which threw an uncaught P2002 that NestJS's
   // default filter turned into a bare 500 instead of a normal 409.
   it('rejects a duplicate phone number with a friendly 409, not a 500', async () => {
-    const phone = `+234803${Math.floor(1_000_000 + Math.random() * 8_999_999)}`;
+    const phone = uniqueRegisterPhone();
     await request(app.getHttpServer())
       .post('/api/auth/register')
       .send({ fullName: 'First', email: uniqueRegisterEmail(), password: DEFAULT_PASSWORD, countryOfResidence: 'United Kingdom', phone })
@@ -91,6 +109,7 @@ describe('Registration', () => {
         .send({
           fullName: 'Referred Customer',
           email,
+          phone: uniqueRegisterPhone(),
           password: DEFAULT_PASSWORD,
           countryOfResidence: 'United Kingdom',
           referralCode: customer.referralCode,
@@ -111,6 +130,7 @@ describe('Registration', () => {
         .send({
           fullName: 'Typo Customer',
           email,
+          phone: uniqueRegisterPhone(),
           password: DEFAULT_PASSWORD,
           countryOfResidence: 'United Kingdom',
           referralCode: 'NOTAREALCODE',
@@ -137,6 +157,7 @@ describe('Registration', () => {
         .send({
           fullName: 'Partner-Referred Customer',
           email,
+          phone: uniqueRegisterPhone(),
           password: DEFAULT_PASSWORD,
           countryOfResidence: 'United Kingdom',
           partnerCode: partner.code,
@@ -160,6 +181,7 @@ describe('Registration', () => {
         .send({
           fullName: 'Blocked Partner Customer',
           email,
+          phone: uniqueRegisterPhone(),
           password: DEFAULT_PASSWORD,
           countryOfResidence: 'United Kingdom',
           partnerCode: partner.code,

@@ -98,7 +98,7 @@ const LINE_CATEGORY_LABEL: Record<string, string> = {
 };
 
 // No useSC toggle — CommerceService.acceptQuote applies any eligible
-// Special Credit automatically server-side (re-validated at accept time,
+// Service Credit automatically server-side (re-validated at accept time,
 // not a customer choice at this screen). Same reasoning removed the
 // prototype's AI-generated instant-quote flow: this app keeps quoting
 // decisions off the client.
@@ -134,7 +134,7 @@ export function QuoteCard({ quote, onAccept, busy, accepted }: { quote: QuoteDat
         )}
         {scApplied > 0 && (
           <div className="flex items-start justify-between gap-4 py-3">
-            <p className="text-sm font-medium text-gold">Special Credit applied</p>
+            <p className="text-sm font-medium text-gold">Service Credit applied</p>
             <span className="text-sm font-semibold text-gold">−{naira(scApplied)}</span>
           </div>
         )}

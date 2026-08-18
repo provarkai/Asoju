@@ -116,7 +116,7 @@ export default function BillingPage() {
             <CreditCard className="size-4" />
             Subscription &amp; billing
           </p>
-          <h1 className="mt-1 font-display text-3xl font-semibold text-forest">Pick your plan — every subscription includes a monthly Special Credit</h1>
+          <h1 className="mt-1 font-display text-3xl font-semibold text-forest">Pick your plan — every subscription includes a monthly Service Credit</h1>
           <p className="mt-1.5 text-sm text-forest/60">Your SC voucher covers part of a case each cycle, and you pay the remainder out-of-pocket (with your tier discount).</p>
         </div>
         {sub && sub.status === 'ACTIVE' && (
@@ -134,7 +134,7 @@ export default function BillingPage() {
         <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-gold/40 bg-gold/5 p-6">
           <div>
             <p className="font-display text-lg font-semibold text-forest">Your {PLAN_LABEL[sub.plan]} subscription is awaiting payment</p>
-            <p className="mt-1 text-sm text-forest/65">Nothing is active yet — complete checkout to unlock your Special Credit and plan benefits.</p>
+            <p className="mt-1 text-sm text-forest/65">Nothing is active yet — complete checkout to unlock your Service Credit and plan benefits.</p>
           </div>
           <div className="flex gap-2.5">
             <Button variant="ghost" className="text-forest/60 hover:text-forest" disabled={busy === 'cancel'} onClick={doCancel}>
@@ -155,7 +155,7 @@ export default function BillingPage() {
             <div>
               <p className="flex items-center gap-2 font-display text-lg font-semibold text-forest">
                 <Sparkles className="size-5 text-gold" />
-                Special Credit balance
+                Service Credit balance
               </p>
               <p className="mt-1 text-sm text-forest/65">
                 ${sub.scBalanceUsd} available · ≈ {naira(Math.round(sub.scBalanceUsd * FX_RATE_NGN_PER_USD))} at the reference rate
@@ -221,7 +221,7 @@ export default function BillingPage() {
               </p>
               <ul className="mt-5 flex-1 space-y-2.5 text-sm text-forest/70">
                 <li className="flex gap-2">
-                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" />${p.scGrantUsd} Special Credit / month
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" />${p.scGrantUsd} Service Credit / month
                 </li>
                 <li className="flex gap-2">
                   <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-forest" />

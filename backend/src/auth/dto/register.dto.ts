@@ -5,6 +5,11 @@ import { IsEmail, IsIn, IsOptional, IsPhoneNumber, IsString, MinLength } from 'c
  * progressive disclosure: name, country of residence, phone/email,
  * preferred channel only, nothing more up front). Staff/agent/provider
  * accounts are created through internal/admin flows, not this endpoint.
+ *
+ * `phone` is compulsory — it's the channel WhatsApp delivery (quote-ready
+ * notices, payment links, case updates) depends on, and the WhatsApp
+ * front-door itself (WhatsappService.resolveThread) already treats a
+ * phone number as a customer's real identity.
  */
 export class RegisterDto {
   @IsString()
@@ -14,9 +19,8 @@ export class RegisterDto {
   @IsEmail()
   email: string;
 
-  @IsOptional()
   @IsPhoneNumber()
-  phone?: string;
+  phone: string;
 
   @IsString()
   @MinLength(8)

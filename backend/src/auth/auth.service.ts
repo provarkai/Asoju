@@ -48,19 +48,17 @@ export class AuthService {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) throw new ConflictException('An account with this email already exists');
 
-    // `phone` is optional but @unique at the DB level (schema.prisma) —
-    // without this check, a second registration reusing a phone number
-    // already on file (own retry with a different email, another
-    // person's number typo'd, a demo/seed account, etc.) skipped
+    // Phone is compulsory (RegisterDto) and @unique at the DB level
+    // (schema.prisma) — without this check, a second registration reusing
+    // a phone number already on file (own retry with a different email,
+    // another person's number typo'd, a demo/seed account, etc.) skipped
     // straight to `prisma.user.create()`, which throws an uncaught
     // PrismaClientKnownRequestError (P2002) that NestJS's default filter
     // turns into a bare 500 "Internal server error" — a live user hit
     // this exact case. Same friendly-exception treatment as the email
-    // check right above, only when a phone was actually supplied.
-    if (dto.phone) {
-      const existingPhone = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
-      if (existingPhone) throw new ConflictException('An account with this phone number already exists');
-    }
+    // check right above.
+    const existingPhone = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
+    if (existingPhone) throw new ConflictException('An account with this phone number already exists');
 
     const passwordHash = await argon2.hash(dto.password);
     const referralCode = await generateUniqueReferralCode(this.prisma);
