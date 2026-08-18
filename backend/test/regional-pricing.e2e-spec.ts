@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
-import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma, verifySubscriptionFirstPayment } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -100,12 +100,15 @@ describe('Region-based quoting engine', () => {
         login(app, agent.email),
       ]);
 
-      await request(app.getHttpServer())
+      const subRes = await request(app.getHttpServer())
         .post('/api/me/subscription')
         .set('Authorization', `Bearer ${customerToken}`)
         .send({ plan: 'PRIORITY' })
         .expect(201);
-
+      // subscribe() only creates a PENDING subscription now — the
+      // discount/SC math below relies on it being live from the start, so
+      // confirm the (dry-run, in this env) payment here.
+      await verifySubscriptionFirstPayment(app, subRes.body.id);
     });
   });
 

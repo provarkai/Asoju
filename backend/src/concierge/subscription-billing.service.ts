@@ -85,7 +85,14 @@ export class SubscriptionBillingService {
     return { billed, lapsed };
   }
 
-  private async billPeriod(subscription: BillableSubscription) {
+  /** Shared by billPeriod (cron renewal) and initiateFirstPayment ("the
+   * subscriptions are not connected to Paystack" fix) — builds the
+   * period's SubscriptionInvoice and calls Paystack exactly the same way
+   * either time. Deliberately does NOT touch Subscription.renewsAt: the
+   * two callers disagree on when that should move (immediately, for a
+   * renewal already ACTIVE; only once the first payment is verified, for
+   * a still-PENDING subscription that has no current period yet). */
+  private async initiatePeriodPayment(subscription: BillableSubscription) {
     const periodStart = new Date();
     const periodEnd = new Date(periodStart.getTime() + BILLING_PERIOD_MS);
     const reference = `${SUBSCRIPTION_INVOICE_REFERENCE_PREFIX}${subscription.id}_${randomBytes(4).toString('hex')}`;
@@ -110,22 +117,40 @@ export class SubscriptionBillingService {
       },
     });
 
-    await this.prisma.subscription.update({ where: { id: subscription.id }, data: { renewsAt: periodEnd } });
+    return { invoice, authorizationUrl: result.authorizationUrl, reference, dryRun: result.dryRun };
+  }
+
+  private async billPeriod(subscription: BillableSubscription) {
+    const { invoice, authorizationUrl, dryRun } = await this.initiatePeriodPayment(subscription);
+
+    await this.prisma.subscription.update({ where: { id: subscription.id }, data: { renewsAt: invoice.periodEnd } });
 
     await this.audit.record({
       actorType: 'system',
       action: 'concierge.subscription_billed',
-      metadata: { subscriptionId: subscription.id, invoiceId: invoice.id, reference, dryRun: result.dryRun },
+      metadata: { subscriptionId: subscription.id, invoiceId: invoice.id, reference: invoice.paystackReference, dryRun },
     });
     await this.notifications.notify(
       subscription.customer.userId,
       'Your Concierge subscription is due for renewal',
-      result.dryRun
+      dryRun
         ? `Your next Concierge payment of ${subscription.currency} ${Number(subscription.amount).toLocaleString()} is due — a real payment link will appear here once Paystack is configured.`
-        : `Your next Concierge payment of ${subscription.currency} ${Number(subscription.amount).toLocaleString()} is ready — complete it at ${result.authorizationUrl}`,
+        : `Your next Concierge payment of ${subscription.currency} ${Number(subscription.amount).toLocaleString()} is ready — complete it at ${authorizationUrl}`,
     );
 
     return invoice;
+  }
+
+  /** "The subscriptions are not connected to Paystack" fix — called from
+   * ConciergeService.subscribe() right after creating a PENDING
+   * subscription, so signing up actually requires a real payment before
+   * any benefit (SC grant, discount, eligible-request cap) is usable.
+   * Returns the checkout link for the frontend to redirect to; the
+   * subscription only becomes ACTIVE once handleVerifiedSubscriptionPayment
+   * below confirms payment via the webhook. */
+  async initiateFirstPayment(subscription: BillableSubscription) {
+    const { authorizationUrl, reference, dryRun } = await this.initiatePeriodPayment(subscription);
+    return { authorizationUrl, reference, dryRun };
   }
 
   /** Called only from the PaystackWebhookGuard-protected route, after
@@ -151,10 +176,28 @@ export class SubscriptionBillingService {
       data: { status: PaymentStatus.PAID, paidAt: new Date() },
     });
 
+    // "The subscriptions are not connected to Paystack" fix — a still-
+    // PENDING subscription only ever reaches here on its FIRST verified
+    // payment (renewals only exist for already-ACTIVE subscriptions, via
+    // billPeriod), so this is the real activation moment: flip it ACTIVE
+    // and start its first period now, not at signup time.
+    const isFirstActivation = invoice.subscription.status === SubscriptionStatus.PENDING;
+    if (isFirstActivation) {
+      await this.prisma.subscription.update({
+        where: { id: invoice.subscriptionId },
+        data: { status: SubscriptionStatus.ACTIVE, renewsAt: invoice.periodEnd },
+      });
+      await this.audit.record({
+        actorType: 'system',
+        action: 'concierge.subscribed',
+        metadata: { subscriptionId: invoice.subscriptionId, subscriptionInvoiceId: invoice.id, reference },
+      });
+    }
+
     // P0 Technical Build Spec Section 18: "GRANT | Monthly membership SC"
     // — granted on confirmed payment, not at invoice-creation time, so a
-    // renewal that never gets paid never hands out free SC that would
-    // otherwise need clawing back.
+    // renewal (or a first period) that never gets paid never hands out
+    // free SC that would otherwise need clawing back.
     const plan = invoice.subscription.plan as MembershipPlan;
     const planConfig = await this.planConfig.getConfig(plan);
     await this.scLedger.grant(invoice.subscriptionId, planConfig.scGrantUsd);
@@ -166,8 +209,10 @@ export class SubscriptionBillingService {
     });
     await this.notifications.notify(
       invoice.subscription.customer.userId,
-      'Concierge payment received',
-      'Thanks — your Concierge subscription is active for another period.',
+      isFirstActivation ? 'Welcome to ASOJU Concierge' : 'Concierge payment received',
+      isFirstActivation
+        ? 'Thanks — your payment went through and your Concierge subscription is now active.'
+        : 'Thanks — your Concierge subscription is active for another period.',
     );
 
     return updated;
@@ -192,15 +237,31 @@ export class SubscriptionBillingService {
       data: { status: PaymentStatus.FAILED },
     });
 
+    // A failed renewal is handled entirely by the next day's lapse sweep
+    // (runBillingSweep already lapses an ACTIVE subscription whose last
+    // invoice didn't get paid). A failed *first* payment has no sweep
+    // watching it (PENDING subscriptions aren't in that query at all) —
+    // cancel it directly so the customer isn't stuck and subscribe() lets
+    // them cleanly try again instead of hitting "Already subscribed".
+    const isFirstPaymentFailure = invoice.subscription.status === SubscriptionStatus.PENDING;
+    if (isFirstPaymentFailure) {
+      await this.prisma.subscription.update({
+        where: { id: invoice.subscriptionId },
+        data: { status: SubscriptionStatus.CANCELLED, cancelledAt: new Date() },
+      });
+    }
+
     await this.audit.record({
       actorType: 'system',
       action: 'concierge.subscription_payment_failed',
-      metadata: { subscriptionInvoiceId: invoice.id, reference, gatewayResponse },
+      metadata: { subscriptionInvoiceId: invoice.id, reference, gatewayResponse, cancelledPendingSubscription: isFirstPaymentFailure },
     });
     await this.notifications.notify(
       invoice.subscription.customer.userId,
-      'Concierge payment did not go through',
-      `Your Concierge renewal payment wasn't successful${gatewayResponse ? ` (${gatewayResponse})` : ''} — it will be retried at your next billing date, or contact us to pay now.`,
+      isFirstPaymentFailure ? 'Concierge signup payment did not go through' : 'Concierge payment did not go through',
+      isFirstPaymentFailure
+        ? `Your Concierge signup payment wasn't successful${gatewayResponse ? ` (${gatewayResponse})` : ''} — you can try subscribing again any time.`
+        : `Your Concierge renewal payment wasn't successful${gatewayResponse ? ` (${gatewayResponse})` : ''} — it will be retried at your next billing date, or contact us to pay now.`,
     );
 
     return updated;

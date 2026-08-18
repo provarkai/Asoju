@@ -67,15 +67,28 @@ export default function BillingPage() {
     );
   }
 
+  // "The subscriptions are not connected to Paystack" fix — subscribing
+  // no longer activates anything by itself. The backend creates a PENDING
+  // subscription and returns a real Paystack checkout link; only a
+  // verified payment (webhook) activates it and grants SC. Same
+  // dryRun/redirect pattern as dashboard/cases/[id]/page.tsx's payNow().
   const doSubscribe = async (plan: 'ESSENTIAL' | 'PRIORITY' | 'PREMIUM') => {
     setBusy(plan);
     setError(null);
     try {
-      await apiFetch('/me/subscription', { method: 'POST', body: JSON.stringify({ plan }) });
-      load();
+      const res = await apiFetch<{ authorizationUrl: string; dryRun: boolean }>('/me/subscription', {
+        method: 'POST',
+        body: JSON.stringify({ plan }),
+      });
+      if (res.dryRun) {
+        setError('Payments aren’t configured in this environment yet (dry-run mode) — no charge was made. A real deployment would redirect to Paystack checkout now.');
+        setBusy(null);
+        load();
+      } else {
+        window.location.href = res.authorizationUrl;
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
-    } finally {
       setBusy(null);
     }
   };
@@ -106,15 +119,37 @@ export default function BillingPage() {
           <h1 className="mt-1 font-display text-3xl font-semibold text-forest">Pick your plan — every subscription includes a monthly Special Credit</h1>
           <p className="mt-1.5 text-sm text-forest/60">Your SC voucher covers part of a case each cycle, and you pay the remainder out-of-pocket (with your tier discount).</p>
         </div>
-        {sub && (
+        {sub && sub.status === 'ACTIVE' && (
           <Badge className="border-emerald-300 bg-emerald-100 text-emerald-800">
             Active · {PLAN_LABEL[sub.plan]}
             {daysLeft !== null ? ` · ${daysLeft}d left in cycle` : ''}
           </Badge>
         )}
+        {sub && sub.status === 'PENDING' && (
+          <Badge className="border-gold/40 bg-gold/10 text-clay">Payment pending · {PLAN_LABEL[sub.plan]}</Badge>
+        )}
       </div>
 
-      {sub && (
+      {sub && sub.status === 'PENDING' && (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-gold/40 bg-gold/5 p-6">
+          <div>
+            <p className="font-display text-lg font-semibold text-forest">Your {PLAN_LABEL[sub.plan]} subscription is awaiting payment</p>
+            <p className="mt-1 text-sm text-forest/65">Nothing is active yet — complete checkout to unlock your Special Credit and plan benefits.</p>
+          </div>
+          <div className="flex gap-2.5">
+            <Button variant="ghost" className="text-forest/60 hover:text-forest" disabled={busy === 'cancel'} onClick={doCancel}>
+              {busy === 'cancel' ? <Loader2 className="size-4 animate-spin" /> : null}
+              Cancel
+            </Button>
+            <Button className="bg-gold font-semibold text-forest-deep hover:bg-gold-light" disabled={busy !== null} onClick={() => doSubscribe(sub.plan)}>
+              {busy === sub.plan ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
+              Complete payment
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {sub && sub.status === 'ACTIVE' && (
         <div className="mt-6 overflow-hidden rounded-2xl border border-gold/40 bg-gradient-to-br from-gold/10 to-white p-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
@@ -172,7 +207,8 @@ export default function BillingPage() {
         </div>
 
         {plans.map((p) => {
-          const isCurrent = sub?.plan === p.plan;
+          const isCurrent = sub?.status === 'ACTIVE' && sub.plan === p.plan;
+          const isCurrentPending = sub?.status === 'PENDING' && sub.plan === p.plan;
           return (
             <div key={p.plan} className={cn('flex flex-col rounded-2xl border bg-white p-6 shadow-sm transition-all', p.plan === 'PRIORITY' ? 'border-gold/50 shadow-lg shadow-gold/10' : 'border-forest/10')}>
               <div className="flex items-center justify-between">
@@ -202,6 +238,17 @@ export default function BillingPage() {
                   <Button variant="ghost" className="mt-2 w-full text-forest/60 hover:text-forest" disabled={busy === 'cancel'} onClick={doCancel}>
                     {busy === 'cancel' ? <Loader2 className="size-4 animate-spin" /> : null}
                     Cancel subscription
+                  </Button>
+                </div>
+              ) : isCurrentPending ? (
+                <div className="mt-6">
+                  <Button className="w-full bg-gold font-semibold text-forest-deep hover:bg-gold-light" disabled={busy !== null} onClick={() => doSubscribe(p.plan)}>
+                    {busy === p.plan ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
+                    Complete payment
+                  </Button>
+                  <Button variant="ghost" className="mt-2 w-full text-forest/60 hover:text-forest" disabled={busy === 'cancel'} onClick={doCancel}>
+                    {busy === 'cancel' ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Cancel
                   </Button>
                 </div>
               ) : (

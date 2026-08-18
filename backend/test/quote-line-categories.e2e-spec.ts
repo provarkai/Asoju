@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
-import { createCustomer, createStaff, login, prisma } from './utils/fixtures';
+import { createCustomer, createStaff, login, prisma, verifySubscriptionFirstPayment } from './utils/fixtures';
 import { Role } from '@prisma/client';
 
 /**
@@ -82,12 +82,15 @@ describe('Quote line categories', () => {
       ]);
       [customerToken, adminToken] = await Promise.all([login(app, customer.email), login(app, admin.email)]);
 
-      await request(app.getHttpServer())
+      const subRes = await request(app.getHttpServer())
         .post('/api/me/subscription')
         .set('Authorization', `Bearer ${customerToken}`)
         .send({ plan: 'PRIORITY' })
         .expect(201);
-
+      // subscribe() only creates a PENDING subscription now — every test
+      // below relies on the 10% discount / $50 SC being live from the
+      // start, so confirm the (dry-run, in this env) payment here.
+      await verifySubscriptionFirstPayment(app, subRes.body.id);
     });
   });
 

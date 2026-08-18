@@ -2,7 +2,7 @@ import { randomBytes } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createTestApp, ensureHealthyApp, withSetupRetry } from './utils/bootstrap';
-import { createCustomer, createStaff, createAgent, login, prisma, uniqueEmail } from './utils/fixtures';
+import { createCustomer, createStaff, createAgent, login, prisma, uniqueEmail, verifySubscriptionFirstPayment } from './utils/fixtures';
 import { PaymentStatus, Role } from '@prisma/client';
 
 // User.phone is globally unique (schema.prisma) and acceptBeneficiaryInvite
@@ -269,15 +269,18 @@ describe('Customer portfolio dashboard', () => {
     expect(idxSooner).toBeLessThan(idxLater);
   });
 
-  it('has no membership block for a customer with no subscription, a populated one after subscribing', async () => {
+  it('has no membership block for a customer with no subscription, a populated one after subscribing and paying', async () => {
     const before = await portfolio();
     expect(before.body.membership).toBeNull();
 
-    await request(app.getHttpServer())
+    const subRes = await request(app.getHttpServer())
       .post('/api/me/subscription')
       .set('Authorization', `Bearer ${customerToken}`)
       .send({ plan: 'PRIORITY' })
       .expect(201);
+    // subscribe() only creates a PENDING subscription now — payment must
+    // be verified before it's ACTIVE (see verifySubscriptionFirstPayment).
+    await verifySubscriptionFirstPayment(app, subRes.body.id);
 
     const after = await portfolio();
     expect(after.body.membership).toBeTruthy();
