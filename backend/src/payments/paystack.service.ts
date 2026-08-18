@@ -22,6 +22,21 @@ export interface RefundTransactionResult {
   dryRun: boolean;
 }
 
+/** Paystack's own transaction-status vocabulary
+ * (GET /transaction/verify/:reference) — 'success'/'failed'/'abandoned'
+ * are terminal; 'pending'/'ongoing'/'queued' are still in flight (an
+ * ongoing bank-transfer or USSD confirmation, mid-3DS, etc). */
+export type PaystackVerifyStatus = 'success' | 'failed' | 'abandoned' | 'pending' | 'ongoing' | 'queued' | 'reversed';
+
+export interface VerifyTransactionResult {
+  dryRun: boolean;
+  /** Undefined only in dry-run mode — nothing to report without a real
+   * provider to ask. */
+  status?: PaystackVerifyStatus;
+  amountKobo?: number;
+  gatewayResponse?: string;
+}
+
 /**
  * Section 12 "real payment-provider integration" — replaces
  * WebhookSecretGuard's shared-secret stand-in with Paystack's actual
@@ -133,6 +148,50 @@ export class PaystackService {
       }
 
       return { dryRun: false };
+    });
+  }
+
+  /**
+   * P0 Technical Build Spec Section 20/21 "Payment Architecture" —
+   * `PaymentStatus.PROCESSING` existed in the enum with nothing ever
+   * setting it: the only way a payment's real state ever reached this app
+   * was the webhook, and a payment that's genuinely in flight (an ongoing
+   * bank transfer, mid-3DS) has nowhere to sit but PENDING regardless of
+   * what Paystack itself reports. This is the other leg — a poll of
+   * Paystack's own source of truth (GET /transaction/verify/:reference),
+   * for the case a webhook is late or never arrives. Same dry-run pattern
+   * as everywhere else: without PAYSTACK_SECRET_KEY there's no live
+   * provider to ask, so this returns `{ dryRun: true }` and the caller
+   * (CommerceService.runPaymentVerificationSweep) skips it entirely rather
+   * than inventing a status.
+   */
+  async verifyTransaction(reference: string): Promise<VerifyTransactionResult> {
+    if (!this.secretKey) {
+      this.logger.warn(`[dry-run] Paystack verify skipped (PAYSTACK_SECRET_KEY not set) — reference=${reference}`);
+      return { dryRun: true };
+    }
+
+    return this.breaker.execute(async () => {
+      const res = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+        headers: { Authorization: `Bearer ${this.secretKey}` },
+      });
+
+      const body = (await res.json().catch(() => ({}))) as {
+        status?: boolean;
+        message?: string;
+        data?: { status: PaystackVerifyStatus; amount: number; gateway_response?: string };
+      };
+
+      if (!res.ok || !body.status || !body.data) {
+        throw new Error(`Paystack verify failed: ${body.message ?? res.statusText}`);
+      }
+
+      return {
+        dryRun: false,
+        status: body.data.status,
+        amountKobo: body.data.amount,
+        gatewayResponse: body.data.gateway_response,
+      };
     });
   }
 

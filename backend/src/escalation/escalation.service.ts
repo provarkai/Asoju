@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { EscalationStatus, Role } from '@prisma/client';
+import { EscalationReasonCategory, EscalationStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -66,6 +66,33 @@ export class EscalationService {
     return escalation;
   }
 
+  /**
+   * docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3 — the ESCALATE outcome
+   * of AutomationEligibilityService, for a ServiceRequest that has no Case
+   * yet (`caseId` stays null; `serviceRequestId` is the link instead).
+   * System-attributed, not staff-attributed — there is no human actor
+   * behind an automated decision. Never exposed as a public HTTP route;
+   * AutomationEligibilityService is the only caller.
+   */
+  async createForServiceRequest(
+    serviceRequestId: string,
+    reasonCategory: EscalationReasonCategory,
+    customerMessage: string,
+    internalReason?: string,
+  ) {
+    const escalation = await this.prisma.escalation.create({
+      data: { serviceRequestId, reasonCategory, customerMessage, internalReason },
+    });
+
+    await this.audit.record({
+      actorType: 'system',
+      action: 'escalation.created',
+      metadata: { escalationId: escalation.id, reasonCategory, serviceRequestId },
+    });
+
+    return escalation;
+  }
+
   /** Staff-only detail — every field, including internalReason/
    * handoffSummary. Distinct from listForCase below, which is the
    * customer-safe view. */
@@ -110,7 +137,7 @@ export class EscalationService {
     });
 
     await this.audit.record({
-      caseId: escalation.caseId,
+      caseId: escalation.caseId ?? undefined,
       actorId: actor.id,
       actorType: 'user',
       action: 'escalation.assigned',
@@ -132,7 +159,7 @@ export class EscalationService {
     });
 
     await this.audit.record({
-      caseId: escalation.caseId,
+      caseId: escalation.caseId ?? undefined,
       actorId: actor.id,
       actorType: 'user',
       action: 'escalation.resolved',
@@ -154,7 +181,7 @@ export class EscalationService {
     });
 
     await this.audit.record({
-      caseId: escalation.caseId,
+      caseId: escalation.caseId ?? undefined,
       actorId: actor.id,
       actorType: 'user',
       action: 'escalation.cancelled',

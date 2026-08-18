@@ -380,6 +380,7 @@ model User {
   escalationsAssigned                  Escalation[]
   beneficiaryRelayMessagesSent         BeneficiaryRelayMessage[] @relation("BeneficiaryRelaySender")
   beneficiaryRelayMessagesAcknowledged BeneficiaryRelayMessage[] @relation("BeneficiaryRelayAcknowledgedBy")
+  arrivalArrangementsUpdated           ArrivalArrangement[]
 
   @@index([role])
 }
@@ -625,7 +626,19 @@ model ServiceRequest {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  escalations Escalation[]
+  /// docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3, resolved decision #1
+  /// — the target architecture's `StructuredRequest` is this same model,
+  /// enriched, not a parallel one. All nullable/additive: a request with
+  /// none of these filled in behaves exactly as it always has. Populated
+  /// progressively (PATCH /service-requests/:id), same "fill in more as
+  /// you go" shape as ArrivalProfile's upsert.
+  objective    String?
+  subject      String?
+  timing       String?
+  requirements Json?
+
+  escalations        Escalation[]
+  automationDecision AutomationDecision?
 }
 
 /// THE CENTRAL OBJECT. Every request, regardless of vertical, becomes a
@@ -699,6 +712,7 @@ model ServiceCase {
   disputes                 Dispute[]
   escalations              Escalation[]
   arrivalProfile           ArrivalProfile?
+  arrivalArrangements      ArrivalArrangement[]
   beneficiaryRelayMessages BeneficiaryRelayMessage[]
   qcReviews                QcReview[]
 
@@ -962,24 +976,24 @@ model ProviderCredential {
 
 /// Links case <-> agent/provider (Section 3).
 model Assignment {
-  id              String           @id @default(uuid())
-  caseId          String
-  case            ServiceCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  role            AssignmentRole
-  agentId         String?
-  agent           Agent?           @relation(fields: [agentId], references: [id])
-  providerId      String?
-  provider        Provider?        @relation(fields: [providerId], references: [id])
-  status          AssignmentStatus @default(OFFERED)
-  scheduledFor    DateTime?
-  acceptedAt      DateTime?
+  id                     String           @id @default(uuid())
+  caseId                 String
+  case                   ServiceCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  role                   AssignmentRole
+  agentId                String?
+  agent                  Agent?           @relation(fields: [agentId], references: [id])
+  providerId             String?
+  provider               Provider?        @relation(fields: [providerId], references: [id])
+  status                 AssignmentStatus @default(OFFERED)
+  scheduledFor           DateTime?
+  acceptedAt             DateTime?
   /// Section 5.4 Field Agent App workflow: Accept -> Navigate -> Check-in
   /// (timestamp + location) -> Execute checklist -> ...
-  checkInAt       DateTime?
-  checkInLocation Json?
+  checkInAt              DateTime?
+  checkInLocation        Json?
   /// GPS accuracy (metres) the client reported at check-in, when location
   /// carried real coordinates rather than a plain address string.
-  checkInAccuracy Float?
+  checkInAccuracy        Float?
   /// PASS — real coordinates, validated against the case's property/asset
   ///   target coordinates, within the geofence radius.
   /// UNVERIFIED — checked in without a comparable target (no coordinates
@@ -990,11 +1004,11 @@ model Assignment {
   /// A check-in that fails geofence validation (outside radius, bad
   /// accuracy, stale fix) is rejected outright and never reaches this
   /// field — see AssignmentsService.checkIn / geofence.ts.
-  geofenceResult          String?
-  geofenceDistanceMeters  Float?
-  completedAt     DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  geofenceResult         String?
+  geofenceDistanceMeters Float?
+  completedAt            DateTime?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
 
   restrictedDocuments Document[]
   locationPings       LocationPing[]
@@ -1104,13 +1118,13 @@ model Evidence {
   /// forever. transcript* is the original-language Whisper transcription;
   /// translated* is the English translation (skipped, translatedText =
   /// transcript, when the source already is English).
-  languageHint       String? // caller-supplied ISO 639-1 hint (yo/ha/ig/en), improves Whisper accuracy
-  transcript         String?
-  transcriptLang     String?
-  translatedText     String?
-  translatedLang     String?
-  transcriptionStatus String @default("NOT_REQUESTED") // NOT_REQUESTED | COMPLETED | FAILED
-  translationStatus   String @default("NOT_REQUESTED") // NOT_REQUESTED | COMPLETED | FAILED
+  languageHint        String? // caller-supplied ISO 639-1 hint (yo/ha/ig/en), improves Whisper accuracy
+  transcript          String?
+  transcriptLang      String?
+  translatedText      String?
+  translatedLang      String?
+  transcriptionStatus String  @default("NOT_REQUESTED") // NOT_REQUESTED | COMPLETED | FAILED
+  translationStatus   String  @default("NOT_REQUESTED") // NOT_REQUESTED | COMPLETED | FAILED
 
   @@unique([caseId, clientRequestId])
   @@index([caseId])
@@ -1599,13 +1613,13 @@ model JournalLine {
 /// enforced, auditable state change (CaseStatusHistory + AuditEvent),
 /// not just a flag. `caseHeld` records whether that happened.
 model SosAlert {
-  id           String      @id @default(uuid())
+  id           String       @id @default(uuid())
   agentId      String
-  agent        Agent       @relation(fields: [agentId], references: [id])
+  agent        Agent        @relation(fields: [agentId], references: [id])
   caseId       String?
   case         ServiceCase? @relation(fields: [caseId], references: [id])
   assignmentId String?
-  assignment   Assignment? @relation(fields: [assignmentId], references: [id])
+  assignment   Assignment?  @relation(fields: [assignmentId], references: [id])
 
   alertType String // GENERAL | MEDICAL | SECURITY | SAFETY | LOST
   severity  String // LOW | MEDIUM | HIGH | CRITICAL
@@ -1929,8 +1943,13 @@ model RecurringSchedule {
 
   cadenceDays Int
   nextRunAt   DateTime
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  active      Boolean   @default(true)
+  // Set the moment a schedule is paused (`setActive(false)`), cleared on
+  // resume — lets `setActive(true)` restore the exact remaining time until
+  // `nextRunAt` instead of resetting the full cadence from the resume
+  // moment. Null whenever the schedule has never been paused.
+  pausedAt    DateTime?
+  createdAt   DateTime  @default(now())
 
   spawnedCases ServiceCase[] @relation("ScheduleSpawned")
 }
@@ -2071,6 +2090,10 @@ enum EscalationReasonCategory {
   /// decision at all. The "also immediately useful today" case Phase 2
   /// is scoped to cover, not just a placeholder for future automation.
   MANUAL
+  /// Phase 3 — AutomationEligibilityService's ESCALATE outcome: the
+  /// service type has automation configured but its kill switch
+  /// (AutomationCapability.enabled) is currently off.
+  AUTOMATION_UNAVAILABLE
 }
 
 enum EscalationStatus {
@@ -2082,31 +2105,32 @@ enum EscalationStatus {
 
 model Escalation {
   id     String       @id @default(uuid())
-  caseId String
-  case   ServiceCase  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  /// Nullable as of Phase 3 — an automation decision can escalate a
+  /// ServiceRequest before it's ever converted to a Case (serviceRequestId
+  /// below is set instead). Every other escalation source (manual,
+  /// dispute-adjacent) still has a real case and sets this as before.
+  caseId String?
+  case   ServiceCase? @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
-  /// Nullable, forward-compatible with Phase 3 — a StructuredRequest can
-  /// escalate before it's ever converted to a Case (per decision #1 in
-  /// the scope doc, that's an enriched ServiceRequest, not a new model).
-  /// Not used by anything yet; caseId above is required today because
-  /// every current escalation source (manual, or a future automation
-  /// decision on an already-converted case) has one.
+  /// Phase 3 — AutomationEligibilityService.evaluateAndRecord sets this
+  /// (and leaves caseId null) for its ESCALATE outcome; every other
+  /// escalation source leaves it null.
   serviceRequestId String?
   serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id], onDelete: SetNull)
 
-  reasonCategory EscalationReasonCategory
+  reasonCategory  EscalationReasonCategory
   /// Restricted, staff-only — never returned on the customer-facing
   /// GET /cases/:caseId/escalations endpoint. The real operational detail
   /// (e.g. "predictive cost 3x the regional base rate, flagged for
   /// review") that customerMessage below deliberately does not expose.
-  internalReason String?
+  internalReason  String?
   /// Structured staff handoff (source spec §23 "Human Escalation Handoff
   /// Package") — flexible JSON, same convention as CaseScope.tasks/
   /// deliverables, rather than a fixed column per optional field
   /// (confirmed scope, missing information, pricing inputs unresolved,
   /// provider issue, recommended next action — not every escalation has
   /// all of these).
-  handoffSummary Json?
+  handoffSummary  Json?
   /// Always required — every escalation must have an approved,
   /// customer-safe explanation before it's visible to them at all. Source
   /// spec §9: "Do not expose internal risk scores, thresholds or hidden
@@ -2123,9 +2147,97 @@ model Escalation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  automationDecision AutomationDecision?
+
   @@index([caseId])
   @@index([status])
   @@index([assignedToId, status])
+}
+
+/// docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3 "Structured Request +
+/// Eligibility Decision" — the deterministic gate between a Concierge
+/// conversation and automated case creation. Per the scope doc's own
+/// instruction: "resolve AUTO at first to 'still requires staff convert'
+/// ... land the decision-making and audit trail without yet removing the
+/// human from case creation." Nothing here can create, convert, price, or
+/// pay for anything — it only ever records a decision.
+enum AutomationDecisionOutcome {
+  /// Every configured rule passed. Recorded for audit/observation only in
+  /// this phase — POST /service-requests/:id/convert (staff-only) remains
+  /// the only way a Case is ever created; Phase 4 is what would let this
+  /// outcome actually act.
+  AUTO
+  /// A REQUIRED_FIELDS rule found something missing — not a rejection,
+  /// just "not enough information yet."
+  CUSTOMER_INPUT
+  /// The service type has automation configured but its kill switch
+  /// (AutomationCapability.enabled) is off — creates a real Escalation
+  /// (reasonCategory AUTOMATION_UNAVAILABLE) so it surfaces the same way
+  /// any other staff handoff does.
+  ESCALATE
+  /// No AutomationCapability exists for this service type at all (or the
+  /// request has no serviceType yet) — automation was never offered here,
+  /// distinct from ESCALATE's "offered but currently switched off."
+  UNSUPPORTED
+  /// A BLOCKED_KEYWORDS rule matched — never eligible for automation
+  /// regardless of the kill switch. Source spec's own "AI cannot ...
+  /// bypass configured escalation" — this is the deterministic code path
+  /// that guarantees it, not a judgment call.
+  BLOCKED
+}
+
+model AutomationCapability {
+  id          String      @id @default(uuid())
+  serviceType ServiceType @unique
+  /// The kill switch. Defaults to off — automation must be deliberately
+  /// enabled per service type, never on by the mere existence of a row.
+  enabled     Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  rules AutomationRule[]
+}
+
+enum AutomationRuleKind {
+  /// config: { "fields": ["serviceType" | "objective" | "location" | "timing"] }
+  /// Any listed field empty on the ServiceRequest -> CUSTOMER_INPUT.
+  REQUIRED_FIELDS
+  /// config: { "keywords": string[] }
+  /// Case-insensitive substring match against rawDescription + objective
+  /// -> BLOCKED. Evaluated before REQUIRED_FIELDS — a blocked request is
+  /// blocked regardless of what information it's missing.
+  BLOCKED_KEYWORDS
+}
+
+model AutomationRule {
+  id           String               @id @default(uuid())
+  capabilityId String
+  capability   AutomationCapability @relation(fields: [capabilityId], references: [id], onDelete: Cascade)
+  kind         AutomationRuleKind
+  config       Json
+  sortOrder    Int                  @default(0)
+  createdAt    DateTime             @default(now())
+
+  @@index([capabilityId])
+}
+
+/// One row per ServiceRequest — re-evaluated (upserted, never duplicated)
+/// every time PATCH /service-requests/:id supplies new structured detail.
+/// ruleResults is the full audit trail (source spec: "every automated
+/// decision is audited") — which rule fired, not just the final outcome.
+model AutomationDecision {
+  id                String                    @id @default(uuid())
+  serviceRequestId  String                    @unique
+  serviceRequest    ServiceRequest            @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  outcome           AutomationDecisionOutcome
+  reason            String
+  ruleResults       Json
+  capabilityEnabled Boolean
+  escalationId      String?                   @unique
+  escalation        Escalation?               @relation(fields: [escalationId], references: [id], onDelete: SetNull)
+  decidedAt         DateTime                  @default(now())
+
+  @@index([outcome])
 }
 
 /// docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 2 — duplicate protection
@@ -2287,6 +2399,57 @@ model ArrivalProfile {
   specialRequests      String?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
+
+  @@index([caseId])
+}
+
+/// ASOJU_Arrivals_Service_Page_Blueprint_v1.1 — transport/accommodation
+/// "help secure and coordinate," never guaranteed availability before a
+/// human actually confirms it with the real airport-transport driver or
+/// accommodation host. Backend/provider-authoritative by design: there is
+/// no self-service provider portal for these (the general `ProviderStatus`
+/// directory doesn't cover ad hoc transport/accommodation vendors — see
+/// arrival-arrangement-state-machine.ts) — staff coordinate off-platform
+/// (phone/email/WhatsApp) and record the real-world state here, so the
+/// frontend only ever displays what a human actually confirmed, never an
+/// assumption.
+enum ArrivalArrangementType {
+  AIRPORT_TRANSPORT
+  ACCOMMODATION
+}
+
+/// The blueprint's locked state machine, verbatim:
+/// requested -> being sourced -> awaiting confirmation -> confirmed ->
+/// changed/cancelled -> completed. See arrival-arrangement-state-machine.ts
+/// for the transition map this enum's values back.
+enum ArrivalArrangementStatus {
+  REQUESTED
+  BEING_SOURCED
+  AWAITING_CONFIRMATION
+  CONFIRMED
+  CHANGED
+  CANCELLED
+  COMPLETED
+}
+
+model ArrivalArrangement {
+  id          String                   @id @default(uuid())
+  caseId      String
+  case        ServiceCase              @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  type        ArrivalArrangementType
+  status      ArrivalArrangementStatus @default(REQUESTED)
+  /// Free text — who/what was actually arranged (e.g. "Toyota Camry,
+  /// driver Musa +234...", "Ikeja hotel, room 302, checked in 14 Aug").
+  /// Never a promise of availability by itself; `status` is.
+  detail      String?
+  /// Required whenever staff move a case-visible status backwards
+  /// (CHANGED/CANCELLED) — same "never a silent pause" discipline as
+  /// ServiceCase.heldFromStatus's `reason`.
+  note        String?
+  updatedById String?
+  updatedBy   User?                    @relation(fields: [updatedById], references: [id])
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
 
   @@index([caseId])
 }

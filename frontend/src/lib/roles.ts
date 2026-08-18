@@ -15,6 +15,15 @@ export const ADMIN_ROLES = ['ADMIN', 'SUPER_ADMIN'];
 // membership plan pricing (P0 UX Spec "Admin Screen — Pricing Configuration").
 export const FINANCE_ROLES = ['FINANCE', 'ADMIN', 'SUPER_ADMIN'];
 
+// Matches backend CasesController's CHECKLIST_STAFF_ROLES — who can add,
+// edit, or remove a case-specific checklist item on top of the fixed
+// service-type template.
+export const CHECKLIST_STAFF_ROLES = ['CASE_MANAGER', 'ADMIN', 'SUPER_ADMIN'];
+
+// Matches backend ArrivalArrangementsController's ARRIVAL_STAFF_ROLES —
+// who can create/transition a transport/accommodation arrangement.
+export const ARRIVAL_STAFF_ROLES = ['CASE_MANAGER', 'RELATIONSHIP_MANAGER', 'ADMIN', 'SUPER_ADMIN'];
+
 // Section 5.4 — Field Agent App / Provider Portal (shared workflow for MVP).
 export const FIELD_ROLES = ['FIELD_AGENT', 'PROVIDER'];
 

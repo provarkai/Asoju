@@ -16,9 +16,16 @@
 //
 // serviceTypes cross-references the real backend ServiceType enum
 // (backend/prisma/schema.prisma) per docs/FRONTEND_HANDOFF_V1_GAP_MAP.md
-// §1 — the mapping is display-only until the Sprint 1 backend ticket
-// proposed there (restructure ServiceType -> ServiceFamily) lands; it is
-// not yet wired into case creation.
+// §1's Option B (the additive layer, not the enum restructuring): the
+// backend now computes this exact grouping too
+// (backend/src/cases/service-family.ts's SERVICE_TYPE_TO_FAMILY,
+// GET /service-families) and stamps it onto every case response as
+// `serviceFamily` — this array is kept in sync with that map by hand
+// (service-family.e2e-spec.ts asserts the backend's own mapping covers
+// every real ServiceType exactly once). Still display-only here: this
+// list isn't fetched from the backend endpoint at render time, and
+// ServiceType itself is untouched — case creation still keys off the
+// real 10-... now 12-value enum, not this family label.
 //
 // fromNgn is undefined, never invented, where no serviceType in the
 // family has a real published "from" price — Arrivals and Assist's
@@ -139,7 +146,7 @@ export const SERVICE_FAMILIES: ServiceFamily[] = [
     slug: 'care',
     name: 'ASOJU Care',
     tagline: "Be there for the people who matter, even when you're far away.",
-    serviceTypes: ['FAMILY_SUPPORT', 'BEREAVEMENT_SUPPORT'],
+    serviceTypes: ['FAMILY_SUPPORT', 'BEREAVEMENT_SUPPORT', 'HEALTHCARE_COORDINATION'],
     fromNgn: 45000,
     useCases: [
       'Errands and check-ins for family members back home',
@@ -169,7 +176,7 @@ export const SERVICE_FAMILIES: ServiceFamily[] = [
     slug: 'verify',
     name: 'ASOJU Verify',
     tagline: "Know who and what you're dealing with.",
-    serviceTypes: ['BUSINESS_VERIFICATION'],
+    serviceTypes: ['BUSINESS_VERIFICATION', 'LEGAL_DOCUMENT_SERVICES'],
     fromNgn: 90000,
     useCases: [
       'Confirm a business actually exists before you invest or partner',

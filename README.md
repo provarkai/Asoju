@@ -75,11 +75,27 @@ end-to-end against a real Postgres instance:
   `PAYSTACK_SECRET_KEY`), and moves the Payment to `PARTIALLY_REFUNDED` or `REFUNDED` depending on
   whether anything's still owed — never lets a refund exceed what's left. `PaymentStatus` now carries
   all eight of the spec's states; the webhook's amount-mismatch path also now sets
-  `RECONCILIATION_REQUIRED` on the payment and case instead of just logging and doing nothing durable
-  (`PROCESSING` is the one state this doesn't yet set anywhere — it'd need a provider-status poll, a
-  separate increment). Covered by `backend/test/refund.e2e-spec.ts` (4 tests) — negative-control
-  verified: disabling the over-refund guard lets a refund exceed the remaining balance and fails the
-  test; restoring it passes again.
+  `RECONCILIATION_REQUIRED` on the payment and case instead of just logging and doing nothing durable.
+  Covered by `backend/test/refund.e2e-spec.ts` (4 tests) — negative-control verified: disabling the
+  over-refund guard lets a refund exceed the remaining balance and fails the test; restoring it passes
+  again.
+- **Payment verification poll (`PaymentStatus.PROCESSING`)** — the one payment state nothing in the app
+  ever set: the webhook was the only thing that ever moved a `Payment` off `PENDING`, so a late or lost
+  webhook just left it looking untouched. `CommerceService.runPaymentVerificationSweep` polls Paystack's
+  own `GET /transaction/verify/:reference` directly for any `PENDING`/`PROCESSING` payment old enough
+  the webhook's had a fair chance (`PAYMENT_VERIFICATION_MIN_AGE_MINUTES`, default 5) but not yet past
+  the expiry window — reusing the exact same `PAID`/`FAILED` transitions the webhook itself uses, so
+  there's exactly one place either can happen from; this only ever writes `PROCESSING` directly, for
+  Paystack's own in-flight statuses (pending/ongoing/queued). Runs every 5 minutes (plus
+  `POST /admin/payments/run-verification-sweep`, Admin/SuperAdmin, same on-demand pattern as every other
+  sweep). `runPaymentExpirySweep`'s own window now also recovers a payment stuck `PROCESSING` past
+  expiry, the same recovery path an ordinary abandoned checkout gets. Dry-run-safe like every other
+  Paystack call without `PAYSTACK_SECRET_KEY` configured — no live provider to ask means the sweep is a
+  no-op, never inventing a status. Covered by `backend/test/payment-verification.e2e-spec.ts` (8 tests,
+  `PaystackService.verifyTransaction` stubbed via the real app's own DI container since no live Paystack
+  account exists to test the HTTP call itself against, same boundary every other Paystack spec in this
+  suite stops at) — negative-control verified: disabling the success-path reuse fails exactly the "marks
+  a payment PAID" test; restoring it passes again.
 - **Payment reconciliation resolution** (Database Schema & ERD Design v1.0 Section 17 "Finance Schema" —
   `reconciliations | id, payment_id, reconciled_by, reconciled_at, status, notes`) — the webhook
   amount-mismatch path above left a `RECONCILIATION_REQUIRED` payment with no way forward: no admin
@@ -850,11 +866,16 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   (not just hold the right role) — triaging a request auto-attaches the triaging staff member;
   `POST /api/cases/:caseId/claim` self-attaches (used by the Ops Console); `.../collaborators`
   (admin-only) attaches anyone else.
-- The very first staff/admin account has no self-service path — run `npm run seed --workspace=backend`
-  (`backend/prisma/seed.ts`) against a real `DATABASE_URL` (e.g. from Render's dashboard Shell for the
-  backend service) to create the first ADMIN and a FIELD_AGENT test account; it prints each generated
-  password once, and re-running it is safe (existing accounts' passwords are left untouched). Every
-  subsequent agent/provider account can then be onboarded through `/ops/agents` and `/ops/providers`.
+- **Bootstrapping the very first staff/admin account** — every subsequent staff account has a real
+  provisioning path (`POST /admin/staff-accounts` — `AuthService.adminProvisionAccount`, UI on the Admin
+  Console — for RM/Case Manager/QC/Finance/Compliance-Risk/Admin/SuperAdmin; `/ops/agents` and
+  `/ops/providers` for field agents/providers; `POST /admin/partners/:partnerId/contacts` for partner
+  logins), but every one of those requires an already-authenticated Admin/SuperAdmin caller — the
+  chicken-and-egg for account #1. `backend/prisma/seed.ts` (`npm run seed --workspace=backend`,
+  `SEED_SUPERADMIN_EMAIL`/`SEED_SUPERADMIN_PASSWORD` env vars) creates exactly that one account and
+  nothing else, idempotently (a re-run against an email that already exists is a no-op, never a
+  duplicate). MFA is mandatory for `SUPER_ADMIN` like every other privileged role, so its first login
+  goes through the enrollment flow above, not a normal session.
 - **Demo/test data** — `npm run seed:demo --workspace=backend` (`backend/prisma/seed-demo.ts`), separate
   from the bootstrap script above: creates a full set of obviously-synthetic staff accounts (admin,
   finance, case manager, QC, RM, two field agents) and five diaspora customer accounts, all sharing one
@@ -875,13 +896,56 @@ Set `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001` if yo
   (`DATABASE_URL="<external string from the Render dashboard>" SEED_BASE_URL=https://asoju-backend.onrender.com/api npm run seed:demo --workspace=backend`).
   The five demo customer accounts are already registered live (via the public `/auth/register` endpoint,
   which needed no direct DB access) — only the staff accounts and the seven demo cases are still local-only.
-- A case's checklist is fixed at creation time from `backend/src/cases/checklist-templates.ts` — there's
-  no UI yet to customize a checklist per case, only per service type.
-- A mistyped/expired referral code at registration is silently ignored rather than blocking signup —
-  check `GET /api/me/referral` if you need to confirm a code is actually valid before sharing it.
+- A case's checklist is seeded at creation time from `backend/src/cases/checklist-templates.ts` (per
+  service type), and staff (Case Manager/Admin/SuperAdmin) can add, edit, or remove case-specific items
+  on top of it from the Ops case page's "Checklist" card (`POST`/`PATCH`/`DELETE
+  cases/:caseId/tasks[/:taskId]`) — never on a `COMPLETED`/`CLOSED` case, and never on an item the field
+  agent has already completed (`completeTask` stays the only route that can flip that).
+- **Arrivals transport/accommodation arrangements** (`ASOJU_Arrivals_Service_Page_Blueprint_v1.1` — "help
+  secure and coordinate," never a guaranteed booking before a human confirms it) — a new
+  `ArrivalArrangement` per airport-transport/accommodation need on an `ARRIVAL_SUPPORT` case, walking the
+  blueprint's locked state machine verbatim (`requested → being sourced → awaiting confirmation →
+  confirmed → changed/cancelled → completed`, `arrival-arrangement-state-machine.ts`) —
+  backend/provider-authoritative: there's no self-service vendor portal for ad hoc transport/
+  accommodation, so Case Manager/RM/Admin/SuperAdmin coordinate off-platform and record the real state
+  via `POST`/`PATCH cases/:caseId/arrival-arrangements[/:id]`. A cancellation or a post-confirmation
+  change always requires a note (same discipline as `holdCase`'s required `reason`), and a change from
+  `CONFIRMED` always lands back at `AWAITING_CONFIRMATION` rather than staying `CONFIRMED` against stale
+  detail — the customer (`GET` only, read-only by design) only ever sees what's actually been confirmed,
+  never an assumption. New "Transport & accommodation" card on the Ops case page; a read-only equivalent
+  on the customer case page once anything's been requested.
+- A mistyped/expired referral or partner code at registration never blocks signup — `POST /auth/register`
+  now returns `referralCodeApplied`/`partnerCodeApplied` (present only when that field was supplied) so
+  the caller can tell whether it was actually recognized; the register page surfaces a one-shot notice on
+  `/dashboard` when one wasn't.
 - A `RecurringSchedule` is unique per origin case — cancelling (`PATCH /api/cases/:caseId/recurrence`,
-  `{"active":false}`) pauses it rather than deleting it, so reactivating resumes the same schedule
-  (with the clock reset from the reactivation moment, not wherever it was paused).
+  `{"active":false}`) pauses it rather than deleting it; reactivating restores the exact time that was
+  left until the next run when it was paused, not a fresh full cadence.
+- **`ServiceFamily` (additive layer, `docs/FRONTEND_HANDOFF_V1_GAP_MAP.md` §1 Option B)** — the real
+  `ServiceType` enum (12 values now — the original 10 plus `LEGAL_DOCUMENT_SERVICES`/
+  `HEALTHCARE_COORDINATION` from the Platform Expansion PRD — and every module keyed off it) is exactly
+  as it was; `backend/src/cases/service-family.ts`'s `SERVICE_TYPE_TO_FAMILY` is a derived, display-only
+  grouping into the six locked public families (Arrivals/Inspect/Build/Care/Verify/Assist). Genuinely
+  public `GET /service-families` (no auth), and `serviceFamily` now rides alongside the real
+  `serviceType` on every case response (`GET /cases`, `GET /cases/:id`, the beneficiary view too) —
+  additive, never replacing it.
+- **Automation eligibility engine — Phase 3 skeleton** (`docs/AUTOMATION_PRICING_ENGINE_SCOPE.md`) —
+  the deterministic gate between a Concierge conversation and automated case creation, built exactly to
+  the scope doc's own instruction: **decision-and-audit only, nothing here creates, converts, or acts on
+  anything.** `ServiceRequest` gained the enriched fields the target `StructuredRequest` needed
+  (`objective`/`subject`/`timing`/`requirements`, plus finally persisting `serviceType` — previously a
+  comment's promise nothing kept), fillable progressively via new `PATCH /service-requests/:id`. New
+  `AutomationCapability` (a per-service-type kill switch, off by default) + `AutomationRule`
+  (`REQUIRED_FIELDS`/`BLOCKED_KEYWORDS`, admin-configurable) feed a pure, unit-tested evaluator
+  (`backend/src/automation/automation-evaluator.ts`) that decides `AUTO`/`CUSTOMER_INPUT`/`ESCALATE`/
+  `UNSUPPORTED`/`BLOCKED` for every request — re-run automatically on create and on every update.
+  `ESCALATE` creates a real `Escalation` (Phase 2's entity, `Escalation.caseId` now nullable to allow
+  one before a Case exists) that surfaces in the exact same staff triage queue any other escalation
+  does. `POST /service-requests/:id/convert` (staff-only) remains the **only** way a Case is ever
+  created — an `AUTO` decision is recorded and nothing more; Phase 4 (letting `AUTO` actually act) is
+  explicitly not part of this. Admin CRUD only (Finance/Admin/SuperAdmin,
+  `/admin/automation/capabilities[/rules]`), no frontend screen yet — same resolved scope as the pricing
+  engine's own admin surface. Covered by 13 e2e tests + 10 pure unit tests (the evaluator itself, no I/O).
 - **WhatsApp integration** (Zavu, docs.zavu.dev): set `WHATSAPP_WEBHOOK_SECRET` to accept inbound
   messages at `POST /api/webhooks/whatsapp` (shared-secret stand-in — Zavu's real inbound signature
   scheme isn't confirmed publicly enough to implement; see `WhatsappWebhookGuard`'s comment). Set

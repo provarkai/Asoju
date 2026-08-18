@@ -43,6 +43,7 @@ import { AgentFinancialPlanningModule } from './agent-financial-planning/agent-f
 import { AgentSosModule } from './agent-sos/agent-sos.module';
 import { CaseReportPdfModule } from './case-report-pdf/case-report-pdf.module';
 import { EscalationModule } from './escalation/escalation.module';
+import { AutomationModule } from './automation/automation.module';
 
 @Module({
   imports: [
@@ -89,6 +90,7 @@ import { EscalationModule } from './escalation/escalation.module';
     AgentSosModule,
     CaseReportPdfModule,
     EscalationModule,
+    AutomationModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

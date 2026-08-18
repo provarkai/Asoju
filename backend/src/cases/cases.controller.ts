@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -7,6 +7,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CasesService } from './cases.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
+import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
 import { ConvertRequestDto } from './dto/convert-request.dto';
 import { TransitionCaseDto } from './dto/transition-case.dto';
 import { ApprovalActionDto } from './dto/approval-action.dto';
@@ -17,6 +18,8 @@ import { HoldCaseDto } from './dto/hold-case.dto';
 import { ResumeCaseDto } from './dto/resume-case.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { RaiseDisputeDto } from './dto/raise-dispute.dto';
+import { AddCaseTaskDto } from './dto/add-case-task.dto';
+import { UpdateCaseTaskDto } from './dto/update-case-task.dto';
 
 const STAFF_TRIAGE_ROLES = [Role.CASE_MANAGER, Role.RELATIONSHIP_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
 const STAFF_TRANSITION_ROLES = [Role.CASE_MANAGER, Role.QUALITY_CONTROL, Role.ADMIN, Role.SUPER_ADMIN];
@@ -39,6 +42,9 @@ const OPS_ROLES = [
   Role.ADMIN,
   Role.SUPER_ADMIN,
 ];
+// Same staff set as scope.controller.ts's SCOPE_STAFF_ROLES — checklist
+// customization is the same kind of case-planning action.
+const CHECKLIST_STAFF_ROLES = [Role.CASE_MANAGER, Role.ADMIN, Role.SUPER_ADMIN];
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller()
@@ -60,6 +66,38 @@ export class CasesController {
   @Get('service-requests')
   listServiceRequests(@CurrentUser() user: AuthenticatedUser) {
     return this.casesService.listServiceRequests(user);
+  }
+
+  /** docs/AUTOMATION_PRICING_ENGINE_SCOPE.md Phase 3 — progressive
+   * enrichment of the request the customer started; re-runs the
+   * automation eligibility decision every call. */
+  @Roles(Role.CUSTOMER)
+  @Patch('service-requests/:id')
+  updateServiceRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateServiceRequestDto,
+  ) {
+    return this.casesService.updateServiceRequest(user, id, dto);
+  }
+
+  // No @Roles — the owning customer or any staff can read a request's
+  // automation decision; CasesService.getAutomationDecision enforces
+  // ownership for a CUSTOMER caller itself (ServiceRequest predates
+  // CaseAccessGuard's case-scoped model, so this is the same pattern
+  // hand-rolled).
+  @Get('service-requests/:id/automation-decision')
+  getAutomationDecision(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.casesService.getAutomationDecision(user, id);
+  }
+
+  /** Staff-only, on-demand recompute — same "trigger without waiting on
+   * the pipeline" pattern as every other sweep in this codebase. Useful
+   * right after an admin changes an AutomationCapability/rule. */
+  @Roles(...STAFF_TRIAGE_ROLES)
+  @Post('service-requests/:id/automation-decision/recompute')
+  recomputeAutomationDecision(@Param('id') id: string) {
+    return this.casesService.recomputeAutomationDecision(id);
   }
 
   @Roles(...STAFF_TRIAGE_ROLES)
@@ -195,6 +233,40 @@ export class CasesController {
     @Body() dto: ResumeCaseDto,
   ) {
     return this.casesService.resolveDispute(user, caseId, dto.reason);
+  }
+
+  // -------------------------------------------------------------------
+  // Per-case checklist customization — the fixed service-type template
+  // (checklist-templates.ts) always seeds the case first; these only add
+  // on top of it for something specific to this case the template
+  // couldn't have predicted. Never touches an already-complete item —
+  // completeTask (EvidenceController) is the only route that can.
+  // -------------------------------------------------------------------
+
+  @Roles(...CHECKLIST_STAFF_ROLES)
+  @UseGuards(CaseAccessGuard)
+  @Post('cases/:caseId/tasks')
+  addTask(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Body() dto: AddCaseTaskDto) {
+    return this.casesService.addTask(user, caseId, dto.label, dto.isRequired);
+  }
+
+  @Roles(...CHECKLIST_STAFF_ROLES)
+  @UseGuards(CaseAccessGuard)
+  @Patch('cases/:caseId/tasks/:taskId')
+  updateTask(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Param('taskId') taskId: string,
+    @Body() dto: UpdateCaseTaskDto,
+  ) {
+    return this.casesService.updateTask(user, caseId, taskId, dto.label, dto.isRequired);
+  }
+
+  @Roles(...CHECKLIST_STAFF_ROLES)
+  @UseGuards(CaseAccessGuard)
+  @Delete('cases/:caseId/tasks/:taskId')
+  removeTask(@CurrentUser() user: AuthenticatedUser, @Param('caseId') caseId: string, @Param('taskId') taskId: string) {
+    return this.casesService.removeTask(user, caseId, taskId);
   }
 
   // -------------------------------------------------------------------
